@@ -29,6 +29,7 @@ const ActivityLog = require("../src/models/ActivityLog");
 const { DASHBOARD_JWT_SECRET } = require("../src/services/dashboardTokenService");
 
 const TEST_TAG = `dashboard-admin-${Date.now()}`;
+const ORIGINAL_ONE_TIME_ORDER_DELIVERY_ENABLED = process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
 
 function dashboardToken(role = "admin") {
   return jwt.sign(
@@ -157,6 +158,7 @@ async function seedBaseData() {
 async function main() {
   await connect();
   await cleanup();
+  delete process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
   const app = createApp();
   const api = request(app);
   const ctx = await seedBaseData();
@@ -588,6 +590,10 @@ async function main() {
     expectStatus(res, 200, "courier dispatch delivery day");
     assert.strictEqual(res.body.data.status, "out_for_delivery");
 
+    res = await api.get("/api/dashboard/courier/queue?date=2026-05-10&method=delivery").set(auth("courier"));
+    expectStatus(res, 200, "courier queue includes subscription delivery day");
+    assert(res.body.data.items.some((item) => item.subscriptionDayId === String(deliveryDay._id)));
+
     res = await api.post("/api/dashboard/courier/actions/notify_arrival").set(auth("courier")).send({
       entityId: String(deliveryDay._id),
       entityType: "subscription_day",
@@ -602,6 +608,32 @@ async function main() {
     });
     expectStatus(res, 200, "courier fulfill delivery day");
     assert.strictEqual(res.body.data.status, "fulfilled");
+
+    const deliveryCancelDay = await SubscriptionDay.create({
+      subscriptionId: ctx.subscription._id,
+      date: "2026-05-11",
+      status: "in_preparation",
+      materializedMeals: [{
+        slotKey: "slot_1",
+        selectionType: "standard_meal",
+        operationalSku: "dashboard-test-cancel-meal",
+      }],
+      mealSlots: [{ slotIndex: 1, slotKey: "slot_1", status: "complete" }],
+    });
+    res = await api.post("/api/dashboard/courier/actions/dispatch").set(auth("courier")).send({
+      entityId: String(deliveryCancelDay._id),
+      entityType: "subscription_day",
+      payload: { reason: "dispatch cancellation regression" },
+    });
+    expectStatus(res, 200, "courier dispatch cancel regression day");
+
+    res = await api.post("/api/dashboard/courier/actions/cancel").set(auth("courier")).send({
+      entityId: String(deliveryCancelDay._id),
+      entityType: "subscription_day",
+      payload: { reason: "customer unavailable" },
+    });
+    expectStatus(res, 200, "courier cancel subscription delivery day");
+    assert.strictEqual(res.body.data.status, "delivery_canceled");
 
     const pickupSubscription = await Subscription.create({
       userId: ctx.user._id,
@@ -779,6 +811,11 @@ async function main() {
 
     console.log("✅ Dashboard admin endpoints tests passed");
   } finally {
+    if (ORIGINAL_ONE_TIME_ORDER_DELIVERY_ENABLED === undefined) {
+      delete process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
+    } else {
+      process.env.ONE_TIME_ORDER_DELIVERY_ENABLED = ORIGINAL_ONE_TIME_ORDER_DELIVERY_ENABLED;
+    }
     await cleanup();
     await mongoose.disconnect();
   }

@@ -27,7 +27,7 @@ async function listOperations({ date, role, lang = "ar" }) {
   
   // 2. Fetch One-time Orders for the date
   const orders = await Order.find({
-    $or: [{ fulfillmentDate: date }, { deliveryDate: date }],
+    fulfillmentDate: date,
     paymentStatus: "paid",
     status: { $in: ["confirmed", "in_preparation", "preparing", "ready_for_pickup", "out_for_delivery"] },
   }).lean();

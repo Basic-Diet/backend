@@ -4,7 +4,7 @@ const ActivityLog = require("../../models/ActivityLog");
 const Order = require("../../models/Order");
 const Payment = require("../../models/Payment");
 const User = require("../../models/User");
-const { FINAL_ORDER_STATUSES } = require("../../utils/orderState");
+const { FINAL_ORDER_STATUSES, normalizeLegacyOrderStatus } = require("../../utils/orderState");
 const { serializeOrderForDashboard } = require("./orderSerializationService");
 const {
   executeOrderAction,
@@ -33,11 +33,12 @@ function escapeRegex(value) {
 }
 
 function parseStatusFilter(value) {
-  return String(value || "")
+  return Array.from(new Set(String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
-    .filter((status) => FINAL_ORDER_STATUSES.includes(status));
+    .map((status) => normalizeLegacyOrderStatus(status))
+    .filter((status) => FINAL_ORDER_STATUSES.includes(status))));
 }
 
 function parseDate(value) {
@@ -110,7 +111,7 @@ async function buildOrderFilter(filters = {}, actor = {}) {
   }
   if (filters.date) {
     query.$and = query.$and || [];
-    query.$and.push({ $or: [{ fulfillmentDate: String(filters.date).trim() }, { deliveryDate: String(filters.date).trim() }] });
+    query.$and.push({ fulfillmentDate: String(filters.date).trim() });
   }
   if (filters.zoneId && mongoose.Types.ObjectId.isValid(filters.zoneId)) {
     query["delivery.zoneId"] = new mongoose.Types.ObjectId(filters.zoneId);

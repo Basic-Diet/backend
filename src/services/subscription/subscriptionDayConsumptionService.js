@@ -5,12 +5,44 @@ const SubscriptionDay = require("../../models/SubscriptionDay");
 const { resolveMealsPerDay } = require("../../utils/subscription/subscriptionDaySelectionSync");
 
 function resolveDayMealsToDeduct({ subscription, day }) {
-  const fromSnapshot = Number(day?.lockedSnapshot?.mealsPerDay || day?.fulfilledSnapshot?.deductedCredits || 0);
-  if (Number.isFinite(fromSnapshot) && fromSnapshot > 0) {
-    return Math.floor(fromSnapshot);
+  // 1. fulfilledSnapshot.deductedCredits if present > 0
+  const explicitDeductedCredits = Number(day?.fulfilledSnapshot?.deductedCredits || 0);
+  if (Number.isFinite(explicitDeductedCredits) && explicitDeductedCredits > 0) {
+    return Math.floor(explicitDeductedCredits);
   }
+
+  // 2. materializedMeals count if present > 0
+  const materializedCount = Array.isArray(day?.materializedMeals) ? day.materializedMeals.filter(Boolean).length : 0;
+  if (materializedCount > 0) return materializedCount;
+
+  // 3. complete mealSlots count if present > 0
+  const completeSlotCount = Array.isArray(day?.mealSlots)
+    ? day.mealSlots.filter((slot) => slot && slot.status === "complete").length
+    : 0;
+  if (completeSlotCount > 0) return completeSlotCount;
+
+  // 4. planningMeta.selectedTotalMealCount or plannerMeta.completeSlotCount if present > 0
+  const selectedTotalMealCount = Number(day?.planningMeta?.selectedTotalMealCount || day?.plannerMeta?.completeSlotCount || 0);
+  if (Number.isFinite(selectedTotalMealCount) && selectedTotalMealCount > 0) {
+    return Math.floor(selectedTotalMealCount);
+  }
+
+  // 5. lockedSnapshot.requiredMealCount if present > 0
+  const requiredMealCount = Number(day?.lockedSnapshot?.requiredMealCount || 0);
+  if (Number.isFinite(requiredMealCount) && requiredMealCount > 0) {
+    return Math.floor(requiredMealCount);
+  }
+
+  // 6. lockedSnapshot.mealsPerDay only as fallback
+  const snapshotMealsPerDay = Number(day?.lockedSnapshot?.mealsPerDay || 0);
+  if (Number.isFinite(snapshotMealsPerDay) && snapshotMealsPerDay > 0) {
+    return Math.floor(snapshotMealsPerDay);
+  }
+
+  // 7. resolveMealsPerDay(subscription) only as final fallback
   return Math.max(0, Math.floor(Number(resolveMealsPerDay(subscription)) || 0));
 }
+
 
 async function consumeSubscriptionDayCredits({
   day,
@@ -167,11 +199,17 @@ async function consumeSubscriptionMealBalance({
 
   // Re-read subscription to get actual remainingMeals after atomic update
   const updatedSubscription = await SubscriptionModel.findById(resolvedId)
-    .select('remainingMeals')
+    .select("remainingMeals")
     .session(session || null)
     .lean();
 
-  const remainingMealsAfter = Number(updatedSubscription?.remainingMeals || 0);
+  if (!updatedSubscription) {
+    const err = new Error("Subscription not found after successful update - data consistency issue");
+    err.code = "SUBSCRIPTION_NOT_FOUND_AFTER_UPDATE";
+    throw err;
+  }
+
+  const remainingMealsAfter = Number(updatedSubscription.remainingMeals || 0);
   const actorType = (actor && actor.actorType) || "dashboard";
   const actorId = (actor && actor.actorId) || undefined;
 

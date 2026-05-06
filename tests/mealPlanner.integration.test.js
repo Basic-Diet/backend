@@ -885,6 +885,53 @@ async function runTests() {
     assertEqual(res.status, 200, 'status');
   });
 
+  await test('TOTAL_BALANCE_WITHIN_VALIDITY allows slots up to maxConsumableMealsNow', async () => {
+    const balanceSub = await Subscription.create({
+      userId: testUser._id,
+      planId: testPlan._id,
+      selectedMealsPerDay: 1,
+      startDate: testSubscription.startDate,
+      endDate: testSubscription.endDate,
+      validityEndDate: testSubscription.validityEndDate || testSubscription.endDate,
+      status: 'active',
+      totalMeals: 7,
+      remainingMeals: 7,
+      contractMode: 'canonical',
+      deliveryMode: 'pickup',
+      pickupLocationId: 'balance_policy_branch',
+    });
+    const balanceDate = buildDateOffset(12);
+    const slots = Array.from({ length: 7 }, (_, index) => ({
+      slotIndex: index + 1,
+      slotKey: `slot_${index + 1}`,
+      proteinId: String(standardProtein._id),
+      carbs: [{ carbId: String(standardCarb._id), grams: 150 }],
+      selectionType: 'standard_meal',
+    }));
+
+    try {
+      const accepted = await makeRequest('POST', `/api/subscriptions/${balanceSub._id}/days/${balanceDate}/selection/validate`, { mealSlots: slots });
+      assertEqual(accepted.status, 200, 'seven slots accepted');
+      assertEqual(accepted.body.data.plannerMeta.requiredSlotCount, 1, 'daily default stays planning count');
+      assertEqual(accepted.body.data.plannerMeta.maxSlotCount, 7, 'planner cap is maxConsumableMealsNow');
+
+      const rejected = await makeRequest('POST', `/api/subscriptions/${balanceSub._id}/days/${balanceDate}/selection/validate`, {
+        mealSlots: slots.concat({
+          slotIndex: 8,
+          slotKey: 'slot_8',
+          proteinId: String(standardProtein._id),
+          carbs: [{ carbId: String(standardCarb._id), grams: 150 }],
+          selectionType: 'standard_meal',
+        }),
+      });
+      assertEqual(rejected.status, 422, 'eight slots rejected');
+      assertEqual(rejected.body.error.code, 'MEAL_SLOT_COUNT_EXCEEDED', 'over maxConsumableMealsNow error');
+    } finally {
+      await SubscriptionDay.deleteMany({ subscriptionId: balanceSub._id });
+      await Subscription.deleteOne({ _id: balanceSub._id });
+    }
+  });
+
   await test('POST /selection/validate dry-runs addon entitlements and overage pricing', async () => {
     const slots = [
       { slotIndex: 1, slotKey: 'slot_1', proteinId: String(standardProtein._id), carbs: [{ carbId: String(standardCarb._id), grams: 150 }], selectionType: 'standard_meal' },

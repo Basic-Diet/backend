@@ -14,9 +14,13 @@ const Subscription = require("../src/models/Subscription");
 const SubscriptionDay = require("../src/models/SubscriptionDay");
 const SubscriptionAuditLog = require("../src/models/SubscriptionAuditLog");
 const ActivityLog = require("../src/models/ActivityLog");
+const Delivery = require("../src/models/Delivery");
 const { buildSubscriptionTimeline } = require("../src/services/subscription/subscriptionTimelineService");
 const { applyOperationalSkipForDate } = require("../src/services/subscription/subscriptionSkipService");
+const { freezeSubscriptionForClient } = require("../src/services/subscription/subscriptionFreezeClientService");
 const { recordCashierConsumption } = require("../src/services/dashboard/cashierConsumptionService");
+const { listOperations, getEnrichedDTO } = require("../src/services/dashboard/opsReadService");
+const { executeAction } = require("../src/services/dashboard/opsTransitionService");
 const { fulfillSubscriptionDay } = require("../src/services/fulfillmentService");
 const {
   performDaySelectionUpdate,
@@ -125,10 +129,17 @@ async function cleanup() {
     SubscriptionAuditLog.deleteMany({ entityId: { $in: subscriptionIds } }),
     ActivityLog.deleteMany({ entityId: { $in: subscriptionIds } }),
     ActivityLog.deleteMany({ "meta.subscriptionId": { $in: subscriptionIds.map(String) } }),
+    Delivery.deleteMany({ subscriptionId: { $in: subscriptionIds } }),
     Subscription.deleteMany({ _id: { $in: subscriptionIds } }),
     Plan.deleteMany({ _id: { $in: planIds } }),
     User.deleteMany({ _id: { $in: userIds } }),
   ]);
+}
+
+async function assertRemainingMeals(subscriptionId, expected, message) {
+  const subscription = await Subscription.findById(subscriptionId).lean();
+  assert(subscription, "subscription should exist");
+  assert.strictEqual(subscription.remainingMeals, expected, message);
 }
 
 async function seedSubscription({
@@ -259,6 +270,128 @@ async function runTests() {
     const noShowDay = await SubscriptionDay.findOne({ subscriptionId: sub2._id, date: "2026-04-01" }).lean();
     assert.strictEqual(noShowDay.status, "no_show", "Pickup day transitioned to no_show");
 
+    // Test 4a: freeze does not deduct remainingMeals
+    const { subscription: freezeSub } = await seedSubscription({
+      deliveryMode: "pickup",
+      remainingMeals: 7,
+      totalMeals: 7,
+      selectedMealsPerDay: 1,
+      phoneSuffix: "006",
+    });
+    await Subscription.updateOne(
+      { _id: freezeSub._id },
+      {
+        $set: {
+          startDate: new Date("2026-05-07T00:00:00+03:00"),
+          endDate: new Date("2026-05-14T00:00:00+03:00"),
+          validityEndDate: new Date("2026-05-14T00:00:00+03:00"),
+        },
+      }
+    );
+    const freezeResult = await freezeSubscriptionForClient({
+      subscriptionId: freezeSub._id,
+      startDate: "2026-05-08",
+      days: 1,
+      userId: freezeSub.userId,
+      ensureActiveFn: () => {},
+      validateFutureDateOrThrowFn: () => {},
+      writeLogSafelyFn: async () => {},
+    });
+    assert.strictEqual(freezeResult.ok, true, "Freeze should succeed");
+    await assertRemainingMeals(freezeSub._id, 7, "freeze must not deduct remainingMeals");
+    const frozenDay = await SubscriptionDay.findOne({ subscriptionId: freezeSub._id, date: "2026-05-08" }).lean();
+    assert.strictEqual(frozenDay.status, "frozen", "Day was frozen");
+    assert.strictEqual(frozenDay.creditsDeducted, false, "Freeze did not mark credits deducted");
+
+    // Test 4a.1: dashboard GET/read endpoints do not mutate remainingMeals
+    await listOperations({ date: "2026-04-01", role: "admin", lang: "en" });
+    await getEnrichedDTO({ entityId: noShowDay._id, entityType: "subscription", role: "admin", lang: "en" });
+    await assertRemainingMeals(sub2._id, 30, "dashboard read endpoints must not deduct remainingMeals");
+
+    // Test 4a.2: prepare, ready_for_pickup, no_show, cancel do not deduct for pickup subscriptions
+    const pickupOpsDay = await SubscriptionDay.create({
+      subscriptionId: sub2._id,
+      date: "2026-04-07",
+      status: "locked",
+      pickupRequested: true,
+      lockedSnapshot: { mealsPerDay: 2, requiredMealCount: 2 },
+    });
+    await executeAction("prepare", {
+      entityId: pickupOpsDay._id,
+      entityType: "subscription",
+      userId: sub2.userId,
+      role: "admin",
+      payload: {},
+    });
+    await assertRemainingMeals(sub2._id, 30, "prepare must not deduct remainingMeals");
+    await executeAction("ready_for_pickup", {
+      entityId: pickupOpsDay._id,
+      entityType: "subscription",
+      userId: sub2.userId,
+      role: "admin",
+      payload: {},
+    });
+    await assertRemainingMeals(sub2._id, 30, "ready_for_pickup must not deduct remainingMeals");
+    await executeAction("cancel", {
+      entityId: pickupOpsDay._id,
+      entityType: "subscription",
+      userId: sub2.userId,
+      role: "admin",
+      payload: { noShow: true, reason: "customer_no_show" },
+    });
+    await assertRemainingMeals(sub2._id, 30, "no_show/cancel must not deduct remainingMeals");
+
+    const pickupFulfillDay = await SubscriptionDay.create({
+      subscriptionId: sub2._id,
+      date: "2026-04-09",
+      status: "ready_for_pickup",
+      pickupRequested: true,
+      lockedSnapshot: { mealsPerDay: 2, requiredMealCount: 2 },
+    });
+    const pickupFulfillResult = await fulfillSubscriptionDay({ dayId: pickupFulfillDay._id });
+    assert.strictEqual(pickupFulfillResult.ok, true, "Pickup fulfill should succeed");
+    await assertRemainingMeals(sub2._id, 28, "pickup fulfill deducts exact fulfilled count");
+    const repeatedPickupFulfillResult = await fulfillSubscriptionDay({ dayId: pickupFulfillDay._id });
+    assert.strictEqual(repeatedPickupFulfillResult.ok, true, "Repeated pickup fulfill should be idempotent");
+    await assertRemainingMeals(sub2._id, 28, "repeated pickup fulfill does not deduct again");
+
+    // Test 4a.3: delivery dispatch, notify_arrival, and cancellation do not deduct
+    const deliveryOpsDay = await SubscriptionDay.create({
+      subscriptionId: sub1._id,
+      date: "2026-04-08",
+      status: "in_preparation",
+      lockedSnapshot: {
+        mealsPerDay: 2,
+        requiredMealCount: 2,
+        address: { line1: "Dispatch address" },
+        deliveryWindow: "13:00-16:00",
+      },
+    });
+    await executeAction("dispatch", {
+      entityId: deliveryOpsDay._id,
+      entityType: "subscription",
+      userId: sub1.userId,
+      role: "admin",
+      payload: {},
+    });
+    await assertRemainingMeals(sub1._id, 30, "dispatch must not deduct remainingMeals");
+    await executeAction("notify_arrival", {
+      entityId: deliveryOpsDay._id,
+      entityType: "subscription",
+      userId: sub1.userId,
+      role: "admin",
+      payload: {},
+    });
+    await assertRemainingMeals(sub1._id, 30, "notify_arrival must not deduct remainingMeals");
+    await executeAction("cancel", {
+      entityId: deliveryOpsDay._id,
+      entityType: "subscription",
+      userId: sub1.userId,
+      role: "admin",
+      payload: { reason: "customer_issue" },
+    });
+    await assertRemainingMeals(sub1._id, 30, "delivery cancel must not deduct remainingMeals");
+
     // Test 4b: repeated fulfillment deducts exactly once
     await SubscriptionDay.create({
       subscriptionId: sub1._id,
@@ -284,10 +417,43 @@ async function runTests() {
       fulfillSubscriptionDay({ subscriptionId: sub1._id, date: "2026-04-06" }),
       fulfillSubscriptionDay({ subscriptionId: sub1._id, date: "2026-04-06" }),
       fulfillSubscriptionDay({ subscriptionId: sub1._id, date: "2026-04-06" }),
+      fulfillSubscriptionDay({ subscriptionId: sub1._id, date: "2026-04-06" }),
+      fulfillSubscriptionDay({ subscriptionId: sub1._id, date: "2026-04-06" }),
     ]);
     assert(concurrentFulfillResults.every((result) => result.ok), "Concurrent fulfillment calls should resolve successfully");
     const sub1AfterConcurrentFulfill = await Subscription.findById(sub1._id).lean();
     assert.strictEqual(sub1AfterConcurrentFulfill.remainingMeals, 26, "Concurrent fulfill deducts only once");
+    const concurrentFulfilledDay = await SubscriptionDay.findOne({ subscriptionId: sub1._id, date: "2026-04-06" }).lean();
+    assert.strictEqual(concurrentFulfilledDay.status, "fulfilled", "Concurrent fulfilled day is fulfilled");
+    assert.strictEqual(concurrentFulfilledDay.creditsDeducted, true, "Concurrent fulfilled day marks credits deducted");
+    assert.strictEqual(concurrentFulfilledDay.fulfilledSnapshot.deductedCredits, 2, "Concurrent fulfilled day snapshot stores deducted credits");
+
+    // Test 4d: fulfilled meal-slot count, not daily default, controls deduction
+    const { subscription: exactSub } = await seedSubscription({
+      deliveryMode: "delivery",
+      remainingMeals: 7,
+      totalMeals: 7,
+      selectedMealsPerDay: 1,
+      contractMode: "canonical",
+      phoneSuffix: "005",
+    });
+    await SubscriptionDay.create({
+      subscriptionId: exactSub._id,
+      date: "2026-05-23",
+      status: "out_for_delivery",
+      plannerState: "confirmed",
+      planningState: "confirmed",
+      lockedSnapshot: { mealsPerDay: 1, requiredMealCount: 1 },
+      mealSlots: buildStandardSlots(3).map((slot) => ({ ...slot, status: "complete" })),
+      plannerMeta: { requiredSlotCount: 1, maxSlotCount: 7, completeSlotCount: 3, premiumSlotCount: 0, isDraftValid: true, isConfirmable: true },
+      planningMeta: { requiredMealCount: 1, selectedTotalMealCount: 3, isExactCountSatisfied: true },
+    });
+    const exactFulfillResult = await fulfillSubscriptionDay({ subscriptionId: exactSub._id, date: "2026-05-23" });
+    assert.strictEqual(exactFulfillResult.ok, true, "Fulfillment with 3 selected meals should succeed");
+    const exactSubAfterFulfill = await Subscription.findById(exactSub._id).lean();
+    assert.strictEqual(exactSubAfterFulfill.remainingMeals, 4, "Fulfillment deducts exact selected meal count, not dailyMealsDefault");
+    const exactFulfilledDay = await SubscriptionDay.findOne({ subscriptionId: exactSub._id, date: "2026-05-23" }).lean();
+    assert.strictEqual(exactFulfilledDay.fulfilledSnapshot.deductedCredits, 3, "Fulfilled snapshot records exact deducted credits");
 
     // Test 5 & 9: Cashier can consume more than dailyMealsDefault, creates audit log
     const cashierConsumption = await recordCashierConsumption({
@@ -314,6 +480,8 @@ async function runTests() {
     } catch (err) {
       assert.strictEqual(err.code, "INSUFFICIENT_CREDITS", "Cannot consume more than available");
     }
+    const sub1AfterFailedCashier = await Subscription.findById(sub1._id).lean();
+    assert.strictEqual(sub1AfterFailedCashier.remainingMeals, 19, "Failed over-consumption must not change remainingMeals");
     
     // Test 7: Expired subscription blocks cashier consumption
     // Move validityEndDate to yesterday

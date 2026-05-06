@@ -231,7 +231,7 @@ async function queryBoardDays(req, { screen }) {
   }
 
   const orderQuery = {
-    $or: [{ deliveryDate: date }, { fulfillmentDate: date }],
+    fulfillmentDate: date,
     paymentStatus: "paid",
   };
   if (activeOrderStatuses.length > 0) {
@@ -408,4 +408,5 @@ module.exports = {
   queueDetail,
   action,
   deliverySchedule,
+  queryBoardDays,
 };

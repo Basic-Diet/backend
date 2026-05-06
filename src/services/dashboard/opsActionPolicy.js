@@ -1,5 +1,7 @@
 "use strict";
 
+const { normalizeLegacyOrderStatus } = require("../../utils/orderState");
+
 /**
  * Action Policy Engine for Dashboard Operations.
  * Responsibilities:
@@ -80,12 +82,10 @@ const TRANSITION_RULES = {
   order: {
     created: ["lock", "cancel"],
     confirmed: ["prepare", "cancel"],
-    preparing: ["dispatch", "ready_for_pickup", "cancel"],
     in_preparation: ["dispatch", "ready_for_pickup", "cancel"],
     out_for_delivery: ["notify_arrival", "fulfill", "cancel"],
     ready_for_pickup: ["fulfill", "cancel"],
     fulfilled: [],
-    canceled: [],
     cancelled: [],
     expired: [],
     pending_payment: [],
@@ -100,7 +100,10 @@ function getAllowedActions({ entityType, status, mode, role, lang = "ar" }) {
     ? "subscription"
     : entityType;
   const typeRules = TRANSITION_RULES[normalizedEntityType] || {};
-  const allowedIds = typeRules[status] || [];
+  const normalizedStatus = normalizedEntityType === "order"
+    ? normalizeLegacyOrderStatus(status)
+    : status;
+  const allowedIds = typeRules[normalizedStatus] || [];
 
   return allowedIds
     .map((actionId) => {
@@ -131,6 +134,9 @@ function validateAction({ entityType, status, mode, role, actionId }) {
   const normalizedEntityType = entityType === "subscription_day" || entityType === "pickup_day"
     ? "subscription"
     : entityType;
+  const normalizedStatus = normalizedEntityType === "order"
+    ? normalizeLegacyOrderStatus(status)
+    : status;
   const config = ACTION_REGISTRY[actionId];
   if (!config) {
     return { allowed: false, reason: "UNKNOWN_ACTION" };
@@ -155,7 +161,7 @@ function validateAction({ entityType, status, mode, role, actionId }) {
   }
 
   const typeRules = TRANSITION_RULES[normalizedEntityType] || {};
-  const allowedIds = typeRules[status] || [];
+  const allowedIds = typeRules[normalizedStatus] || [];
   if (!allowedIds.includes(actionId)) {
     return { allowed: false, reason: "INVALID_STATE_TRANSITION" };
   }

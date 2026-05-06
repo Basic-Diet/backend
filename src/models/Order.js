@@ -283,6 +283,10 @@ OrderSchema.index({ paymentId: 1 });
 OrderSchema.index({ providerInvoiceId: 1 }, { sparse: true });
 OrderSchema.index({ deliveryDate: 1 });
 OrderSchema.index(
+  { fulfillmentDate: 1, paymentStatus: 1, status: 1, fulfillmentMethod: 1, updatedAt: -1 },
+  { background: true, name: "idx_ops_canonical_date" }
+);
+OrderSchema.index(
   { userId: 1, idempotencyKey: 1 },
   {
     unique: true,

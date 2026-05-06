@@ -1,266 +1,126 @@
-/**
- * One-Time Order Delivery Gate Tests
- * 
- * Tests the ONE_TIME_ORDER_DELIVERY_ENABLED feature gate that disables delivery for one-time orders
- * when the flag is false (default).
- */
+"use strict";
+
+process.env.JWT_SECRET = process.env.JWT_SECRET || "supersecret";
 
 require("dotenv").config();
+
+const assert = require("assert");
+const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const request = require("supertest");
+
 const { createApp } = require("../src/app");
+const User = require("../src/models/User");
+const { JWT_SECRET } = require("../src/middleware/auth");
 
-function describe(label, fn) {
-  console.log(`\n📦 ${label}`);
-  return fn();
+const TEST_TAG = `one-time-delivery-gate-${Date.now()}`;
+const USER_PHONE = `${TEST_TAG}-+966500000001`;
+
+const results = { passed: 0, failed: 0 };
+
+function issueAppAccessToken(userId) {
+  return jwt.sign(
+    { userId: String(userId), role: "client", tokenType: "app_access" },
+    JWT_SECRET,
+    { expiresIn: "1h" }
+  );
 }
 
-function before(fn) {
-  fn();
+function auth(token) {
+  return { Authorization: `Bearer ${token}`, "Accept-Language": "en" };
 }
 
-function after(fn) {
-  fn();
+async function test(name, fn) {
+  try {
+    await fn();
+    results.passed += 1;
+    console.log(`✅ ${name}`);
+  } catch (err) {
+    results.failed += 1;
+    console.error(`❌ ${name}`);
+    console.error(err && err.stack ? err.stack : err);
+  }
 }
 
 async function connectDatabase() {
-  if (mongoose.connection.readyState === 0) {
-    await mongoose.connect(process.env.MONGO_URI || process.env.MONGODB_URI || "mongodb://localhost:27017/basicdiet_test");
+  if (mongoose.connection.readyState !== 0) return;
+  const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI || "mongodb://localhost:27017/basicdiet_test";
+  try {
+    await mongoose.connect(mongoUri);
+  } catch (err) {
+    console.error("Database connection failed with exact error:");
+    console.error(err && err.stack ? err.stack : err);
+    throw err;
   }
 }
 
-function it(name, fn) {
-  return async function() {
-    try {
-      await fn();
-      console.log(`✅ ${name}`);
-    } catch (err) {
-      console.error(`❌ ${name}`);
-      console.error(err && err.stack ? err.stack : err);
-    }
+async function cleanup() {
+  const users = await User.find({ phone: { $regex: TEST_TAG } }).select("_id").lean();
+  await User.deleteMany({ _id: { $in: users.map((user) => user._id) } });
+}
+
+function deliveryPayload() {
+  return {
+    fulfillmentMethod: "delivery",
+    delivery: {
+      zoneId: String(new mongoose.Types.ObjectId()),
+      deliveryWindow: "18:00-20:00",
+      address: { line1: "Test Street 1", city: "Riyadh" },
+    },
+    items: [
+      {
+        itemType: "sandwich",
+        qty: 1,
+        selections: { sandwichId: String(new mongoose.Types.ObjectId()) },
+      },
+    ],
   };
 }
 
-const TEST_USER = {
-  _id: new mongoose.Types.ObjectId(),
-  phone: "966500000001",
-  role: "client",
-};
-
-const BASE_ORDER = {
-  items: [
-    {
-      itemType: "standard_meal",
-      catalogRef: { model: "Meal", id: "507f1f77bcf86cd799439011" },
-      qty: 1,
-      selections: {
-        proteinId: "507f1f77bcf86cd799439014",
-        carbId: "507f1f77bcf86cd799439017",
-      },
-    },
-  ],
-  fulfillmentMethod: "pickup",
-  pickup: {
-    branchId: "main",
-    pickupWindow: "12:00-13:00",
-  },
-};
-
-const DELIVERY_ORDER = {
-  ...BASE_ORDER,
-  fulfillmentMethod: "delivery",
-  delivery: {
-    zoneId: "riyadh-zone-1",
-    zoneName: "Riyadh Central",
-    address: {
-      label: "Home",
-      line1: "123 Test Street",
-      district: "Al Olaya",
-      city: "Riyadh",
-      phone: "966500000001",
-    },
-    deliveryWindow: "18:00-19:00",
-  },
-};
-
-async function createTestUser() {
-  const User = mongoose.model("User");
-  const user = new User({
-    _id: TEST_USER._id,
-    phone: TEST_USER.phone,
-    status: "active",
-    role: "client",
-  });
-  await user.save();
-  return user;
+function assertDeliveryGateResponse(res, label) {
+  assert.strictEqual(res.status, 400, `${label}: expected 400, got ${res.status} ${JSON.stringify(res.body)}`);
+  assert.strictEqual(res.body && res.body.error && res.body.error.code, "DELIVERY_NOT_SUPPORTED");
 }
 
-async function authenticateUser(agent) {
-  const authResponse = await request(app)
-    .post("/api/auth/login")
-    .send({ phone: TEST_USER.phone });
-  
-  const token = authResponse.body.data?.token;
-  if (token) {
-    agent.set("Authorization", `Bearer ${token}`);
-  }
-  return token;
-}
-
-describe("One-Time Order Delivery Gate", function() {
-  let agent;
-  let authToken;
-
-  before(async function() {
+(async function run() {
+  let originalDeliveryFlag;
+  try {
     await connectDatabase();
-    await createTestUser();
-    agent = request.agent(app);
-    authToken = await authenticateUser(agent);
-  });
+    await cleanup();
 
-  after(async function() {
+    const user = await User.create({
+      phone: USER_PHONE,
+      name: `${TEST_TAG} User`,
+      role: "client",
+      isActive: true,
+    });
+    const token = issueAppAccessToken(user._id);
+    const api = request(createApp());
+
+    originalDeliveryFlag = process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
+    delete process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
+
+    await test("POST /api/orders/quote rejects delivery after valid auth when gate disabled", async () => {
+      const res = await api.post("/api/orders/quote").set(auth(token)).send(deliveryPayload());
+      assertDeliveryGateResponse(res, "quote delivery gate");
+    });
+
+    await test("POST /api/orders rejects delivery after valid auth when gate disabled", async () => {
+      const res = await api.post("/api/orders").set(auth(token)).send(deliveryPayload());
+      assertDeliveryGateResponse(res, "create delivery gate");
+    });
+  } finally {
+    if (originalDeliveryFlag === undefined) delete process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
+    else process.env.ONE_TIME_ORDER_DELIVERY_ENABLED = originalDeliveryFlag;
+    await cleanup().catch(() => {});
     if (mongoose.connection.readyState !== 0) {
-      await mongoose.connection.close();
+      await mongoose.disconnect();
     }
-  });
+  }
 
-  describe("When delivery is disabled (default)", function() {
-    before(function() {
-      // Ensure delivery is disabled (default)
-      delete process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
-    });
-
-    it("should allow pickup order quote", async function() {
-      const response = await agent
-        .post("/api/orders/quote")
-        .send(BASE_ORDER)
-        .expect(200);
-
-      response.body.should.have.property("status", true);
-      response.body.data.should.have.property("pricing");
-      response.body.data.pricing.should.have.property("deliveryFeeHalala", 0);
-    });
-
-    it("should allow pickup order creation", async function() {
-      const response = await agent
-        .post("/api/orders")
-        .send(BASE_ORDER)
-        .expect(200);
-
-      response.body.should.have.property("status", true);
-      response.body.data.should.have.property("orderId");
-      response.body.data.should.have.property("paymentUrl");
-    });
-
-    it("should reject delivery order quote", async function() {
-      const response = await agent
-        .post("/api/orders/quote")
-        .send(DELIVERY_ORDER)
-        .expect(400);
-
-      response.body.should.have.property("status", false);
-      response.body.should.have.property("code", "DELIVERY_NOT_SUPPORTED");
-      response.body.should.have.property("message", "Delivery is not currently supported for one-time orders");
-    });
-
-    it("should reject delivery order creation", async function() {
-      const response = await agent
-        .post("/api/orders")
-        .send(DELIVERY_ORDER)
-        .expect(400);
-
-      response.body.should.have.property("status", false);
-      response.body.should.have.property("code", "DELIVERY_NOT_SUPPORTED");
-      response.body.should.have.property("message", "Delivery is not currently supported for one-time orders");
-    });
-  });
-
-  describe("When delivery is enabled", function() {
-    before(function() {
-      // Enable delivery for testing
-      process.env.ONE_TIME_ORDER_DELIVERY_ENABLED = "true";
-    });
-
-    after(function() {
-      // Reset to default (disabled)
-      delete process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
-    });
-
-    it("should allow delivery order quote when enabled", async function() {
-      const response = await agent
-        .post("/api/orders/quote")
-        .send(DELIVERY_ORDER)
-        .expect(200);
-
-      response.body.should.have.property("status", true);
-      response.body.data.should.have.property("pricing");
-      response.body.data.pricing.should.have.property("deliveryFeeHalala").that.is.above(0);
-    });
-
-    it("should allow delivery order creation when enabled", async function() {
-      const response = await agent
-        .post("/api/orders")
-        .send(DELIVERY_ORDER)
-        .expect(200);
-
-      response.body.should.have.property("status", true);
-      response.body.data.should.have.property("orderId");
-      response.body.data.should.have.property("paymentUrl");
-    });
-
-    it("should still allow pickup orders when delivery is enabled", async function() {
-      const response = await agent
-        .post("/api/orders")
-        .send(BASE_ORDER)
-        .expect(200);
-
-      response.body.should.have.property("status", true);
-      response.body.data.should.have.property("orderId");
-    });
-  });
-
-  describe("Rate limiting", function() {
-    it("should have rate limiting on quote endpoint", async function() {
-      // Make multiple rapid requests to test rate limiting
-      const promises = Array(10).fill().map(() =>
-        agent
-          .post("/api/orders/quote")
-          .send(BASE_ORDER)
-      );
-
-      const responses = await Promise.allSettled(promises);
-      const rateLimitedResponses = responses.filter(
-        r => r.status === 'fulfilled' && r.value.status === 429
-      );
-
-      // At least some responses should be rate limited
-      rateLimitedResponses.length.should.be.above(0);
-    });
-
-    it("should have rate limiting on verify payment endpoint", async function() {
-      // Create an order first
-      const orderResponse = await agent
-        .post("/api/orders")
-        .send(BASE_ORDER)
-        .expect(200);
-
-      const orderId = orderResponse.body.data.orderId;
-      const paymentId = new mongoose.Types.ObjectId();
-
-      // Make multiple rapid verification requests
-      const promises = Array(10).fill().map(() =>
-        agent
-          .post(`/api/orders/${orderId}/payments/${paymentId}/verify`)
-          .send({})
-      );
-
-      const responses = await Promise.allSettled(promises);
-      const rateLimitedResponses = responses.filter(
-        r => r.status === 'fulfilled' && r.value.status === 429
-      );
-
-      // At least some responses should be rate limited
-      rateLimitedResponses.length.should.be.above(0);
-    });
-  });
+  console.log(`\nResult: ${results.passed} passed, ${results.failed} failed`);
+  if (results.failed > 0) process.exit(1);
+})().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  process.exit(1);
 });

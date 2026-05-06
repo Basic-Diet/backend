@@ -59,7 +59,6 @@ async function fulfillSubscriptionDay({ subscriptionId, date, dayId, session }) 
     fulfilledSnapshot.planning = planningSnapshot;
   }
 
-  // CR-02 FIX: First update day to fulfilled with snapshot (idempotent)
   const updatedDay = day.status === "fulfilled"
     ? day
     : await SubscriptionDay.findOneAndUpdate(
@@ -79,16 +78,43 @@ async function fulfillSubscriptionDay({ subscriptionId, date, dayId, session }) 
 
   if (!updatedDay) {
     const currentDay = await SubscriptionDay.findById(day._id).session(session);
+    if (currentDay && currentDay.creditsDeducted) {
+      return {
+        ok: true,
+        alreadyFulfilled: true,
+        day: currentDay,
+        deductedCredits: 0,
+      };
+    }
+
+    try {
+      const consumption = await consumeSubscriptionDayCredits({
+        day: currentDay || day,
+        subscription: sub,
+        session,
+        reason: "fulfilled",
+      });
+      return {
+        ok: true,
+        alreadyFulfilled: Boolean(consumption.alreadyDeducted),
+        day: currentDay || day,
+        deductedCredits: consumption.deductedCredits,
+      };
+    } catch (err) {
+      if (err.code === "INSUFFICIENT_CREDITS") {
+        return { ok: false, code: "INSUFFICIENT_CREDITS", message: "Not enough credits" };
+      }
+      throw err;
+    }
+  }
+
+  if (updatedDay.creditsDeducted) {
     return {
       ok: true,
       alreadyFulfilled: true,
-      day: currentDay || day,
-      deductedCredits: currentDay?.fulfilledSnapshot?.deductedCredits || day.fulfilledSnapshot?.deductedCredits || 0
+      day: updatedDay,
+      deductedCredits: 0,
     };
-  }
-
-  if (day.creditsDeducted) {
-    return { ok: true, day: updatedDay, deductedCredits: 0 };
   }
 
   try {
@@ -98,8 +124,12 @@ async function fulfillSubscriptionDay({ subscriptionId, date, dayId, session }) 
       session,
       reason: "fulfilled",
     });
-    await updatedDay.save({ session });
-    return { ok: true, day: updatedDay, deductedCredits: consumption.deductedCredits };
+    return {
+      ok: true,
+      alreadyFulfilled: Boolean(consumption.alreadyDeducted),
+      day: updatedDay,
+      deductedCredits: consumption.deductedCredits,
+    };
   } catch (err) {
     if (err.code === "INSUFFICIENT_CREDITS") {
       return { ok: false, code: "INSUFFICIENT_CREDITS", message: "Not enough credits" };

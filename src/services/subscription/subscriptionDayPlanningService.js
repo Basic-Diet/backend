@@ -69,8 +69,9 @@ function buildPlanningMeta({
   confirmed = false,
   confirmedByRole = null,
 } = {}) {
-  const dailyMealsLimit = resolveMealsPerDay(subscription);
-  
+  const dailyMealsDefault = resolveMealsPerDay(subscription);
+  const maxConsumableMealsNow = Number(subscription.remainingMeals || 0);
+
   // Use plannerMeta if it contains complete counts, otherwise fall back to legacy fields
   const sourceSlots = Array.isArray(mealSlots) ? mealSlots : [];
   const sourceMaterialized = Array.isArray(selections) ? selections : [];
@@ -95,19 +96,24 @@ function buildPlanningMeta({
     selectedTotalMealCount = selectedBaseMealCount + selectedPremiumMealCount;
   }
 
-  const isExactCountSatisfied = selectedTotalMealCount === dailyMealsLimit;
+  const isThresholdMet = selectedTotalMealCount >= dailyMealsDefault;
+  const isBalanceExceeded = selectedTotalMealCount > maxConsumableMealsNow;
 
   return {
-    requiredMealCount: dailyMealsLimit,
+    requiredMealCount: dailyMealsDefault,
     selectedBaseMealCount,
     selectedPremiumMealCount,
     selectedTotalMealCount,
-    isExactCountSatisfied,
+    isThresholdMet,
+    isExactCountSatisfied: isThresholdMet, // Keep as alias for backward compatibility
+    isBalanceExceeded,
+    maxConsumableMealsNow,
     lastEditedAt: now,
     confirmedAt: confirmed ? now : null,
     confirmedByRole: confirmed ? confirmedByRole : null,
   };
 }
+
 
 function applyCanonicalDraftPlanningToDay({
   subscription,
@@ -150,8 +156,12 @@ function buildCanonicalPlanningView({ subscription, day } = {}) {
       selectedBaseMealCount: meta.selectedBaseMealCount,
       selectedPremiumMealCount: meta.selectedPremiumMealCount,
       selectedTotalMealCount: meta.selectedTotalMealCount,
-      isExactCountSatisfied: meta.isExactCountSatisfied,
+      isThresholdMet: meta.isThresholdMet || meta.isExactCountSatisfied,
+      isExactCountSatisfied: meta.isExactCountSatisfied || meta.isThresholdMet,
+      isBalanceExceeded: meta.isBalanceExceeded || false,
+      maxConsumableMealsNow: meta.maxConsumableMealsNow,
       confirmedAt: meta.confirmedAt || null,
+
       confirmedByRole: meta.confirmedByRole || null,
       baseMealSlots: snap.baseMealSlots || [],
       premiumOverageCount: meta.premiumOverageCount || 0,
@@ -191,8 +201,12 @@ function buildCanonicalPlanningView({ subscription, day } = {}) {
     selectedBaseMealCount: planningMeta.selectedBaseMealCount,
     selectedPremiumMealCount: planningMeta.selectedPremiumMealCount,
     selectedTotalMealCount: planningMeta.selectedTotalMealCount,
+    isThresholdMet: planningMeta.isThresholdMet,
     isExactCountSatisfied: planningMeta.isExactCountSatisfied,
+    isBalanceExceeded: planningMeta.isBalanceExceeded,
+    maxConsumableMealsNow: planningMeta.maxConsumableMealsNow,
     confirmedAt: (day.plannerMeta && day.plannerMeta.confirmedAt) || planningMeta.confirmedAt || null,
+
     confirmedByRole: (day.plannerMeta && day.plannerMeta.confirmedByRole) || planningMeta.confirmedByRole || null,
     baseMealSlots,
     premiumOverageCount: day.premiumOverageCount || 0,
@@ -235,20 +249,45 @@ function applyPremiumOverageState({
 
 function assertCanonicalPlanningExactCount({ subscription, day } = {}) {
   const planningView = buildCanonicalPlanningView({ subscription, day });
-  if (!planningView || !planningView.isExactCountSatisfied) {
-    logger.warn("assertCanonicalPlanningExactCount failed: exact count not satisfied", {
+  if (!planningView) {
+    throw createLocalizedError({
+      code: "PLANNING_MISSING",
+      key: "errors.planning.missing",
+      fallbackMessage: "Planning view could not be resolved",
+    });
+  }
+
+  if (planningView.isBalanceExceeded) {
+    logger.warn("assertCanonicalPlanningExactCount failed: balance exceeded", {
+      subscriptionId: subscription ? String(subscription._id) : null,
+      dayId: day ? String(day._id) : null,
+      selected: planningView.selectedTotalMealCount,
+      max: planningView.maxConsumableMealsNow,
+    });
+    throw createLocalizedError({
+      code: "INSUFFICIENT_CREDITS",
+      key: "errors.planning.insufficientCredits",
+      fallbackMessage: `Selected ${planningView.selectedTotalMealCount} meals exceed remaining balance of ${planningView.maxConsumableMealsNow}`,
+    });
+  }
+
+  if (!planningView.isThresholdMet) {
+    logger.warn("assertCanonicalPlanningExactCount failed: minimum threshold not met", {
       subscriptionId: subscription ? String(subscription._id) : null,
       dayId: day ? String(day._id) : null,
       date: day ? day.date : null,
+      selected: planningView.selectedTotalMealCount,
+      required: planningView.requiredMealCount,
     });
     throw createLocalizedError({
       code: "PLANNING_INCOMPLETE",
       key: "errors.planning.incomplete",
-      fallbackMessage: "Day must contain exactly mealsPerDay total meal selections before confirmation",
+      fallbackMessage: `Day must contain at least ${planningView.requiredMealCount} meal selections before confirmation`,
     });
   }
   return planningView;
 }
+
 
 function assertNoPendingPremiumOverage({
   subscription,
@@ -309,12 +348,16 @@ function buildCanonicalPlanningSnapshot({ subscription, day } = {}) {
       selectedBaseMealCount: view.selectedBaseMealCount,
       selectedPremiumMealCount: view.selectedPremiumMealCount,
       selectedTotalMealCount: view.selectedTotalMealCount,
+      isThresholdMet: view.isThresholdMet,
       isExactCountSatisfied: view.isExactCountSatisfied,
+      isBalanceExceeded: view.isBalanceExceeded,
+      maxConsumableMealsNow: view.maxConsumableMealsNow,
       confirmedAt: view.confirmedAt,
       confirmedByRole: view.confirmedByRole,
       premiumOverageCount: day.premiumOverageCount || 0,
       premiumOverageStatus: day.premiumOverageStatus || null,
     },
+
   };
 }
 

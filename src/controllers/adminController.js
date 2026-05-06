@@ -60,6 +60,7 @@ const { writeAuditLog } = require("../services/subscription/subscriptionAuditLog
 const { getRestaurantBusinessDate } = require("../services/restaurantHoursService");
 const { normalizeStoredVatBreakdown, buildMoneySummary } = require("../utils/pricing");
 const { resolveSubscriptionAddonBillingMode } = require("../utils/subscription/subscriptionCatalog");
+const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
 
 const MAX_PREMIUM_PRICE = 10000;
 const MAX_VAT_PERCENTAGE = 100;
@@ -758,15 +759,6 @@ function resolvePagination(query = {}) {
     return { error: { status: 400, code: "INVALID", message: "limit cannot exceed 200" } };
   }
   return { page, limit: Math.min(Math.floor(parsedLimit), 200) };
-}
-
-function buildPaginationMeta(page, limit, total) {
-  return {
-    page,
-    limit,
-    total,
-    totalPages: Math.ceil(total / limit),
-  };
 }
 
 function resolvePaginationOrRespond(res, query = {}) {
@@ -3798,8 +3790,27 @@ async function listSubscriptionDaysAdmin(req, res) {
   }
 
   // Settlement on read intentionally removed — meals are not consumed by date passage.
-  const days = await SubscriptionDay.find({ subscriptionId: id }).sort({ date: 1 }).lean();
-  return res.status(200).json({ status: true, data: days });
+  const query = { subscriptionId: id };
+  const pagination = resolveOptionalPagination(req.query, 365, 50);
+
+  if (!pagination) {
+    // No pagination requested - return all (current behavior)
+    const days = await SubscriptionDay.find(query).sort({ date: 1 }).lean();
+    return res.status(200).json({ status: true, data: days });
+  }
+
+  // Pagination requested - apply it
+  const skip = (pagination.page - 1) * pagination.limit;
+  const [days, total] = await Promise.all([
+    SubscriptionDay.find(query).sort({ date: 1 }).skip(skip).limit(pagination.limit).lean(),
+    SubscriptionDay.countDocuments(query),
+  ]);
+
+  return res.status(200).json({
+    status: true,
+    data: days,
+    meta: buildPaginationMeta(pagination.page, pagination.limit, total),
+  });
 }
 
 async function updateSubscriptionDeliveryAdmin(req, res) {

@@ -16,8 +16,9 @@ const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
 const { ORDER_STATUSES } = require("../utils/orderState");
 const { getOrderFulfillmentMethod, shouldBlockOneTimeOrderDelivery } = require("../utils/oneTimeOrderDeliveryGate");
+const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
 
-async function listTodayOrders(_req, res) {
+async function listTodayOrders(req, res) {
   try {
     const today = getTodayKSADate();
     const orders = await Order.find({
@@ -47,7 +48,23 @@ async function listTodayOrders(_req, res) {
         delivery: deliveriesByOrderId.get(String(order._id)),
       }));
 
-    return res.status(200).json({ status: true, data: queue });
+    const pagination = resolveOptionalPagination(req.query, 300, 50);
+
+    if (!pagination) {
+      // No pagination requested - return all (current behavior)
+      return res.status(200).json({ status: true, data: queue });
+    }
+
+    // Pagination requested - apply it to filtered results
+    const total = queue.length;
+    const skip = (pagination.page - 1) * pagination.limit;
+    const paginatedQueue = queue.slice(skip, skip + pagination.limit);
+
+    return res.status(200).json({
+      status: true,
+      data: paginatedQueue,
+      meta: buildPaginationMeta(pagination.page, pagination.limit, total),
+    });
   } catch (err) {
     logger.error("orderCourierController.listTodayOrders failed", {
       error: err.message,

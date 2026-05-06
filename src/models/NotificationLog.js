@@ -23,5 +23,6 @@ const NotificationLogSchema = new mongoose.Schema(
 );
 
 NotificationLogSchema.index({ dedupeKey: 1 }, { unique: true, sparse: true });
+NotificationLogSchema.index({ userId: 1, createdAt: -1 }, { background: true });
 
 module.exports = mongoose.model("NotificationLog", NotificationLogSchema);

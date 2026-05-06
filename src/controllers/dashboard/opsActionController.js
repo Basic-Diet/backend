@@ -3,7 +3,7 @@ const opsActionPolicy = require("../../services/dashboard/opsActionPolicy");
 const opsReadService = require("../../services/dashboard/opsReadService");
 const SubscriptionDay = require("../../models/SubscriptionDay");
 const Subscription = require("../../models/Subscription");
-const Order = require("../../models/Order");
+const { executeDashboardOrderAction } = require("../../services/orders/orderDashboardService");
 const errorResponse = require("../../utils/errorResponse");
 const { getRequestLang } = require("../../utils/i18n");
 // Settlement on read is DISABLED — see pastSubscriptionDaySettlementService.js
@@ -36,14 +36,14 @@ async function handleAction(req, res) {
     }
 
     if (entityType === "order") {
-      const { executeOrderAction } = require("../../services/orders/orderOpsTransitionService");
       try {
-        await executeOrderAction({
+        const data = await executeDashboardOrderAction({
           orderId: entityId,
           action,
           actor: { userId: req.dashboardUserId || req.userId, role },
           payload,
         });
+        return res.status(200).json({ status: true, data });
       } catch (err) {
         if (err.status || err.code) {
           return errorResponse(res, err.status || 500, err.code || "INTERNAL", err.message, err.details);
@@ -53,7 +53,6 @@ async function handleAction(req, res) {
     } else {
       // 1. Fetch current state for validation
       const Model = SubscriptionDay;
-      const existingDoc = await Model.findById(entityId).lean();
       // Settlement on read intentionally removed — meals are not consumed by date passage.
       const doc = await Model.findById(entityId).lean();
       if (!doc) {

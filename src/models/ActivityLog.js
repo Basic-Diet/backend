@@ -14,5 +14,6 @@ const ActivityLogSchema = new mongoose.Schema(
 
 // Performance: Activity log queries commonly filter by entityType/entityId and sort by time.
 ActivityLogSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
+ActivityLogSchema.index({ entityType: 1, createdAt: -1 }, { background: true });
 
 module.exports = mongoose.model("ActivityLog", ActivityLogSchema);

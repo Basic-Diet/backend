@@ -8,6 +8,7 @@ const request = require("supertest");
 
 const { createApp } = require("../src/app");
 const ActivityLog = require("../src/models/ActivityLog");
+const Delivery = require("../src/models/Delivery");
 const Order = require("../src/models/Order");
 const Payment = require("../src/models/Payment");
 const SubscriptionDay = require("../src/models/SubscriptionDay");
@@ -73,6 +74,7 @@ async function cleanup() {
 
   await Promise.all([
     ActivityLog.deleteMany({ $or: [{ entityId: { $in: orderIds } }, { "meta.source": "dashboard_orders" }] }),
+    Delivery.deleteMany({ orderId: { $in: orderIds } }),
     Payment.deleteMany({ $or: [{ userId: { $in: userIds } }, { orderId: { $in: orderIds } }] }),
     Order.deleteMany({ _id: { $in: orderIds } }),
     User.deleteMany({ _id: { $in: userIds } }),
@@ -269,6 +271,44 @@ async function createOrder(user, overrides = {}) {
       assert.strictEqual(res.body.error.code, "ONE_TIME_ORDER_DELIVERY_DISABLED");
     });
 
+    await test("delivery order DTO hides actions by default", async () => {
+      const order = await createOrder(user, {
+        fulfillmentMethod: "delivery",
+        status: ORDER_STATUSES.IN_PREPARATION,
+      });
+      const res = await api.get(`/api/dashboard/orders/${order._id}`).set(auth());
+      expectStatus(res, 200, "delivery detail action gate");
+      assert.deepStrictEqual(res.body.data.allowedActions, []);
+    });
+
+    await test("legacy kitchen/courier delivery order routes are blocked by default", async () => {
+      const kitchenOrder = await createOrder(user, {
+        fulfillmentMethod: "delivery",
+        status: ORDER_STATUSES.IN_PREPARATION,
+      });
+      let res = await api.post(`/api/kitchen/orders/${kitchenOrder._id}/out-for-delivery`).set(auth("kitchen")).send({});
+      expectStatus(res, 409, "legacy kitchen dispatch delivery disabled");
+      assert.strictEqual(res.body.error.code, "ONE_TIME_ORDER_DELIVERY_DISABLED");
+
+      const courierOrder = await createOrder(user, {
+        fulfillmentMethod: "delivery",
+        status: ORDER_STATUSES.OUT_FOR_DELIVERY,
+      });
+      res = await api.put(`/api/courier/orders/${courierOrder._id}/arriving-soon`).set(auth("courier")).send({});
+      expectStatus(res, 409, "legacy courier arriving soon delivery disabled");
+      assert.strictEqual(res.body.error.code, "ONE_TIME_ORDER_DELIVERY_DISABLED");
+
+      res = await api.put(`/api/courier/orders/${courierOrder._id}/delivered`).set(auth("courier")).send({});
+      expectStatus(res, 409, "legacy courier delivered delivery disabled");
+      assert.strictEqual(res.body.error.code, "ONE_TIME_ORDER_DELIVERY_DISABLED");
+
+      res = await api.put(`/api/courier/orders/${courierOrder._id}/cancel`).set(auth("courier")).send({
+        reason: "customer_unavailable",
+      });
+      expectStatus(res, 409, "legacy courier cancel delivery disabled");
+      assert.strictEqual(res.body.error.code, "ONE_TIME_ORDER_DELIVERY_DISABLED");
+    });
+
     await test("fulfill pickup ready_for_pickup -> fulfilled", async () => {
       const order = await createOrder(user, {
         fulfillmentMethod: "pickup",
@@ -301,6 +341,30 @@ async function createOrder(user, overrides = {}) {
 
       res = await api.post(`/api/dashboard/orders/${preparing._id}/actions/cancel`).set(auth()).send({ reason: "stock_out" });
       expectStatus(res, 200, "cancel preparing");
+      assert.strictEqual(res.body.data.status, ORDER_STATUSES.CANCELLED);
+    });
+
+    await test("legacy kitchen preparing route writes canonical in_preparation", async () => {
+      const order = await createOrder(user, { status: ORDER_STATUSES.CONFIRMED });
+      const res = await api.post(`/api/kitchen/orders/${order._id}/preparing`).set(auth("kitchen")).send({});
+      expectStatus(res, 200, "legacy kitchen preparing route");
+      assert.strictEqual(res.body.data.status, ORDER_STATUSES.IN_PREPARATION);
+
+      const saved = await Order.findById(order._id).lean();
+      assert.strictEqual(saved.status, ORDER_STATUSES.IN_PREPARATION);
+    });
+
+    await test("legacy seeded order statuses serialize canonically", async () => {
+      const preparing = await createOrder(user, { status: ORDER_STATUSES.CONFIRMED });
+      await Order.collection.updateOne({ _id: preparing._id }, { $set: { status: "preparing" } });
+      let res = await api.get(`/api/dashboard/orders/${preparing._id}`).set(auth());
+      expectStatus(res, 200, "legacy preparing detail");
+      assert.strictEqual(res.body.data.status, ORDER_STATUSES.IN_PREPARATION);
+
+      const canceled = await createOrder(user, { status: ORDER_STATUSES.CONFIRMED });
+      await Order.collection.updateOne({ _id: canceled._id }, { $set: { status: "canceled" } });
+      res = await api.get(`/api/dashboard/orders/${canceled._id}`).set(auth());
+      expectStatus(res, 200, "legacy canceled detail");
       assert.strictEqual(res.body.data.status, ORDER_STATUSES.CANCELLED);
     });
 
@@ -347,6 +411,20 @@ async function createOrder(user, overrides = {}) {
         entityId: String(order._id),
       });
       expectStatus(res, 200, "board order prepare");
+      assert.strictEqual(res.body.data.source, "one_time_order");
+      assert.strictEqual(res.body.data.entityType, "order");
+      assert.strictEqual(res.body.data.entityId, String(order._id));
+      assert.strictEqual(res.body.data.status, ORDER_STATUSES.IN_PREPARATION);
+      assert(Array.isArray(res.body.data.allowedActions));
+    });
+
+    await test("Unified ops order action routes by source and returns order DTO", async () => {
+      const order = await createOrder(user, { status: ORDER_STATUSES.CONFIRMED });
+      const res = await api.post("/api/dashboard/ops/actions/prepare").set(auth()).send({
+        source: "one_time_order",
+        entityId: String(order._id),
+      });
+      expectStatus(res, 200, "unified ops source order prepare");
       assert.strictEqual(res.body.data.source, "one_time_order");
       assert.strictEqual(res.body.data.entityType, "order");
       assert.strictEqual(res.body.data.entityId, String(order._id));

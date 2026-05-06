@@ -374,6 +374,8 @@ SubscriptionDaySchema.index({ subscriptionId: 1, status: 1, date: 1 });
 SubscriptionDaySchema.index({ subscriptionId: 1, canonicalDayActionType: 1, skipCompensated: 1, date: 1 });
 SubscriptionDaySchema.index({ date: 1, pickupCode: 1 });
 
+SubscriptionDaySchema.index({ date: 1, status: 1, updatedAt: -1 }, { background: true });
+
 // Unique index to quickly lookup or upsert per-subscription per-day rows.
 SubscriptionDaySchema.index({ subscriptionId: 1, date: 1 }, { unique: true });
 

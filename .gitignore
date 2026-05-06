@@ -57,3 +57,17 @@ graph.dot
 
 
 .env
+
+node_modules/
+dist/
+.env
+.env.*
+*.log
+logs/
+scripts/logs/
+tmp/
+graphify-out/
+graph.dot
+graph.png
+graph.svg
+.DS_Store

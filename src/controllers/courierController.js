@@ -17,6 +17,7 @@ const {
 const { logger } = require("../utils/logger");
 const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
+const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
 
 function appendDeliveryCancellationAudit(day, actorId) {
   if (!day) return;
@@ -35,8 +36,27 @@ async function listTodayDeliveries(req, res) {
     const today = getTodayKSADate();
     const dayDocs = await SubscriptionDay.find({ date: today }).select("_id").lean();
     const dayIds = dayDocs.map((d) => d._id);
-    const deliveries = await Delivery.find({ dayId: { $in: dayIds } }).sort({ createdAt: -1 }).lean();
-    return res.status(200).json({ status: true, data: deliveries });
+    const query = { dayId: { $in: dayIds } };
+    const pagination = resolveOptionalPagination(req.query, 300, 50);
+
+    if (!pagination) {
+      // No pagination requested - return all (current behavior)
+      const deliveries = await Delivery.find(query).sort({ createdAt: -1 }).lean();
+      return res.status(200).json({ status: true, data: deliveries });
+    }
+
+    // Pagination requested - apply it
+    const skip = (pagination.page - 1) * pagination.limit;
+    const [deliveries, total] = await Promise.all([
+      Delivery.find(query).sort({ createdAt: -1 }).skip(skip).limit(pagination.limit).lean(),
+      Delivery.countDocuments(query),
+    ]);
+
+    return res.status(200).json({
+      status: true,
+      data: deliveries,
+      meta: buildPaginationMeta(pagination.page, pagination.limit, total),
+    });
   } catch (err) {
     // MEDIUM AUDIT FIX: Express 4 does not catch async errors automatically; return controlled 500.
     logger.error("courierController.listTodayDeliveries failed", { error: err.message, stack: err.stack });

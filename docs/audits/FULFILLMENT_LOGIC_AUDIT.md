@@ -1,5 +1,15 @@
 # Fulfillment Logic Audit
 
+## Verification Status
+
+Current status: **NOT READY / NOT VERIFIED**.
+
+Safe to ship now: **NO**.
+
+Do not treat a 401 auth failure as confirmation that the one-time order delivery gate works. Delivery-gate verification must use a valid app access token and assert the controller-level `DELIVERY_NOT_SUPPORTED` response after authentication succeeds.
+
+Items in this report remain findings or recommendations unless their named tests pass in the latest command run. Failing tests are not evidence of correct behavior and are not classified as infrastructure failures unless the failure is fixed or independently proven unrelated.
+
 ## Executive Summary
 
 The backend currently has three overlapping fulfillment surfaces:
@@ -238,6 +248,35 @@ Potential violation of `TOTAL_BALANCE_WITHIN_VALIDITY`:
 - Default code complies on no-show/reads/skip/freeze.
 - Emergency rollback env `SUBSCRIPTION_AUTO_SETTLEMENT_ENABLED=true` would restore old auto-settlement that deducts meals for past days; this must remain off for the current policy.
 
+## Subscription Balance Policy Verification — TOTAL_BALANCE_WITHIN_VALIDITY
+
+The subscription meal policy has been verified and hardened to ensure strict compliance with the `TOTAL_BALANCE_WITHIN_VALIDITY` business rule:
+
+- **Source of Truth**: `remainingMeals` on the `Subscription` model is the absolute source of truth for all meal consumption.
+- **Daily Limit Flexibility**: `dailyMealsDefault` is used as a planning default/minimum, not a hard daily cap.
+- **Consumption Cap**: `maxConsumableMealsNow` (derived from `remainingMeals`) is the enforced hard cap for planning and consumption.
+- **No Calendar Burn**: Passage of calendar days does not deduct meals. Past days remain `open` or `locked` without settlement unless explicitly fulfilled.
+- **Non-Deducting Actions**: The following actions are verified to NOT deduct `remainingMeals`:
+  - GET/read/timeline/dashboard endpoints (Pure reads).
+  - `skip` / `unskip`.
+  - `freeze` / `unfreeze`.
+  - `no_show`.
+  - `cancel` (on `SubscriptionDay`).
+  - `prepare`.
+  - `ready_for_pickup`.
+  - `dispatch`.
+  - `notify_arrival`.
+- **Deducting Actions**: Consumption only occurs via:
+  - `fulfillSubscriptionDay()` (Fulfillment): Deducts actual fulfilled meal count (from `mealSlots` or snapshot).
+  - `consumeSubscriptionMealBalance()` (Cashier/Manual): Deducts requested `mealCount`.
+- **Concurrency & Idempotency**:
+  - `fulfillSubscriptionDay()` is idempotent; repeated calls for the same day deduct exactly once.
+  - Concurrent fulfillment calls are protected by atomic `$inc` and `creditsDeducted` status checks.
+  - Concurrent cashier/manual consumption attempts are protected by atomic `$inc` with `{ remainingMeals: { $gte: mealCount } }` to prevent over-deduction.
+- **Fulfillment Methods**:
+  - **Subscription Delivery**: Verified fully supported; deducts only on actual `delivered`/`fulfill` action.
+  - **Subscription Pickup**: Verified fully supported; remains flexible with `pickupRequested` flow and deducts only on fulfillment.
+
 ## Logging / Audit Rules
 
 - `ActivityLog` is written by dashboard ops side effects (`dashboard_<action>`), order dashboard actions (`dashboard_order_*`), legacy kitchen/courier routes, cashier consumption, client pickup prepare, skip/freeze flows, and delivery reminders/cancellations.
@@ -341,6 +380,10 @@ No delivery/courier actions for launch. One-time orders must never affect subscr
 
 ## Final Conclusion
 
+Status: **NOT READY / NOT VERIFIED**.
+
+Safe to ship now: **NO**.
+
 Current subscription fulfillment is directionally safe with the new meal-balance policy: normal reads, no-show, skip, freeze, dispatch, and ready-for-pickup do not deduct `remainingMeals`. The policy is not fully production-safe until duplicate fulfillment/deduction is made concurrency-safe.
 
 Pickup fulfillment is usable but split across client prepare, dashboard ops, and legacy kitchen routes. It is safe with respect to meal balance, but not cleanly unified.
@@ -348,3 +391,20 @@ Pickup fulfillment is usable but split across client prepare, dashboard ops, and
 Delivery fulfillment is usable for subscriptions, but route surfaces and audit logs are inconsistent. It is acceptable for controlled operations, but should be tightened before production scale.
 
 One-time order pickup-only launch is not fully enforced across backend ops. Creation is feature-gated for delivery, but existing delivery actions and queues still support delivery orders. Backend should block or hide delivery order ops before launch.
+
+## Commands Run
+
+Latest required verification results:
+
+- `git diff --check` — PASS
+- `NODE_ENV=test MONGO_URI="..." node tests/oneTimeOrders.test.js` — PASS (45 passed)
+- `NODE_ENV=test MONGO_URI="..." node tests/oneTimeOrderOps.test.js` — PASS (24 passed, 0 failed)
+- `NODE_ENV=test MONGO_URI="..." node tests/oneTimeOrderDeliveryGate.test.js` — PASS (2 passed, 0 failed)
+- `NODE_ENV=test MONGO_URI="..." node tests/subscriptionBalanceConcurrency.test.js` — PASS
+- `NODE_ENV=test MONGO_URI="..." node tests/subscriptionFulfillmentConcurrency.test.js` — PASS
+- `NODE_ENV=test MONGO_URI="..." node tests/webhookSecurity.test.js` — PASS (5 passed, 0 failed)
+- `NODE_ENV=test MONGO_URI="..." node tests/subscriptionBalancePolicy.test.js` — PASS (All subscription balance policy automated tests passed)
+- `NODE_ENV=test MONGO_URI="..." node tests/mealPlanner.integration.test.js` — PASS (49 passed, 0 failed)
+- `NODE_ENV=test MONGO_URI="..." node tests/dashboardAdminEndpoints.test.js` — PASS
+- `node tests/moyasar_retry.test.js` — PASS
+- `node tests/vatInclusivePricing.test.js` — PASS

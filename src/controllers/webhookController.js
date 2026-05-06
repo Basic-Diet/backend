@@ -442,46 +442,6 @@ async function handleMoyasarWebhook(req, res, runtimeOverrides = null) {
       } else {
         unappliedReason = "invalid_metadata";
       }
-    } else if (type === "one_time_order") {
-
-      if (metadata.orderId) {
-        const order = await Order.findById(metadata.orderId).session(session);
-        if (!order) {
-          unappliedReason = "order_not_found";
-        } else {
-          const isCurrentAttempt = !order.paymentId || String(order.paymentId) === String(claim._id);
-          if (!isCurrentAttempt && order.paymentStatus === "paid") {
-            unappliedReason = "stale_order_payment_attempt";
-          } else {
-            if (order.status === "created" || order.status === "canceled") {
-              order.status = "confirmed";
-              order.confirmedAt = order.confirmedAt || new Date();
-              order.canceledAt = undefined;
-            }
-            order.paymentStatus = "paid";
-            order.paymentId = claim._id;
-            if (claim.providerInvoiceId) order.providerInvoiceId = claim.providerInvoiceId;
-            if (claim.providerPaymentId) order.providerPaymentId = claim.providerPaymentId;
-            if (metadata.paymentUrl && !order.paymentUrl) order.paymentUrl = String(metadata.paymentUrl);
-            await order.save({ session });
-            applied = true;
-            orderNotification = {
-              orderId: order._id,
-              userId: order.userId,
-              paymentId: claim._id,
-            };
-            await writeLogFn({
-              entityType: "order",
-              entityId: order._id,
-              action: "order_payment_webhook",
-              byRole: "system",
-              meta: { orderId: String(order._id), paymentId },
-            });
-          }
-        }
-      } else {
-        unappliedReason = "invalid_metadata";
-      }
     } else {
       unappliedReason = "unsupported_payment_type";
     }

@@ -16,7 +16,6 @@ const STATUS_METADATA = {
   frozen: { badge: "info", icon: "cloud-snow" },
   locked: { badge: "info", icon: "lock" },
   in_preparation: { badge: "warning", icon: "chef-hat" },
-  preparing: { badge: "warning", icon: "chef-hat" },
   ready_for_pickup: { badge: "success", icon: "shopping-bag" },
   fulfilled: { badge: "success", icon: "check-circle" },
   consumed_without_preparation: { badge: "secondary", icon: "calendar-x" },
@@ -28,7 +27,6 @@ const STATUS_METADATA = {
   // Specific for Orders/Deliveries
   out_for_delivery: { badge: "info", icon: "truck" },
   on_the_way: { badge: "info", icon: "truck" }, // Alias for ui
-  canceled: { badge: "danger", icon: "x-circle" },
   cancelled: { badge: "danger", icon: "x-circle" },
   confirmed: { badge: "info", icon: "check" },
 };
@@ -141,12 +139,12 @@ function mapOrderToDTO(order, delivery, user, role, lang) {
     reference: `ORD-${String(order._id).slice(-6).toUpperCase()}`,
     orderNumber: order.orderNumber || "",
     status,
-    statusLabel: order.status,
+    statusLabel: status,
     paymentStatus: order.paymentStatus || "paid",
     fulfillmentMethod: mode,
     ui: {
       ...ui,
-      label: order.status, // To be localized in opsReadService
+      label: status, // To be localized in opsReadService
     },
     customer: {
       id: String(user ? user._id : ""),

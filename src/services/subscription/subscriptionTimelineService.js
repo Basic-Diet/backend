@@ -478,32 +478,44 @@ async function buildSubscriptionTimeline(subscriptionId, options = {}) {
     },
     premiumMealsRemaining: Array.isArray(subscription.premiumBalance) ? subscription.premiumBalance.reduce((s, row) => s + Number(row.remainingQty || 0), 0) : 0,
     premiumMealsSelected: Array.isArray(subscription.premiumSelections) ? subscription.premiumSelections.length : 0,
-    premiumBalanceBreakdown: await Promise.all((subscription.premiumBalance || []).map(async (row) => {
-      const proteinId = row.proteinId ? String(row.proteinId) : null;
-      let premiumKey = row.premiumKey;
+    premiumBalanceBreakdown: await (async () => {
+      const balanceRows = subscription.premiumBalance || [];
+      const missingKeyProteinIds = balanceRows
+        .filter((row) => !row.premiumKey && mongoose.isValidObjectId(row.proteinId))
+        .map((row) => new mongoose.Types.ObjectId(String(row.proteinId)));
 
-      if (!premiumKey && mongoose.isValidObjectId(proteinId)) {
-        const doc = await BuilderProtein.findById(proteinId).select("premiumKey").lean();
-        premiumKey = doc ? doc.premiumKey : null;
+      const proteinMap = new Map();
+      if (missingKeyProteinIds.length > 0) {
+        const proteins = await BuilderProtein.find({ _id: { $in: missingKeyProteinIds } })
+          .select("_id premiumKey")
+          .lean();
+        for (const p of proteins) {
+          proteinMap.set(String(p._id), p.premiumKey);
+        }
       }
 
-      if (!premiumKey) {
-        premiumKey = resolvePremiumKeyFromName(row.name || "");
-      }
+      return balanceRows.map((row) => {
+        const proteinId = row.proteinId ? String(row.proteinId) : null;
+        let premiumKey = row.premiumKey || (proteinId ? proteinMap.get(proteinId) : null);
 
-      if (!premiumKey) {
-        throw new Error("Invalid premiumBalance row in timeline: premiumKey is required");
-      }
+        if (!premiumKey) {
+          premiumKey = resolvePremiumKeyFromName(row.name || "");
+        }
 
-      return {
-        proteinId,
-        premiumKey,
-        purchasedQty: Number(row.purchasedQty || 0),
-        remainingQty: Number(row.remainingQty || 0),
-        unitExtraFeeHalala: Number(row.unitExtraFeeHalala || 0),
-        currency: row.currency || "SAR",
-      };
-    })),
+        if (!premiumKey) {
+          throw new Error("Invalid premiumBalance row in timeline: premiumKey is required");
+        }
+
+        return {
+          proteinId,
+          premiumKey,
+          purchasedQty: Number(row.purchasedQty || 0),
+          remainingQty: Number(row.remainingQty || 0),
+          unitExtraFeeHalala: Number(row.unitExtraFeeHalala || 0),
+          currency: row.currency || "SAR",
+        };
+      });
+    })(),
     days: timelineDays,
   };
 }

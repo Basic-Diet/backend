@@ -499,6 +499,59 @@ async function applyOrderWebhookInvoice({ providerInvoice, eventType }) {
       if (paymentInSession.applied === true && paymentInSession.status === "paid") {
         return { order: orderInSession, payment: paymentInSession, alreadyProcessed: true };
       }
+
+      if (NON_PAYABLE_ORDER_STATUSES.has(orderInSession.status) && paymentInSession.status !== "paid") {
+        const { providerPaymentId, providerInvoiceId } = getProviderInvoiceStatus(providerInvoice, paymentInSession);
+        const now = new Date();
+
+        const claim = await Payment.findOneAndUpdate(
+          { _id: paymentInSession._id, type: ORDER_PAYMENT_TYPE, applied: false },
+          {
+            $set: {
+              status: "paid",
+              applied: true,
+              paidAt: paymentInSession.paidAt || now,
+              ...(providerPaymentId ? { providerPaymentId } : {}),
+              ...(providerInvoiceId ? { providerInvoiceId } : {}),
+            },
+          },
+          { new: true, session }
+        );
+
+        if (!claim) return { alreadyProcessed: true };
+
+        orderInSession.paymentStatus = "paid";
+        if (providerInvoiceId) orderInSession.providerInvoiceId = providerInvoiceId;
+        if (providerPaymentId) orderInSession.providerPaymentId = providerPaymentId;
+        await orderInSession.save({ session });
+
+        await ActivityLog.create(
+          [
+            {
+              entityType: "order",
+              entityId: orderInSession._id,
+              action: "order_webhook_late_payment",
+              byUserId: orderInSession.userId,
+              byRole: "system",
+              meta: {
+                source: "webhook",
+                orderId: String(orderInSession._id),
+                paymentId: String(claim._id),
+                providerInvoiceId: providerInvoiceId || null,
+                providerPaymentId: providerPaymentId || null,
+                previousOrderStatus: orderInSession.status,
+                paymentStatus: "paid",
+                requiresManualReview: true,
+                reason: "paid_webhook_for_non_payable_order",
+              },
+            },
+          ],
+          { session }
+        );
+
+        return { order: orderInSession, payment: claim, applied: true, latePayment: true };
+      }
+
       return applyPaidOrderPayment({
         order: orderInSession,
         payment: paymentInSession,

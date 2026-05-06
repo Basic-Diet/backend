@@ -1,5 +1,6 @@
 "use strict";
 
+const mongoose = require("mongoose");
 const User = require("../../models/User");
 const SubscriptionDay = require("../../models/SubscriptionDay");
 const Subscription = require("../../models/Subscription");
@@ -13,7 +14,8 @@ const dashboardDtoService = require("./dashboardDtoService");
 
 async function search({ q, role, lang = "ar" }) {
   const query = String(q || "").trim();
-  if (query.length < 3) return [];
+  const isObjectId = mongoose.Types.ObjectId.isValid(query);
+  if (query.length < 3 && !isObjectId) return [];
 
   // 1. Search Users by Phone (Exact First) then Name
   const usersByPhone = await User.find({ phone: query }).limit(5).lean();
@@ -22,7 +24,10 @@ async function search({ q, role, lang = "ar" }) {
   if (users.length < 10) {
     const extraUsers = await User.find({
       _id: { $nin: usersByPhone.map(u => u._id) },
-      name: { $regex: query, $options: "i" }
+      $or: [
+        { name: { $regex: query, $options: "i" } },
+        ...(isObjectId ? [{ _id: new mongoose.Types.ObjectId(query) }] : [])
+      ]
     }).limit(10).lean();
     users = [...users, ...extraUsers];
   }
@@ -35,14 +40,21 @@ async function search({ q, role, lang = "ar" }) {
 
   const orderSearchConditions = [];
   if (isReferenceSearch && query.startsWith("ORD-") && referenceId && referenceId.length >= 6) {
-    orderSearchConditions.push({ _id: { $regex: referenceId, $options: "i" } });
+    if (mongoose.Types.ObjectId.isValid(referenceId)) {
+      orderSearchConditions.push({ _id: new mongoose.Types.ObjectId(referenceId) });
+    } else {
+      orderSearchConditions.push({ _id: { $regex: referenceId, $options: "i" } });
+    }
   } else {
     orderSearchConditions.push({ orderNumber: { $regex: query, $options: "i" } });
+    if (isObjectId) {
+      orderSearchConditions.push({ _id: new mongoose.Types.ObjectId(query) });
+    }
   }
 
   const [subscriptions, ordersByRef] = await Promise.all([
-    Subscription.find({ userId: { $in: userIds } }).lean(),
-    Order.find({ $or: orderSearchConditions }).limit(5).lean()
+    Subscription.find({ userId: { $in: userIds } }).limit(50).lean(),
+    Order.find({ $or: orderSearchConditions }).limit(10).lean()
   ]);
   
   const subIds = subscriptions.map(s => s._id);

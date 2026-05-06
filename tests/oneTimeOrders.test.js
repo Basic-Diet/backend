@@ -545,10 +545,17 @@ function setMoyasarInvoice(invoiceId, updates = {}) {
         },
         pickup: undefined,
       }));
-      expectStatus(res, 200, "delivery quote");
-      assert.strictEqual(res.body.data.pricing.subtotalHalala, 2500);
-      assert.strictEqual(res.body.data.pricing.deliveryFeeHalala, 1350);
-      assert.strictEqual(res.body.data.pricing.totalHalala, 3850);
+      // Check if delivery is enabled via feature gate
+      const isDeliveryEnabled = process.env.ONE_TIME_ORDER_DELIVERY_ENABLED === "true";
+      if (isDeliveryEnabled) {
+        expectStatus(res, 200, "delivery quote");
+        assert.strictEqual(res.body.data.pricing.subtotalHalala, 2500);
+        assert.strictEqual(res.body.data.pricing.deliveryFeeHalala, 1350);
+        assert.strictEqual(res.body.data.pricing.totalHalala, 3850);
+      } else {
+        expectStatus(res, 400, "delivery quote rejected when feature gate disabled");
+        assert.strictEqual(res.body.error.code, "DELIVERY_NOT_SUPPORTED");
+      }
     });
 
     await test("POST /api/orders/quote rejects inactive zone", async () => {
@@ -560,8 +567,15 @@ function setMoyasarInvoice(invoiceId, updates = {}) {
         },
         pickup: undefined,
       }));
-      expectStatus(res, 409, "inactive zone quote");
-      assert.strictEqual(res.body.error.code, "ZONE_INACTIVE");
+      // Check if delivery is enabled via feature gate
+      const isDeliveryEnabled = process.env.ONE_TIME_ORDER_DELIVERY_ENABLED === "true";
+      if (isDeliveryEnabled) {
+        expectStatus(res, 409, "inactive zone quote");
+        assert.strictEqual(res.body.error.code, "ZONE_INACTIVE");
+      } else {
+        expectStatus(res, 400, "delivery quote rejected when feature gate disabled");
+        assert.strictEqual(res.body.error.code, "DELIVERY_NOT_SUPPORTED");
+      }
     });
 
     await test("POST /api/orders/quote rejects unavailable item", async () => {

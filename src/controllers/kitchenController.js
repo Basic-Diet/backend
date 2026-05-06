@@ -26,6 +26,7 @@ const { consumeSubscriptionDayCredits } = require("../services/subscription/subs
 const { logger } = require("../utils/logger");
 const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
+const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
 
 async function getPickupLocationsSetting() {
   const setting = await Setting.findOne({ key: "pickup_locations" }).lean();
@@ -298,7 +299,23 @@ async function listPickupsByDate(req, res) {
       return String(left.subscriptionDayId).localeCompare(String(right.subscriptionDayId));
     });
 
-  return res.status(200).json({ status: true, data: rows });
+  const pagination = resolveOptionalPagination(req.query, 300, 50);
+
+  if (!pagination) {
+    // No pagination requested - return all (current behavior)
+    return res.status(200).json({ status: true, data: rows });
+  }
+
+  // Pagination requested - apply it to filtered/sorted results
+  const total = rows.length;
+  const skip = (pagination.page - 1) * pagination.limit;
+  const paginatedRows = rows.slice(skip, skip + pagination.limit);
+
+  return res.status(200).json({
+    status: true,
+    data: paginatedRows,
+    meta: buildPaginationMeta(pagination.page, pagination.limit, total),
+  });
 }
 
 async function listTodayPickups(req, res) {
