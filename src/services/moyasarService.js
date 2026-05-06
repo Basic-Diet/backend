@@ -5,6 +5,9 @@ const DEFAULT_MOYASAR_TIMEOUT_MS = 15000;
 const DEFAULT_MOYASAR_GET_RETRY_ATTEMPTS = 3;
 const MOYASAR_GET_RETRY_BACKOFF_MS = [150, 300];
 
+/** Names of env vars required for Moyasar to function — never log values. */
+const REQUIRED_ENV_VARS = ["MOYASAR_SECRET_KEY"];
+
 function getMoyasarGetRetryAttempts() {
   const parsed = Number(process.env.MOYASAR_GET_RETRY_ATTEMPTS || DEFAULT_MOYASAR_GET_RETRY_ATTEMPTS);
   return Number.isFinite(parsed) && parsed > 0
@@ -32,6 +35,7 @@ function requestJsonOnce(path, method, body, apiKey) {
     const timeoutMs = Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0
       ? timeoutMsRaw
       : DEFAULT_MOYASAR_TIMEOUT_MS;
+
     const req = https.request(
       {
         hostname: MOYASAR_HOST,
@@ -56,6 +60,7 @@ function requestJsonOnce(path, method, body, apiKey) {
               const err = new Error(parsed && parsed.message ? parsed.message : "Moyasar request failed");
               err.status = status;
               err.payload = parsed;
+              err.moyasarCode = parsed && parsed.type;
               return reject(err);
             }
             return resolve(parsed);
@@ -67,12 +72,16 @@ function requestJsonOnce(path, method, body, apiKey) {
       }
     );
 
-    req.on("error", reject);
+    req.on("error", (err) => {
+      reject(err);
+    });
+
     req.setTimeout(timeoutMs, () => {
       const err = new Error(`Moyasar request timed out after ${timeoutMs}ms`);
       err.code = "PAYMENT_PROVIDER_TIMEOUT";
       req.destroy(err);
     });
+
     if (payload) req.write(payload);
     req.end();
   });
@@ -98,11 +107,66 @@ async function requestJson(path, method, body, apiKey) {
   throw lastError;
 }
 
-async function createInvoice({ amount, currency = "SAR", description, callbackUrl, successUrl, backUrl, metadata }) {
+function getUrlSafeSummary(url) {
+  if (!url) return "none";
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.hostname}`;
+  } catch (e) {
+    return "invalid_url";
+  }
+}
+
+/**
+ * Returns names of any required env vars that are not set.
+ * Safe to log: only names are returned, never values.
+ */
+function getMoyasarEnvStatus() {
+  const missing = REQUIRED_ENV_VARS.filter((name) => !process.env[name]);
+  return {
+    configured: missing.length === 0,
+    missingVars: missing,
+  };
+}
+
+/**
+ * Creates a Moyasar invoice (hosted-payment link).
+ *
+ * @param {object} opts
+ * @param {number}  opts.amount        - Amount in halala (smallest unit)
+ * @param {string}  [opts.currency]    - ISO currency code, default SAR
+ * @param {string}  [opts.description]
+ * @param {string}  [opts.callbackUrl] - Webhook callback URL
+ * @param {string}  [opts.successUrl]  - Client success deep-link
+ * @param {string}  [opts.backUrl]     - Client cancel deep-link
+ * @param {object}  [opts.metadata]    - Forwarded to Moyasar as-is
+ * @param {string}  [opts._orderId]    - Internal orderId for error context only
+ * @param {string}  [opts._paymentId]  - Internal paymentId for error context only
+ */
+async function createInvoice({
+  amount,
+  currency = "SAR",
+  description,
+  callbackUrl,
+  successUrl,
+  backUrl,
+  metadata,
+  _orderId,
+  _paymentId,
+}) {
   const apiKey = process.env.MOYASAR_SECRET_KEY;
   if (!apiKey) {
-    const err = new Error("Missing MOYASAR_SECRET_KEY");
+    const err = new Error("MOYASAR_SECRET_KEY is not configured");
     err.code = "CONFIG";
+    err.missingEnv = "MOYASAR_SECRET_KEY";
+    err.context = {
+      provider: "moyasar",
+      missingEnvVars: ["MOYASAR_SECRET_KEY"],
+      amountHalala: amount,
+      currency,
+      orderId: _orderId || undefined,
+      paymentId: _paymentId || undefined,
+    };
     throw err;
   }
 
@@ -116,7 +180,25 @@ async function createInvoice({ amount, currency = "SAR", description, callbackUr
     metadata,
   };
 
-  return requestJson("/v1/invoices", "POST", body, apiKey);
+  try {
+    return await requestJson("/v1/invoices", "POST", body, apiKey);
+  } catch (err) {
+    // Attach structured diagnostic context — never include secret values.
+    err.context = {
+      provider: "moyasar",
+      amountHalala: amount,
+      currency,
+      successUrlDomain: getUrlSafeSummary(successUrl),
+      backUrlDomain: getUrlSafeSummary(backUrl),
+      callbackUrlDomain: getUrlSafeSummary(callbackUrl),
+      providerHttpStatus: err.status,
+      providerErrorCode: err.moyasarCode,
+      providerErrorMessage: err.message,
+      orderId: _orderId || undefined,
+      paymentId: _paymentId || undefined,
+    };
+    throw err;
+  }
 }
 
 async function getInvoice(invoiceId) {
@@ -146,4 +228,4 @@ async function getInvoice(invoiceId) {
   return invoice;
 }
 
-module.exports = { createInvoice, getInvoice };
+module.exports = { createInvoice, getInvoice, getMoyasarEnvStatus };

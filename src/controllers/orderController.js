@@ -343,6 +343,9 @@ async function createOrder(req, res) {
         paymentId: String(payment._id),
         expiresAt: expiresAt.toISOString(),
       },
+      // Internal context fields for structured error logging (not sent to Moyasar)
+      _orderId: String(order._id),
+      _paymentId: String(payment._id),
     });
 
     if (Number.isFinite(Number(invoice.amount)) && Number(invoice.amount) !== Number(quote.pricing.totalHalala)) {
@@ -415,16 +418,60 @@ async function createOrder(req, res) {
       }
     }
 
-    if (err && err.code && err.status) {
-      return errorResponse(res, err.status, err.code, err.message, err.details);
-    }
-    if (err && err.code === "CONFIG") {
-      return errorResponse(res, 500, "CONFIG_MISSING", err.message);
-    }
-    if (err && err.code === 11000) {
+    const isProviderError = Boolean(
+      err
+      && err.context
+      && err.context.provider === "moyasar"
+      && err.context.providerHttpStatus
+    );
+    const isConfigError = err && (err.code === "CONFIG" || err.missingEnv);
+    const isDuplicateKey = err && err.code === 11000;
+    const isClientError = err && err.code && err.status
+      && !isProviderError
+      && !isConfigError
+      && !isDuplicateKey;
+
+    const logDetail = {
+      orderId: order ? String(order._id) : "(not created)",
+      paymentId: payment ? String(payment._id) : "(not created)",
+      errorName: err.name,
+      errorMessage: err.message,
+      // Safe provider context (populated by moyasarService.createInvoice)
+      ...(err.context ? {
+        provider: err.context.provider,
+        providerHttpStatus: err.context.providerHttpStatus,
+        providerErrorCode: err.context.providerErrorCode,
+        providerErrorMessage: err.context.providerErrorMessage,
+        amountHalala: err.context.amountHalala,
+        currency: err.context.currency,
+        successUrlDomain: err.context.successUrlDomain,
+        backUrlDomain: err.context.backUrlDomain,
+        callbackUrlDomain: err.context.callbackUrlDomain,
+        // Only log ENV var names (never values)
+        missingEnvVars: err.context.missingEnvVars,
+      } : {}),
+      // Backwards-compat: missingEnv set directly on err by old code paths
+      missingEnvName: err.missingEnv || undefined,
+      isProviderError,
+      isConfigError,
+    };
+    logger.error("PAYMENT_INIT_ERROR [createOrder]", logDetail);
+
+    // Always return a safe, generic response to the client.
+    // Never expose provider HTTP status, API error codes, or env var values.
+    if (isDuplicateKey) {
       return errorResponse(res, 409, "CHECKOUT_IN_PROGRESS", "A matching pending order already exists");
     }
-    logger.error("orderController.createOrder failed", { error: err.message, stack: err.stack });
+    if (isConfigError) {
+      // Do NOT reveal which key is missing or its value.
+      // The var name is already in the server logs via missingEnvName/missingEnvVars.
+      return errorResponse(res, 502, "PAYMENT_INIT_ERROR", "Order payment initialization failed");
+    }
+    if (isClientError) {
+      // Validation / business logic errors (INVALID_REQUEST, EMPTY_ORDER, etc.)
+      // that carry an explicit status are safe to forward.
+      return errorResponse(res, err.status, err.code, err.message, err.details);
+    }
     return errorResponse(res, 502, "PAYMENT_INIT_ERROR", "Order payment initialization failed");
   }
 }
