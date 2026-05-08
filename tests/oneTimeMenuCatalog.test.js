@@ -388,6 +388,48 @@ async function seedViaDashboard(api) {
     restoreMoyasar = installMoyasarMock();
     const api = request(createApp());
 
+    const legacyPublishedAt = new Date();
+    const [legacySalads, legacyMeals] = await Promise.all([
+      MenuCategory.create({
+        key: "salads",
+        name: { en: "Legacy Salads", ar: "سلطات" },
+        isActive: true,
+        sortOrder: 1,
+        publishedAt: legacyPublishedAt,
+      }),
+      MenuCategory.create({
+        key: "meals",
+        name: { en: "Legacy Meals", ar: "وجبات" },
+        isActive: true,
+        sortOrder: 2,
+        publishedAt: legacyPublishedAt,
+      }),
+    ]);
+    await MenuProduct.create([
+      {
+        categoryId: legacySalads._id,
+        key: "cold_boiled_egg",
+        name: { en: "Old Cold Egg", ar: "بيض مسلوق" },
+        itemType: "cold_sandwich",
+        pricingModel: "fixed",
+        priceHalala: 900,
+        isActive: true,
+        sortOrder: 1,
+        publishedAt: legacyPublishedAt,
+      },
+      {
+        categoryId: legacyMeals._id,
+        key: "sourdough_halloumi",
+        name: { en: "Old Sourdough Halloumi", ar: "ساوردو حلومي" },
+        itemType: "sourdough",
+        pricingModel: "fixed",
+        priceHalala: 2300,
+        isActive: true,
+        sortOrder: 2,
+        publishedAt: legacyPublishedAt,
+      },
+    ]);
+
     await seedOneTimeMenu({ actor: { role: "test" }, notes: TEST_TAG });
 
     await test("seed-one-time-menu publishes the final Basic Diet dynamic menu", async () => {
@@ -398,6 +440,8 @@ async function seedViaDashboard(api) {
       ["custom_order", "cold_sandwiches", "sourdough", "desserts", "juices", "drinks", "ice_cream"].forEach((categoryKey) => {
         assert(categoriesByKey.has(categoryKey), `menu includes ${categoryKey}`);
       });
+      assert(!categoriesByKey.has("salads"), "legacy salads category is not published in customer menu");
+      assert(!categoriesByKey.has("meals"), "legacy meals category is not published in customer menu");
       assert.strictEqual(categoriesByKey.get("custom_order").nameI18n.ar, "اطلب على مزاجك");
       assert.strictEqual(categoriesByKey.get("sourdough").nameI18n.ar, "الساندويشات");
       assert.strictEqual(categoriesByKey.get("ice_cream").nameI18n.ar, "الايس كريم");
@@ -489,6 +533,9 @@ async function seedViaDashboard(api) {
       seededProductRows
         .filter((product) => product.pricingModel === "fixed" && !product.groups)
         .forEach((product) => assertFixedDirectProduct(findProduct(menu, product.key), product.key, product.priceHalala));
+      ["cold_boiled_egg", "sourdough_halloumi", "ice_cream_addon"].forEach((legacyKey) => {
+        assert(!findProduct(menu, legacyKey), `${legacyKey} is not active in customer menu`);
+      });
     });
 
     await resetDatabase();
@@ -666,6 +713,141 @@ async function seedViaDashboard(api) {
       assert(payment, "one-time order payment was persisted");
       assert.strictEqual(payment.type, "one_time_order");
       assert.strictEqual(payment.status, "initiated");
+    });
+
+    await test("Dashboard can edit relation selection rules and customer menu reflects them", async () => {
+      let res = await api.patch(`/api/dashboard/menu/products/${ctx.greekYogurtProduct.id}/option-groups/${ctx.group.id}/selection-rules`)
+        .set(dashboardAuth())
+        .send({ minSelections: 1, maxSelections: 2, isRequired: true });
+      expectStatus(res, 200, "update selection rules");
+      assert.strictEqual(res.body.data.minSelections, 1);
+      assert.strictEqual(res.body.data.maxSelections, 2);
+      assert.strictEqual(res.body.data.isRequired, true);
+
+      res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "menu after rule update");
+      const greekYogurt = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.greekYogurtProduct.id);
+      assert(greekYogurt, "greek yogurt remains visible");
+      assert.strictEqual(greekYogurt.optionGroups[0].minSelections, 1);
+      assert.strictEqual(greekYogurt.optionGroups[0].maxSelections, 2);
+      assert.strictEqual(greekYogurt.optionGroups[0].isRequired, true);
+
+      res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
+        items: [{ productId: ctx.greekYogurtProduct.id, qty: 1, selectedOptions: [] }],
+      });
+      expectStatus(res, 400, "updated min selections enforced");
+      assert.strictEqual(res.body.error.code, "MIN_SELECTIONS_NOT_MET");
+    });
+
+    await test("Dashboard hide/unhide option filters menu and quote rejects stale hidden option", async () => {
+      let res = await api.patch(`/api/dashboard/menu/options/${ctx.options[1].id}/visibility`)
+        .set(dashboardAuth())
+        .send({ isVisible: false });
+      expectStatus(res, 200, "hide option");
+      assert.strictEqual(res.body.data.isVisible, false);
+
+      res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "menu after hide option");
+      const fixedProduct = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.fixedProduct.id);
+      assert(fixedProduct, "fixed product remains visible");
+      assert(!fixedProduct.optionGroups[0].options.some((item) => item.id === ctx.options[1].id), "hidden option is absent");
+
+      res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
+        items: [{
+          productId: ctx.fixedProduct.id,
+          qty: 1,
+          selectedOptions: [{ groupId: ctx.group.id, optionId: ctx.options[1].id }],
+        }],
+      });
+      expectStatus(res, 409, "hidden option quote rejected");
+      assert.strictEqual(res.body.error.code, "OPTION_NOT_AVAILABLE");
+
+      res = await api.patch(`/api/dashboard/menu/options/${ctx.options[1].id}/visibility`)
+        .set(dashboardAuth())
+        .send({ isVisible: true });
+      expectStatus(res, 200, "unhide option");
+      assert.strictEqual(res.body.data.isVisible, true);
+    });
+
+    await test("Dashboard relation availability is product-specific and stale quotes are rejected", async () => {
+      let res = await api.patch(`/api/dashboard/menu/products/${ctx.fixedProduct.id}/option-groups/${ctx.group.id}/options/${ctx.options[0].id}/availability`)
+        .set(dashboardAuth())
+        .send({ isAvailable: false });
+      expectStatus(res, 200, "mark relation option unavailable");
+      assert.strictEqual(res.body.data.isAvailable, false);
+
+      res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "menu after relation option unavailable");
+      const fixedProduct = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.fixedProduct.id);
+      const greekYogurt = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.greekYogurtProduct.id);
+      assert(!fixedProduct.optionGroups[0].options.some((item) => item.id === ctx.options[0].id), "option hidden only for fixed product");
+      assert(greekYogurt.optionGroups[0].options.some((item) => item.id === ctx.options[0].id), "same global option remains available for greek yogurt");
+
+      res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
+        items: [{
+          productId: ctx.fixedProduct.id,
+          qty: 1,
+          selectedOptions: [{ groupId: ctx.group.id, optionId: ctx.options[0].id }],
+        }],
+      });
+      expectStatus(res, 409, "relation unavailable option quote rejected");
+      assert.strictEqual(res.body.error.code, "OPTION_NOT_AVAILABLE");
+    });
+
+    await test("Dashboard product availability filters menu and quote/create reject stale product", async () => {
+      let res = await api.patch(`/api/dashboard/menu/products/${ctx.directProduct.id}/availability`)
+        .set(dashboardAuth())
+        .send({ isAvailable: false });
+      expectStatus(res, 200, "mark product unavailable");
+      assert.strictEqual(res.body.data.isAvailable, false);
+
+      res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "menu after product unavailable");
+      assert(!res.body.data.categories.flatMap((category) => category.products).some((item) => item.id === ctx.directProduct.id), "unavailable product is absent");
+
+      res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
+        items: [{ productId: ctx.directProduct.id, qty: 1, selectedOptions: [] }],
+      });
+      expectStatus(res, 409, "unavailable product quote rejected");
+      assert.strictEqual(res.body.error.code, "PRODUCT_NOT_AVAILABLE");
+
+      res = await api.post("/api/orders").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
+        items: [{ productId: ctx.directProduct.id, qty: 1, selectedOptions: [] }],
+      });
+      expectStatus(res, 409, "unavailable product create rejected");
+      assert.strictEqual(res.body.error.code, "PRODUCT_NOT_AVAILABLE");
+    });
+
+    await test("Hidden relation group updates canAddDirectly/requiresBuilder and rejects stale builder selections", async () => {
+      let res = await api.patch(`/api/dashboard/menu/products/${ctx.fixedProduct.id}/option-groups/${ctx.group.id}/visibility`)
+        .set(dashboardAuth())
+        .send({ isVisible: false });
+      expectStatus(res, 200, "hide product group relation");
+      assert.strictEqual(res.body.data.isVisible, false);
+
+      res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "menu after relation group hidden");
+      const fixedProduct = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.fixedProduct.id);
+      assert(fixedProduct, "fixed product remains visible after group relation hidden");
+      assert.strictEqual(fixedProduct.optionGroups.length, 0);
+      assert.strictEqual(fixedProduct.requiresBuilder, false);
+      assert.strictEqual(fixedProduct.canAddDirectly, true);
+
+      res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
+        items: [{
+          productId: ctx.fixedProduct.id,
+          qty: 1,
+          selectedOptions: [{ groupId: ctx.group.id, optionId: ctx.options[1].id }],
+        }],
+      });
+      expectStatus(res, 409, "hidden relation group quote rejected");
+      assert.strictEqual(res.body.error.code, "OPTION_GROUP_NOT_AVAILABLE");
     });
 
     await test("Dashboard menu requires admin role", async () => {

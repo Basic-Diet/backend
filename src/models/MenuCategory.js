@@ -15,6 +15,8 @@ const MenuCategorySchema = new mongoose.Schema(
     description: { type: LocalizedStringSchema, default: () => ({}) },
     imageUrl: { type: String, default: "" },
     isActive: { type: Boolean, default: true, index: true },
+    isVisible: { type: Boolean, default: true, index: true },
+    isAvailable: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
     availability: {
       branchIds: { type: [String], default: [] },
@@ -25,6 +27,6 @@ const MenuCategorySchema = new mongoose.Schema(
 );
 
 MenuCategorySchema.index({ key: 1 }, { unique: true });
-MenuCategorySchema.index({ isActive: 1, publishedAt: 1, sortOrder: 1, createdAt: -1 });
+MenuCategorySchema.index({ isActive: 1, isVisible: 1, isAvailable: 1, publishedAt: 1, sortOrder: 1, createdAt: -1 });
 
 module.exports = mongoose.model("MenuCategory", MenuCategorySchema);

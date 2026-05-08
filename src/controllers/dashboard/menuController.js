@@ -12,6 +12,8 @@ function listOptions(req) {
   return {
     includeInactive: String(req.query.includeInactive || "").toLowerCase() === "true",
     isActive: req.query.isActive,
+    isVisible: req.query.isVisible,
+    isAvailable: req.query.isAvailable,
     q: req.query.q,
     published: req.query.published,
     groupId: req.query.groupId,
@@ -54,6 +56,8 @@ const listCategories = wrap(async (req, res) => send(res, await service.listCate
 const createCategory = wrap(async (req, res) => send(res, await service.createCategory(req.body, actorFromRequest(req)), 201));
 const getCategory = wrap(async (req, res) => send(res, await service.getCategory(req.params.id)));
 const updateCategory = wrap(async (req, res) => send(res, await service.updateCategory(req.params.id, req.body, actorFromRequest(req))));
+const updateCategoryVisibility = wrap(async (req, res) => send(res, await service.updateCategoryVisibility(req.params.id, req.body, actorFromRequest(req))));
+const updateCategoryAvailability = wrap(async (req, res) => send(res, await service.updateCategoryAvailability(req.params.id, req.body, actorFromRequest(req))));
 const deleteCategory = wrap(async (req, res) => send(res, await service.deleteCategory(req.params.id, actorFromRequest(req))));
 const reorderCategories = wrap(async (req, res) => send(res, await service.reorderCategories(req.body.items || req.body, actorFromRequest(req))));
 
@@ -61,27 +65,50 @@ const listProducts = wrap(async (req, res) => send(res, await service.listProduc
 const createProduct = wrap(async (req, res) => send(res, await service.createProduct(req.body, actorFromRequest(req)), 201));
 const getProduct = wrap(async (req, res) => send(res, await service.getProduct(req.params.id)));
 const updateProduct = wrap(async (req, res) => send(res, await service.updateProduct(req.params.id, req.body, actorFromRequest(req))));
+const updateProductVisibility = wrap(async (req, res) => send(res, await service.updateProductVisibility(req.params.id || req.params.productId, req.body, actorFromRequest(req))));
 const deleteProduct = wrap(async (req, res) => send(res, await service.deleteProduct(req.params.id, actorFromRequest(req))));
 const reorderProducts = wrap(async (req, res) => send(res, await service.reorderProducts(req.body.items || req.body, actorFromRequest(req))));
 const updateProductAvailability = wrap(async (req, res) => {
-  const body = { branchAvailability: req.body.branchAvailability || req.body.branchIds || [] };
-  return send(res, await service.updateProduct(req.params.productId, body, actorFromRequest(req)));
+  if (req.body.branchAvailability !== undefined || req.body.branchIds !== undefined) {
+    const body = { branchAvailability: req.body.branchAvailability || req.body.branchIds || [] };
+    return send(res, await service.updateProduct(req.params.productId || req.params.id, body, actorFromRequest(req)));
+  }
+  return send(res, await service.updateProductAvailabilityState(req.params.productId || req.params.id, req.body, actorFromRequest(req)));
 });
+const listProductGroups = wrap(async (req, res) => send(res, await service.listProductGroups(req.params.productId, listOptions(req))));
+const createProductGroup = wrap(async (req, res) => send(res, await service.createProductGroup(req.params.productId, req.body, actorFromRequest(req)), 201));
+const updateProductGroup = wrap(async (req, res) => send(res, await service.updateProductGroup(req.params.productId, req.params.groupId, req.body, actorFromRequest(req))));
+const updateProductGroupSelectionRules = wrap(async (req, res) => send(res, await service.updateProductGroupSelectionRules(req.params.productId, req.params.groupId, req.body, actorFromRequest(req))));
+const updateProductGroupVisibility = wrap(async (req, res) => send(res, await service.updateProductGroupVisibility(req.params.productId, req.params.groupId, req.body, actorFromRequest(req))));
+const updateProductGroupAvailability = wrap(async (req, res) => send(res, await service.updateProductGroupAvailability(req.params.productId, req.params.groupId, req.body, actorFromRequest(req))));
 
 const listOptionGroups = wrap(async (req, res) => send(res, await service.listOptionGroups(listOptions(req))));
 const createOptionGroup = wrap(async (req, res) => send(res, await service.createOptionGroup(req.body, actorFromRequest(req)), 201));
 const getOptionGroup = wrap(async (req, res) => send(res, await service.getOptionGroup(req.params.id)));
 const updateOptionGroup = wrap(async (req, res) => send(res, await service.updateOptionGroup(req.params.id, req.body, actorFromRequest(req))));
+const updateOptionGroupVisibility = wrap(async (req, res) => send(res, await service.updateOptionGroupVisibility(req.params.id, req.body, actorFromRequest(req))));
+const updateOptionGroupAvailability = wrap(async (req, res) => send(res, await service.updateOptionGroupAvailability(req.params.id, req.body, actorFromRequest(req))));
 const deleteOptionGroup = wrap(async (req, res) => send(res, await service.deleteOptionGroup(req.params.id, actorFromRequest(req))));
+const reorderOptionGroups = wrap(async (req, res) => send(res, await service.reorderOptionGroups(req.body.items || req.body, actorFromRequest(req))));
+const listOptionsByGroup = wrap(async (req, res) => send(res, await service.listOptions({ ...listOptions(req), groupId: req.params.groupId })));
+const createOptionForGroup = wrap(async (req, res) => send(res, await service.createOption({ ...req.body, groupId: req.params.groupId }, actorFromRequest(req)), 201));
 
 const listOptionsEndpoint = wrap(async (req, res) => send(res, await service.listOptions(listOptions(req))));
 const createOption = wrap(async (req, res) => send(res, await service.createOption(req.body, actorFromRequest(req)), 201));
 const getOption = wrap(async (req, res) => send(res, await service.getOption(req.params.id)));
 const updateOption = wrap(async (req, res) => send(res, await service.updateOption(req.params.id, req.body, actorFromRequest(req))));
+const updateOptionVisibility = wrap(async (req, res) => send(res, await service.updateOptionVisibility(req.params.id, req.body, actorFromRequest(req))));
+const updateOptionAvailability = wrap(async (req, res) => send(res, await service.updateOptionAvailability(req.params.id, req.body, actorFromRequest(req))));
 const deleteOption = wrap(async (req, res) => send(res, await service.deleteOption(req.params.id, actorFromRequest(req))));
+const reorderOptions = wrap(async (req, res) => send(res, await service.reorderOptions(req.body.items || req.body, actorFromRequest(req))));
 
 const setProductGroups = wrap(async (req, res) => send(res, await service.setProductGroups(req.params.productId, req.body.groups || req.body, actorFromRequest(req))));
 const setProductGroupOptions = wrap(async (req, res) => send(res, await service.setProductGroupOptions(req.params.productId, req.params.groupId, req.body.options || req.body, actorFromRequest(req))));
+const listProductGroupOptions = wrap(async (req, res) => send(res, await service.listProductGroupOptions(req.params.productId, req.params.groupId, listOptions(req))));
+const createProductGroupOption = wrap(async (req, res) => send(res, await service.createProductGroupOption(req.params.productId, req.params.groupId, req.body, actorFromRequest(req)), 201));
+const updateProductGroupOption = wrap(async (req, res) => send(res, await service.updateProductGroupOption(req.params.productId, req.params.groupId, req.params.optionId, req.body, actorFromRequest(req))));
+const updateProductGroupOptionVisibility = wrap(async (req, res) => send(res, await service.updateProductGroupOptionVisibility(req.params.productId, req.params.groupId, req.params.optionId, req.body, actorFromRequest(req))));
+const updateProductGroupOptionAvailability = wrap(async (req, res) => send(res, await service.updateProductGroupOptionAvailability(req.params.productId, req.params.groupId, req.params.optionId, req.body, actorFromRequest(req))));
 const publishMenu = wrap(async (req, res) => send(res, await service.publishMenu({ actor: actorFromRequest(req), notes: req.body.notes })));
 const listAuditLogs = wrap(async (req, res) => send(res, await service.listAuditLogs(listOptions(req))));
 
@@ -90,27 +117,49 @@ module.exports = {
   createCategory,
   getCategory,
   updateCategory,
+  updateCategoryVisibility,
+  updateCategoryAvailability,
   deleteCategory,
   reorderCategories,
   listProducts,
   createProduct,
   getProduct,
   updateProduct,
+  updateProductVisibility,
   deleteProduct,
   reorderProducts,
   updateProductAvailability,
+  listProductGroups,
+  createProductGroup,
+  updateProductGroup,
+  updateProductGroupSelectionRules,
+  updateProductGroupVisibility,
+  updateProductGroupAvailability,
   listOptionGroups,
   createOptionGroup,
   getOptionGroup,
   updateOptionGroup,
+  updateOptionGroupVisibility,
+  updateOptionGroupAvailability,
   deleteOptionGroup,
+  reorderOptionGroups,
+  listOptionsByGroup,
+  createOptionForGroup,
   listOptions: listOptionsEndpoint,
   createOption,
   getOption,
   updateOption,
+  updateOptionVisibility,
+  updateOptionAvailability,
   deleteOption,
+  reorderOptions,
   setProductGroups,
   setProductGroupOptions,
+  listProductGroupOptions,
+  createProductGroupOption,
+  updateProductGroupOption,
+  updateProductGroupOptionVisibility,
+  updateProductGroupOptionAvailability,
   publishMenu,
   listAuditLogs,
 };

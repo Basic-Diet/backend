@@ -324,7 +324,16 @@ Managed resources:
 - publish
 - audit logs
 
-The customer app reads only active published catalog data through `GET /api/orders/menu`.
+The customer app reads only active, visible, available, published catalog data through `GET /api/orders/menu`.
+For now unavailable entities are hidden from the customer response instead of returned disabled, because frontend disabled-state support is not part of this backend change.
+
+State fields:
+
+- `isActive=false`: deprecated/disabled; do not show in normal customer menus.
+- `isVisible=false`: hidden from customers but still manageable in dashboard.
+- `isAvailable=false`: sold out/unavailable; hidden from customers and rejected by quote/create-order.
+
+Dashboard list endpoints default to active rows, but admins can use `includeInactive=true`, `isActive`, `isVisible`, `isAvailable`, `published`, and `q` filters to find hidden, unavailable, unpublished, or inactive catalog data.
 
 ## Menu Management Endpoints
 
@@ -335,6 +344,8 @@ GET /api/dashboard/menu/categories
 POST /api/dashboard/menu/categories
 GET /api/dashboard/menu/categories/:id
 PATCH /api/dashboard/menu/categories/:id
+PATCH /api/dashboard/menu/categories/:id/visibility
+PATCH /api/dashboard/menu/categories/:id/availability
 DELETE /api/dashboard/menu/categories/:id
 PATCH /api/dashboard/menu/categories/reorder
 ```
@@ -346,6 +357,8 @@ GET /api/dashboard/menu/products
 POST /api/dashboard/menu/products
 GET /api/dashboard/menu/products/:id
 PATCH /api/dashboard/menu/products/:id
+PATCH /api/dashboard/menu/products/:id/visibility
+PATCH /api/dashboard/menu/products/:id/availability
 DELETE /api/dashboard/menu/products/:id
 PATCH /api/dashboard/menu/products/reorder
 PATCH /api/dashboard/menu/products/:productId/availability
@@ -356,8 +369,13 @@ PATCH /api/dashboard/menu/products/:productId/availability
 ```http
 GET /api/dashboard/menu/option-groups
 POST /api/dashboard/menu/option-groups
+PATCH /api/dashboard/menu/option-groups/reorder
 GET /api/dashboard/menu/option-groups/:id
 PATCH /api/dashboard/menu/option-groups/:id
+PATCH /api/dashboard/menu/option-groups/:id/visibility
+PATCH /api/dashboard/menu/option-groups/:id/availability
+GET /api/dashboard/menu/option-groups/:groupId/options
+POST /api/dashboard/menu/option-groups/:groupId/options
 DELETE /api/dashboard/menu/option-groups/:id
 ```
 
@@ -366,8 +384,11 @@ DELETE /api/dashboard/menu/option-groups/:id
 ```http
 GET /api/dashboard/menu/options
 POST /api/dashboard/menu/options
+PATCH /api/dashboard/menu/options/reorder
 GET /api/dashboard/menu/options/:id
 PATCH /api/dashboard/menu/options/:id
+PATCH /api/dashboard/menu/options/:id/visibility
+PATCH /api/dashboard/menu/options/:id/availability
 DELETE /api/dashboard/menu/options/:id
 ```
 
@@ -378,9 +399,24 @@ DELETE /api/dashboard/menu/options/:id
 Actual relation endpoints in code:
 
 ```http
+GET /api/dashboard/menu/products/:productId/option-groups
+POST /api/dashboard/menu/products/:productId/option-groups
+PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId
+PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/selection-rules
+PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/visibility
+PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/availability
+GET /api/dashboard/menu/products/:productId/option-groups/:groupId/options
+POST /api/dashboard/menu/products/:productId/option-groups/:groupId/options
+PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/options/:optionId
+PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/options/:optionId/visibility
+PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/options/:optionId/availability
 PUT /api/dashboard/menu/products/:productId/groups
 PUT /api/dashboard/menu/products/:productId/groups/:groupId/options
 ```
+
+Use the focused `PATCH` endpoints for normal dashboard edits. Keep the `PUT` endpoints for bulk replace/backward compatibility.
+
+`ProductOptionGroup` is product-specific. This is where Builder selection rules belong, not only on the global `MenuOptionGroup`. The same global `proteins` group can be linked to `basic_salad` and `basic_meal` with different `minSelections`, `maxSelections`, `isRequired`, `sortOrder`, `isVisible`, and `isAvailable`.
 
 `PUT /products/:productId/groups` replaces all `ProductOptionGroup` relations for a product.
 
@@ -395,11 +431,15 @@ Request:
       "maxSelections": 1,
       "isRequired": false,
       "isActive": true,
+      "isVisible": true,
+      "isAvailable": true,
       "sortOrder": 10
     }
   ]
 }
 ```
+
+`ProductGroupOption` is product-specific. A global option can stay available everywhere while one product/group relation is sold out. Customer menu includes an option only when both the global `MenuOption` and product-specific `ProductGroupOption` are active, visible, available, and the global option is published.
 
 `PUT /products/:productId/groups/:groupId/options` replaces allowed `ProductGroupOption` rows for that product/group.
 
@@ -413,13 +453,22 @@ Request:
       "extraPriceHalala": 1600,
       "extraWeightPriceHalala": 1000,
       "isActive": true,
+      "isVisible": true,
+      "isAvailable": true,
       "sortOrder": 10
     }
   ]
 }
 ```
 
-Note: `extraWeightUnitGrams` belongs to `MenuOption`; product-option relation overrides only `extraPriceHalala`, `extraWeightPriceHalala`, `isActive`, and `sortOrder`.
+Note: `extraWeightUnitGrams` belongs to `MenuOption`; product-option relation overrides only `extraPriceHalala`, `extraWeightPriceHalala`, `isActive`, `isVisible`, `isAvailable`, and `sortOrder`.
+
+Selection rule validation:
+
+- `minSelections` must be `>= 0`.
+- `maxSelections` must be `null` or `>= minSelections`.
+- If `isRequired=true`, `minSelections` must be `> 0`.
+- Prefer numeric `maxSelections` for mobile compatibility.
 
 ### Publish and Audit
 
@@ -444,6 +493,8 @@ Fields:
 - `imageUrl`
 - `sortOrder`
 - `isActive`
+- `isVisible`
+- `isAvailable`
 - `availability.branchIds`
 - `publishedAt`
 
@@ -469,6 +520,8 @@ Fields:
 - `branchAvailability`
 - `sortOrder`
 - `isActive`
+- `isVisible`
+- `isAvailable`
 - `versionId`
 - `publishedAt`
 
@@ -505,6 +558,8 @@ Fields:
 - `description.ar`, `description.en`
 - `sortOrder`
 - `isActive`
+- `isVisible`
+- `isAvailable`
 - `publishedAt`
 
 Launch Builder group keys:
@@ -531,6 +586,8 @@ Fields:
 - `currency`
 - `sortOrder`
 - `isActive`
+- `isVisible`
+- `isAvailable`
 - `publishedAt`
 
 ### ProductOptionGroup
@@ -545,6 +602,8 @@ Fields:
 - `maxSelections`
 - `isRequired`
 - `isActive`
+- `isVisible`
+- `isAvailable`
 - `sortOrder`
 
 ### ProductGroupOption
@@ -560,6 +619,8 @@ Fields:
   - `extraPriceHalala`
   - `extraWeightPriceHalala`
   - `isActive`
+  - `isVisible`
+  - `isAvailable`
   - `sortOrder`
 
 If a relation override is `null`, customer pricing falls back to the base `MenuOption` value.
@@ -574,9 +635,57 @@ isActive = false
 
 Do not hard delete menu entities. Old orders store snapshots (`productSnapshot`, `selectedOptions`, `pricingSnapshot`, `menuVersionId`) and must remain readable even after products/options are hidden.
 
+## Hide / Show and Sold Out Operations
+
+Use visibility when admins want to hide something without marking it sold out:
+
+```http
+PATCH /api/dashboard/menu/products/:id/visibility
+PATCH /api/dashboard/menu/options/:id/visibility
+```
+
+Body:
+
+```json
+{ "isVisible": false }
+```
+
+Use availability when an item is sold out:
+
+```http
+PATCH /api/dashboard/menu/products/:id/availability
+PATCH /api/dashboard/menu/options/:id/availability
+PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/options/:optionId/availability
+```
+
+Body:
+
+```json
+{ "isAvailable": false }
+```
+
+Global option unavailable means unavailable everywhere. Product-group-option unavailable means unavailable only for that product/group relation.
+
+## Quote and Create-Order Protection
+
+Do not rely only on `GET /api/orders/menu` filtering. Quote and create-order re-read the current database catalog and reject stale customer payloads.
+
+Stable customer/catalog error codes:
+
+| Code | Meaning |
+| --- | --- |
+| `PRODUCT_NOT_AVAILABLE` | Product or category is inactive, hidden, unavailable, unpublished, or branch-unavailable. |
+| `OPTION_GROUP_NOT_AVAILABLE` | Selected product/group relation or global group is inactive, hidden, unavailable, or unpublished. |
+| `OPTION_NOT_AVAILABLE` | Selected option relation or global option is inactive, hidden, unavailable, or unpublished. |
+| `OPTION_NOT_ALLOWED` | The selected group/option is not linked to that product. |
+| `MIN_SELECTIONS_NOT_MET` | Current relation-specific `minSelections` is not satisfied. |
+| `MAX_SELECTIONS_EXCEEDED` | Current relation-specific `maxSelections` is exceeded. |
+
+Client-sent prices are ignored. Pricing uses current `MenuProduct`, `MenuOption`, and `ProductGroupOption` values only.
+
 ## Publish Rules
 
-- Customer menu reads active published catalog entities.
+- Customer menu reads active, visible, available, published catalog entities.
 - Seed creates/publishes the launch menu.
 - Dashboard changes do not become customer-visible until publish, unless an entity was already published and updated in place.
 - Current draft isolation is lightweight: edits are made on the same model rows and publish stamps active rows / creates a `MenuVersion` snapshot. It is not a full separate draft collection.
@@ -593,6 +702,11 @@ Actions written by `menuCatalogService`:
 
 - `create`
 - `update`
+- `visibility_changed`
+- `availability_changed`
+- `selection_rules_changed`
+- `price_changed`
+- `relation_updated`
 - `soft_delete`
 - `reorder`
 - `replace` for relation replacement
@@ -612,6 +726,20 @@ Use this on local or staging.
 
 The launch seed keeps `fruit_salad` and `greek_yogurt` as `pricingModel = "fixed"` configurable products. `greek_yogurt` uses `nuts` with `minSelections = 0` and `maxSelections = 3`.
 
+Seed modes:
+
+```bash
+MENU_SEED_MODE=initial npm run seed:one-time-menu
+MENU_SEED_MODE=force npm run seed:one-time-menu
+npm run seed:one-time-menu
+```
+
+- `initial`: seed only when no catalog data exists; skip if dashboard-managed catalog rows already exist.
+- `force`: intentionally reseed and overwrite seed-managed launch catalog values.
+- default local/dev/test: idempotent development reseed for local and test data.
+
+Do not silently run reseed over production dashboard-managed catalog data. Use `initial` for first-time setup and `force` only with explicit operational approval.
+
 Production guard:
 
 ```bash
@@ -625,6 +753,14 @@ MENU_SEED_ALLOW_PRODUCTION=true
 ```
 
 Only use the production override with clear operational approval.
+
+Recommended dashboard UX:
+
+- Put category/product/group/option `isVisible` and `isAvailable` controls near publish status.
+- For sold-out actions, prefer `isAvailable=false` over `isActive=false` so admins can restore quickly.
+- Edit Builder rules from the product detail page, because rules are product/group relation-specific.
+- Show relation-level option overrides beside global option state so admins can tell whether an option is sold out everywhere or only for one product.
+- Display the derived product behavior: Builder opens when `requiresBuilder=true`; direct add is allowed when `canAddDirectly=true`.
 
 ## Testing
 
@@ -649,9 +785,11 @@ npm test
 8. Verify payment and confirm the order moves to `confirmed`.
 9. Update a product price from dashboard.
 10. Verify old order `productSnapshot`, `selectedOptions`, `pricingSnapshot`, and `menuVersionId` remain unchanged.
-11. Hide a product with dashboard delete or `isActive=false`.
-12. Publish if needed and verify hidden product disappears from `GET /api/orders/menu`.
-13. Restore product and publish again if needed.
+11. Hide a product with `isVisible=false`.
+12. Mark a product or option sold out with `isAvailable=false`.
+13. Verify hidden/sold-out data disappears from `GET /api/orders/menu`.
+14. Quote stale hidden/sold-out product/option IDs and verify stable availability errors.
+15. Restore product/option and publish again if needed.
 
 ## Known Risks / Tech Debt
 
@@ -673,3 +811,5 @@ npm test
 - Do not hard delete menu entities.
 - Do not calculate totals in dashboard.
 - Do not add VAT again.
+- Do not edit selection rules on the global option group when the rule is product-specific.
+- Do not run production force seed without approval.

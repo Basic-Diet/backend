@@ -8,12 +8,14 @@ const ProductOptionGroupSchema = new mongoose.Schema(
     maxSelections: { type: Number, min: 0, default: null },
     isRequired: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true, index: true },
+    isVisible: { type: Boolean, default: true, index: true },
+    isAvailable: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
 
 ProductOptionGroupSchema.index({ productId: 1, groupId: 1 }, { unique: true });
-ProductOptionGroupSchema.index({ productId: 1, isActive: 1, sortOrder: 1 });
+ProductOptionGroupSchema.index({ productId: 1, isActive: 1, isVisible: 1, isAvailable: 1, sortOrder: 1 });
 
 module.exports = mongoose.model("ProductOptionGroup", ProductOptionGroupSchema);

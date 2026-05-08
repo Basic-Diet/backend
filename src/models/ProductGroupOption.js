@@ -14,12 +14,14 @@ const ProductGroupOptionSchema = new mongoose.Schema(
     extraPriceHalala: { type: Number, min: 0, default: null, validate: integerOrNull },
     extraWeightPriceHalala: { type: Number, min: 0, default: null, validate: integerOrNull },
     isActive: { type: Boolean, default: true, index: true },
+    isVisible: { type: Boolean, default: true, index: true },
+    isAvailable: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
 
 ProductGroupOptionSchema.index({ productId: 1, groupId: 1, optionId: 1 }, { unique: true });
-ProductGroupOptionSchema.index({ productId: 1, groupId: 1, isActive: 1, sortOrder: 1 });
+ProductGroupOptionSchema.index({ productId: 1, groupId: 1, isActive: 1, isVisible: 1, isAvailable: 1, sortOrder: 1 });
 
 module.exports = mongoose.model("ProductGroupOption", ProductGroupOptionSchema);

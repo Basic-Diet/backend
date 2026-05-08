@@ -126,37 +126,58 @@ function buildPricingSnapshot({ subtotalHalala, vatPercentage }) {
 function assertBranchAvailable(product, branchId) {
   const branches = Array.isArray(product.branchAvailability) ? product.branchAvailability : [];
   if (branchId && branches.length && !branches.includes(String(branchId))) {
-    throw createMenuPricingError("ITEM_UNAVAILABLE", "Product is not available for this branch", 409);
+    throw createMenuPricingError("PRODUCT_NOT_AVAILABLE", "Product is not available for this branch", 409);
   }
+}
+
+function isCatalogAvailable(doc) {
+  return Boolean(doc)
+    && doc.isActive !== false
+    && doc.isVisible !== false
+    && doc.isAvailable !== false
+    && Boolean(doc.publishedAt);
+}
+
+function isRelationAvailable(doc) {
+  return Boolean(doc)
+    && doc.isActive !== false
+    && doc.isVisible !== false
+    && doc.isAvailable !== false;
 }
 
 async function loadProductContext(productId) {
   const product = await MenuProduct.findById(productId).lean();
   if (!product) throw createMenuPricingError("ITEM_NOT_FOUND", "Product was not found", 404);
-  if (product.isActive === false || !product.publishedAt) {
-    throw createMenuPricingError("ITEM_UNAVAILABLE", "Product is unavailable", 409);
+  if (!isCatalogAvailable(product)) {
+    throw createMenuPricingError("PRODUCT_NOT_AVAILABLE", "Product is unavailable", 409);
   }
   const category = await MenuCategory.findById(product.categoryId).lean();
-  if (!category || category.isActive === false || !category.publishedAt) {
-    throw createMenuPricingError("ITEM_UNAVAILABLE", "Product category is unavailable", 409);
+  if (!isCatalogAvailable(category)) {
+    throw createMenuPricingError("PRODUCT_NOT_AVAILABLE", "Product category is unavailable", 409);
   }
-  const [groupRelations, optionRelations] = await Promise.all([
-    ProductOptionGroup.find({ productId: product._id, isActive: true }).sort({ sortOrder: 1 }).lean(),
-    ProductGroupOption.find({ productId: product._id, isActive: true }).sort({ sortOrder: 1 }).lean(),
+  const [allGroupRelations, allOptionRelations] = await Promise.all([
+    ProductOptionGroup.find({ productId: product._id }).sort({ sortOrder: 1 }).lean(),
+    ProductGroupOption.find({ productId: product._id }).sort({ sortOrder: 1 }).lean(),
   ]);
-  const groupIds = groupRelations.map((relation) => relation.groupId);
-  const optionIds = optionRelations.map((relation) => relation.optionId);
+  const groupIds = allGroupRelations.map((relation) => relation.groupId);
+  const optionIds = allOptionRelations.map((relation) => relation.optionId);
   const [groups, options] = await Promise.all([
-    MenuOptionGroup.find({ _id: { $in: groupIds }, isActive: true, publishedAt: { $ne: null } }).lean(),
-    MenuOption.find({ _id: { $in: optionIds }, isActive: true, publishedAt: { $ne: null } }).lean(),
+    MenuOptionGroup.find({ _id: { $in: groupIds } }).lean(),
+    MenuOption.find({ _id: { $in: optionIds } }).lean(),
   ]);
+  const groupsById = new Map(groups.map((group) => [String(group._id), group]));
+  const optionsById = new Map(options.map((option) => [String(option._id), option]));
+  const availableGroupRelations = allGroupRelations.filter((relation) => (
+    isRelationAvailable(relation) && isCatalogAvailable(groupsById.get(String(relation.groupId)))
+  ));
   return {
     product,
     category,
-    groupRelations,
-    optionRelations,
-    groupsById: new Map(groups.map((group) => [String(group._id), group])),
-    optionsById: new Map(options.map((option) => [String(option._id), option])),
+    groupRelations: availableGroupRelations,
+    allGroupRelations,
+    allOptionRelations,
+    groupsById,
+    optionsById,
   };
 }
 
@@ -164,13 +185,15 @@ function validateAndPriceOptions({ selections, context, lang }) {
   const {
     product,
     groupRelations,
-    optionRelations,
+    allGroupRelations,
+    allOptionRelations,
     groupsById,
     optionsById,
   } = context;
   const groupRelationsById = new Map(groupRelations.map((relation) => [String(relation.groupId), relation]));
+  const allGroupRelationsById = new Map(allGroupRelations.map((relation) => [String(relation.groupId), relation]));
   const optionRelationsByGroupOption = new Map(
-    optionRelations.map((relation) => [`${relation.groupId}:${relation.optionId}`, relation])
+    allOptionRelations.map((relation) => [`${relation.groupId}:${relation.optionId}`, relation])
   );
   const selectionsByGroup = new Map();
   selections.forEach((selection) => {
@@ -204,6 +227,10 @@ function validateAndPriceOptions({ selections, context, lang }) {
   for (const selection of selections) {
     const groupRelation = groupRelationsById.get(selection.groupId);
     if (!groupRelation) {
+      const staleRelation = allGroupRelationsById.get(selection.groupId);
+      if (staleRelation) {
+        throw createMenuPricingError("OPTION_GROUP_NOT_AVAILABLE", "Option group is unavailable", 409);
+      }
       throw createMenuPricingError("OPTION_NOT_ALLOWED", "Option group is not allowed for this product");
     }
     const optionRelation = optionRelationsByGroupOption.get(`${selection.groupId}:${selection.optionId}`);
@@ -212,7 +239,13 @@ function validateAndPriceOptions({ selections, context, lang }) {
     }
     const group = groupsById.get(selection.groupId);
     const option = optionsById.get(selection.optionId);
-    if (!group || !option || String(option.groupId) !== selection.groupId) {
+    if (!isCatalogAvailable(group)) {
+      throw createMenuPricingError("OPTION_GROUP_NOT_AVAILABLE", "Option group is unavailable", 409);
+    }
+    if (!isRelationAvailable(optionRelation) || !isCatalogAvailable(option)) {
+      throw createMenuPricingError("OPTION_NOT_AVAILABLE", "Option is unavailable", 409);
+    }
+    if (!option || String(option.groupId) !== selection.groupId) {
       throw createMenuPricingError("OPTION_NOT_ALLOWED", "Option does not belong to the selected group");
     }
     const extraPriceHalala = optionRelation.extraPriceHalala === null || optionRelation.extraPriceHalala === undefined

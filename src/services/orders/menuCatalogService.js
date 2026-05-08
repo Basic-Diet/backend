@@ -134,6 +134,42 @@ function serializeDoc(doc) {
   return { id: String(obj._id), ...obj };
 }
 
+function truthyByDefault(value) {
+  return value !== false;
+}
+
+function customerCatalogQuery(extra = {}) {
+  return {
+    isActive: true,
+    isVisible: { $ne: false },
+    isAvailable: { $ne: false },
+    publishedAt: { $ne: null },
+    ...extra,
+  };
+}
+
+function customerRelationQuery(extra = {}) {
+  return {
+    isActive: true,
+    isVisible: { $ne: false },
+    isAvailable: { $ne: false },
+    ...extra,
+  };
+}
+
+function assertCustomerAvailable(doc, code, message, status = 409) {
+  if (!doc || doc.isActive === false || doc.isVisible === false || doc.isAvailable === false || !doc.publishedAt) {
+    const err = new MenuValidationError(message, code, status);
+    throw err;
+  }
+}
+
+function assertRelationAvailable(doc, code, message, status = 409) {
+  if (!doc || doc.isActive === false || doc.isVisible === false || doc.isAvailable === false) {
+    throw new MenuValidationError(message, code, status);
+  }
+}
+
 function serializePublicCategory(category, lang, products) {
   return {
     id: String(category._id),
@@ -219,13 +255,13 @@ async function getSettingValue(key, fallback) {
 }
 
 async function hasPublishedMenuCatalog() {
-  const count = await MenuProduct.countDocuments({ isActive: true, publishedAt: { $ne: null } });
+  const count = await MenuProduct.countDocuments(customerCatalogQuery());
   return count > 0;
 }
 
 async function getPublishedMenu({ lang = "en", branchId = "" } = {}) {
-  const productQuery = { isActive: true, publishedAt: { $ne: null } };
-  const categoryQuery = { isActive: true, publishedAt: { $ne: null } };
+  const productQuery = customerCatalogQuery();
+  const categoryQuery = customerCatalogQuery();
   if (branchId) {
     productQuery.$or = [{ branchAvailability: { $size: 0 } }, { branchAvailability: branchId }];
     categoryQuery.$or = [{ "availability.branchIds": { $size: 0 } }, { "availability.branchIds": branchId }];
@@ -234,10 +270,10 @@ async function getPublishedMenu({ lang = "en", branchId = "" } = {}) {
   const [categories, products, groupRelations, optionRelations, groups, options, vatPercentageRaw] = await Promise.all([
     MenuCategory.find(categoryQuery).sort({ sortOrder: 1, createdAt: -1 }).lean(),
     MenuProduct.find(productQuery).sort({ sortOrder: 1, createdAt: -1 }).lean(),
-    ProductOptionGroup.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
-    ProductGroupOption.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
-    MenuOptionGroup.find({ isActive: true, publishedAt: { $ne: null } }).lean(),
-    MenuOption.find({ isActive: true, publishedAt: { $ne: null } }).lean(),
+    ProductOptionGroup.find(customerRelationQuery()).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    ProductGroupOption.find(customerRelationQuery()).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    MenuOptionGroup.find(customerCatalogQuery()).lean(),
+    MenuOption.find(customerCatalogQuery()).lean(),
     getSettingValue("vat_percentage", 0),
   ]);
 
@@ -319,12 +355,18 @@ async function writeMenuAudit({ entityType, entityId, action, before = null, aft
   });
 }
 
-function buildListQuery({ includeInactive = false, isActive, q, published } = {}) {
+function buildListQuery({ includeInactive = false, isActive, isVisible, isAvailable, q, published } = {}) {
   const query = {};
   if (isActive !== undefined && isActive !== null && String(isActive).trim() !== "") {
     query.isActive = normalizeBoolean(isActive, "isActive");
   } else if (!includeInactive) {
     query.isActive = true;
+  }
+  if (isVisible !== undefined && isVisible !== null && String(isVisible).trim() !== "") {
+    query.isVisible = normalizeBoolean(isVisible, "isVisible");
+  }
+  if (isAvailable !== undefined && isAvailable !== null && String(isAvailable).trim() !== "") {
+    query.isAvailable = normalizeBoolean(isAvailable, "isAvailable");
   }
   if (published !== undefined && published !== null && String(published).trim() !== "") {
     const showPublished = normalizeBoolean(published, "published");
@@ -360,6 +402,8 @@ function normalizeCategoryPayload(body = {}, existing = null) {
     description: optionalLocalizedString(body.description, "description") || (existing ? existing.description : { ar: "", en: "" }),
     imageUrl: body.imageUrl === undefined && existing ? existing.imageUrl : String(body.imageUrl || "").trim(),
     isActive: normalizeBoolean(body.isActive, "isActive", existing ? existing.isActive : true),
+    isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
+    isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
     availability: {
       branchIds: (body.branchIds === undefined && (!body.availability || body.availability.branchIds === undefined) && existing)
@@ -398,6 +442,8 @@ function normalizeProductPayload(body = {}, existing = null) {
     weightStepGrams: normalizeNonNegativeInteger(body.weightStepGrams, "weightStepGrams", existing ? existing.weightStepGrams : 50) || 50,
     currency: SYSTEM_CURRENCY,
     isActive: normalizeBoolean(body.isActive, "isActive", existing ? existing.isActive : true),
+    isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
+    isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
     branchAvailability: (body.branchAvailability === undefined && body.branchIds === undefined && existing)
       ? (existing.branchAvailability || [])
@@ -412,6 +458,8 @@ function normalizeGroupPayload(body = {}, existing = null) {
     name: body.name === undefined && existing ? existing.name : localizedString(body.name, "name", { required: true }),
     description: optionalLocalizedString(body.description, "description") || (existing ? existing.description : { ar: "", en: "" }),
     isActive: normalizeBoolean(body.isActive, "isActive", existing ? existing.isActive : true),
+    isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
+    isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
   };
 }
@@ -429,8 +477,63 @@ function normalizeOptionPayload(body = {}, existing = null) {
     extraWeightPriceHalala: normalizeNonNegativeInteger(body.extraWeightPriceHalala, "extraWeightPriceHalala", existing ? existing.extraWeightPriceHalala : 0),
     currency: SYSTEM_CURRENCY,
     isActive: normalizeBoolean(body.isActive, "isActive", existing ? existing.isActive : true),
+    isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
+    isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
   };
+}
+
+function normalizeSelectionRulePayload(body = {}, existing = null, prefix = "") {
+  const min = normalizeNonNegativeInteger(body.minSelections, `${prefix}minSelections`, existing ? existing.minSelections : 0);
+  const max = normalizeNullableNonNegativeInteger(body.maxSelections, `${prefix}maxSelections`, existing ? existing.maxSelections : null);
+  if (max !== null && max < min) {
+    throw new MenuValidationError(`${prefix}maxSelections must be null or >= minSelections`, "INVALID_SELECTION_RULES");
+  }
+  const requiredFallback = existing ? Boolean(existing.isRequired) : min > 0;
+  const isRequired = normalizeBoolean(body.isRequired, `${prefix}isRequired`, requiredFallback);
+  if (isRequired && min <= 0) {
+    throw new MenuValidationError(`${prefix}minSelections must be > 0 when isRequired=true`, "INVALID_SELECTION_RULES");
+  }
+  return { minSelections: min, maxSelections: max, isRequired };
+}
+
+function normalizeProductGroupRelationPayload(body = {}, existing = null) {
+  if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
+  return {
+    productId: body.productId === undefined && existing ? existing.productId : assertObjectId(body.productId, "productId"),
+    groupId: body.groupId === undefined && existing ? existing.groupId : assertObjectId(body.groupId || body.id, "groupId"),
+    ...normalizeSelectionRulePayload(body, existing),
+    isActive: normalizeBoolean(body.isActive, "isActive", existing ? existing.isActive : true),
+    isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
+    isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
+    sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
+  };
+}
+
+function normalizeProductGroupOptionRelationPayload(body = {}, existing = null) {
+  if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
+  return {
+    productId: body.productId === undefined && existing ? existing.productId : assertObjectId(body.productId, "productId"),
+    groupId: body.groupId === undefined && existing ? existing.groupId : assertObjectId(body.groupId, "groupId"),
+    optionId: body.optionId === undefined && existing ? existing.optionId : assertObjectId(body.optionId || body.id, "optionId"),
+    extraPriceHalala: normalizeNullableNonNegativeInteger(body.extraPriceHalala, "extraPriceHalala", existing ? existing.extraPriceHalala : null),
+    extraWeightPriceHalala: normalizeNullableNonNegativeInteger(body.extraWeightPriceHalala, "extraWeightPriceHalala", existing ? existing.extraWeightPriceHalala : null),
+    isActive: normalizeBoolean(body.isActive, "isActive", existing ? existing.isActive : true),
+    isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
+    isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
+    sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
+  };
+}
+
+function changeAction(payload, fallback = "update") {
+  if (Object.prototype.hasOwnProperty.call(payload, "isVisible")) return "visibility_changed";
+  if (Object.prototype.hasOwnProperty.call(payload, "isAvailable")) return "availability_changed";
+  if (
+    Object.prototype.hasOwnProperty.call(payload, "priceHalala")
+    || Object.prototype.hasOwnProperty.call(payload, "extraPriceHalala")
+    || Object.prototype.hasOwnProperty.call(payload, "extraWeightPriceHalala")
+  ) return "price_changed";
+  return fallback;
 }
 
 async function createEntity(Model, payload, { entityType, actor }) {
@@ -439,14 +542,14 @@ async function createEntity(Model, payload, { entityType, actor }) {
   return serializeDoc(row);
 }
 
-async function updateEntity(Model, id, payload, { entityType, actor }) {
+async function updateEntity(Model, id, payload, { entityType, actor, action = "update", meta = {} }) {
   assertObjectId(id);
   const row = await Model.findById(id);
   if (!row) throw new MenuNotFoundError();
   const before = row.toObject();
   row.set(payload);
   await row.save();
-  await writeMenuAudit({ entityType, entityId: row._id, action: "update", before, after: row.toObject(), actor });
+  await writeMenuAudit({ entityType, entityId: row._id, action, before, after: row.toObject(), actor, meta });
   return serializeDoc(row);
 }
 
@@ -491,8 +594,11 @@ async function setProductGroups(productId, groups = [], actor = {}) {
     maxSelections: normalizeNullableNonNegativeInteger(item.maxSelections, "groups[].maxSelections", null),
     isRequired: normalizeBoolean(item.isRequired, "groups[].isRequired", Number(item.minSelections || 0) > 0),
     isActive: normalizeBoolean(item.isActive, "groups[].isActive", true),
+    isVisible: normalizeBoolean(item.isVisible, "groups[].isVisible", true),
+    isAvailable: normalizeBoolean(item.isAvailable, "groups[].isAvailable", true),
     sortOrder: normalizeNonNegativeInteger(item.sortOrder, "groups[].sortOrder", 0),
   }));
+  normalized.forEach((item) => normalizeSelectionRulePayload(item, item, "groups[]."));
   const groupIds = normalized.map((item) => item.groupId);
   const found = await MenuOptionGroup.countDocuments({ _id: { $in: groupIds } });
   if (found !== groupIds.length) throw new MenuValidationError("One or more groups do not exist");
@@ -515,6 +621,8 @@ async function setProductGroupOptions(productId, groupId, options = [], actor = 
     extraPriceHalala: normalizeNullableNonNegativeInteger(item.extraPriceHalala, "options[].extraPriceHalala", null),
     extraWeightPriceHalala: normalizeNullableNonNegativeInteger(item.extraWeightPriceHalala, "options[].extraWeightPriceHalala", null),
     isActive: normalizeBoolean(item.isActive, "options[].isActive", true),
+    isVisible: normalizeBoolean(item.isVisible, "options[].isVisible", true),
+    isAvailable: normalizeBoolean(item.isAvailable, "options[].isAvailable", true),
     sortOrder: normalizeNonNegativeInteger(item.sortOrder, "options[].sortOrder", 0),
   }));
   const optionIds = normalized.map((item) => item.optionId);
@@ -524,6 +632,103 @@ async function setProductGroupOptions(productId, groupId, options = [], actor = 
   await ProductGroupOption.insertMany(normalized);
   await writeMenuAudit({ entityType: "menu_product_group_option", entityId: productId, action: "replace", after: normalized, actor, meta: { groupId } });
   return normalized;
+}
+
+async function listProductGroups(productId, options = {}) {
+  assertObjectId(productId, "productId");
+  const rows = await ProductOptionGroup.find({ productId, ...buildListQuery(options) })
+    .sort({ sortOrder: 1, createdAt: -1 })
+    .lean();
+  return rows.map(serializeDoc);
+}
+
+async function createProductGroup(productId, body, actor = {}) {
+  assertObjectId(productId, "productId");
+  const payload = normalizeProductGroupRelationPayload({ ...body, productId });
+  const [product, group] = await Promise.all([
+    MenuProduct.findById(productId).lean(),
+    MenuOptionGroup.findById(payload.groupId).lean(),
+  ]);
+  if (!product) throw new MenuNotFoundError("Product not found");
+  if (!group) throw new MenuNotFoundError("Option group not found");
+  return createEntity(ProductOptionGroup, payload, { entityType: "menu_product_group", actor });
+}
+
+async function updateProductGroup(productId, groupId, body, actor = {}, action = null) {
+  assertObjectId(productId, "productId");
+  assertObjectId(groupId, "groupId");
+  const existing = await ProductOptionGroup.findOne({ productId, groupId }).lean();
+  if (!existing) throw new MenuNotFoundError("Product group relation not found");
+  const payload = normalizeProductGroupRelationPayload({ ...body, productId, groupId }, existing);
+  return updateEntity(ProductOptionGroup, existing._id, payload, {
+    entityType: "menu_product_group",
+    actor,
+    action: action || changeAction(payload, "relation_updated"),
+    meta: { productId, groupId },
+  });
+}
+
+async function updateProductGroupSelectionRules(productId, groupId, body, actor = {}) {
+  assertObjectId(productId, "productId");
+  assertObjectId(groupId, "groupId");
+  const existing = await ProductOptionGroup.findOne({ productId, groupId }).lean();
+  if (!existing) throw new MenuNotFoundError("Product group relation not found");
+  const payload = normalizeSelectionRulePayload(body, existing);
+  return updateEntity(ProductOptionGroup, existing._id, payload, {
+    entityType: "menu_product_group",
+    actor,
+    action: "selection_rules_changed",
+    meta: { productId, groupId },
+  });
+}
+
+async function listProductGroupOptions(productId, groupId, options = {}) {
+  assertObjectId(productId, "productId");
+  assertObjectId(groupId, "groupId");
+  const rows = await ProductGroupOption.find({ productId, groupId, ...buildListQuery(options) })
+    .sort({ sortOrder: 1, createdAt: -1 })
+    .lean();
+  return rows.map(serializeDoc);
+}
+
+async function createProductGroupOption(productId, groupId, body, actor = {}) {
+  assertObjectId(productId, "productId");
+  assertObjectId(groupId, "groupId");
+  const relation = await ProductOptionGroup.findOne({ productId, groupId }).lean();
+  if (!relation) throw new MenuValidationError("Product group relation does not exist", "RELATION_NOT_FOUND", 404);
+  const payload = normalizeProductGroupOptionRelationPayload({ ...body, productId, groupId });
+  const option = await MenuOption.findOne({ _id: payload.optionId, groupId }).lean();
+  if (!option) throw new MenuValidationError("Option does not belong to this group", "OPTION_NOT_ALLOWED", 400);
+  return createEntity(ProductGroupOption, payload, { entityType: "menu_product_group_option", actor });
+}
+
+async function updateProductGroupOption(productId, groupId, optionId, body, actor = {}, action = null) {
+  assertObjectId(productId, "productId");
+  assertObjectId(groupId, "groupId");
+  assertObjectId(optionId, "optionId");
+  const existing = await ProductGroupOption.findOne({ productId, groupId, optionId }).lean();
+  if (!existing) throw new MenuNotFoundError("Product group option relation not found");
+  const payload = normalizeProductGroupOptionRelationPayload({ ...body, productId, groupId, optionId }, existing);
+  const option = await MenuOption.findOne({ _id: payload.optionId, groupId }).lean();
+  if (!option) throw new MenuValidationError("Option does not belong to this group", "OPTION_NOT_ALLOWED", 400);
+  return updateEntity(ProductGroupOption, existing._id, payload, {
+    entityType: "menu_product_group_option",
+    actor,
+    action: action || changeAction(payload, "relation_updated"),
+    meta: { productId, groupId, optionId },
+  });
+}
+
+async function updateEntityField(Model, id, fieldName, value, { entityType, actor, action }) {
+  assertObjectId(id);
+  if (!["isVisible", "isAvailable"].includes(fieldName)) {
+    throw new MenuValidationError("Unsupported field update");
+  }
+  const existing = await Model.findById(id).lean();
+  if (!existing) throw new MenuNotFoundError();
+  return updateEntity(Model, id, {
+    [fieldName]: normalizeBoolean(value, fieldName, truthyByDefault(existing[fieldName])),
+  }, { entityType, actor, action });
 }
 
 async function publishMenu({ actor = {}, notes = "" } = {}) {
@@ -574,7 +779,8 @@ module.exports = {
   updateCategory: async (id, body, actor) => {
     const existing = await MenuCategory.findById(assertObjectId(id)).lean();
     if (!existing) throw new MenuNotFoundError();
-    return updateEntity(MenuCategory, id, normalizeCategoryPayload(body, existing), { entityType: "menu_category", actor });
+    const payload = normalizeCategoryPayload(body, existing);
+    return updateEntity(MenuCategory, id, payload, { entityType: "menu_category", actor, action: changeAction(payload) });
   },
   updateProduct: async (id, body, actor) => {
     const existing = await MenuProduct.findById(assertObjectId(id)).lean();
@@ -582,24 +788,47 @@ module.exports = {
     const payload = normalizeProductPayload(body, existing);
     const category = await MenuCategory.findOne({ _id: payload.categoryId, isActive: true }).lean();
     if (!category) throw new MenuValidationError("categoryId does not reference an active category", "CATEGORY_NOT_FOUND", 404);
-    return updateEntity(MenuProduct, id, payload, { entityType: "menu_product", actor });
+    return updateEntity(MenuProduct, id, payload, { entityType: "menu_product", actor, action: changeAction(payload) });
   },
   updateOptionGroup: async (id, body, actor) => {
     const existing = await MenuOptionGroup.findById(assertObjectId(id)).lean();
     if (!existing) throw new MenuNotFoundError();
-    return updateEntity(MenuOptionGroup, id, normalizeGroupPayload(body, existing), { entityType: "menu_option_group", actor });
+    const payload = normalizeGroupPayload(body, existing);
+    return updateEntity(MenuOptionGroup, id, payload, { entityType: "menu_option_group", actor, action: changeAction(payload) });
   },
   updateOption: async (id, body, actor) => {
     const existing = await MenuOption.findById(assertObjectId(id)).lean();
     if (!existing) throw new MenuNotFoundError();
-    return updateEntity(MenuOption, id, normalizeOptionPayload(body, existing), { entityType: "menu_option", actor });
+    const payload = normalizeOptionPayload(body, existing);
+    return updateEntity(MenuOption, id, payload, { entityType: "menu_option", actor, action: changeAction(payload) });
   },
+  updateCategoryVisibility: (id, body, actor) => updateEntityField(MenuCategory, id, "isVisible", body.isVisible, { entityType: "menu_category", actor, action: "visibility_changed" }),
+  updateCategoryAvailability: (id, body, actor) => updateEntityField(MenuCategory, id, "isAvailable", body.isAvailable, { entityType: "menu_category", actor, action: "availability_changed" }),
+  updateProductVisibility: (id, body, actor) => updateEntityField(MenuProduct, id, "isVisible", body.isVisible, { entityType: "menu_product", actor, action: "visibility_changed" }),
+  updateProductAvailabilityState: (id, body, actor) => updateEntityField(MenuProduct, id, "isAvailable", body.isAvailable, { entityType: "menu_product", actor, action: "availability_changed" }),
+  updateOptionGroupVisibility: (id, body, actor) => updateEntityField(MenuOptionGroup, id, "isVisible", body.isVisible, { entityType: "menu_option_group", actor, action: "visibility_changed" }),
+  updateOptionGroupAvailability: (id, body, actor) => updateEntityField(MenuOptionGroup, id, "isAvailable", body.isAvailable, { entityType: "menu_option_group", actor, action: "availability_changed" }),
+  updateOptionVisibility: (id, body, actor) => updateEntityField(MenuOption, id, "isVisible", body.isVisible, { entityType: "menu_option", actor, action: "visibility_changed" }),
+  updateOptionAvailability: (id, body, actor) => updateEntityField(MenuOption, id, "isAvailable", body.isAvailable, { entityType: "menu_option", actor, action: "availability_changed" }),
   deleteCategory: (id, actor) => softDeleteEntity(MenuCategory, id, { entityType: "menu_category", actor }),
   deleteProduct: (id, actor) => softDeleteEntity(MenuProduct, id, { entityType: "menu_product", actor }),
   deleteOptionGroup: (id, actor) => softDeleteEntity(MenuOptionGroup, id, { entityType: "menu_option_group", actor }),
   deleteOption: (id, actor) => softDeleteEntity(MenuOption, id, { entityType: "menu_option", actor }),
   reorderCategories: (items, actor) => reorder(MenuCategory, items, { entityType: "menu_category", actor }),
   reorderProducts: (items, actor) => reorder(MenuProduct, items, { entityType: "menu_product", actor }),
+  reorderOptionGroups: (items, actor) => reorder(MenuOptionGroup, items, { entityType: "menu_option_group", actor }),
+  reorderOptions: (items, actor) => reorder(MenuOption, items, { entityType: "menu_option", actor }),
+  listProductGroups,
+  createProductGroup,
+  updateProductGroup,
+  updateProductGroupSelectionRules,
+  updateProductGroupVisibility: (productId, groupId, body, actor) => updateProductGroup(productId, groupId, { isVisible: body.isVisible }, actor, "visibility_changed"),
+  updateProductGroupAvailability: (productId, groupId, body, actor) => updateProductGroup(productId, groupId, { isAvailable: body.isAvailable }, actor, "availability_changed"),
+  listProductGroupOptions,
+  createProductGroupOption,
+  updateProductGroupOption,
+  updateProductGroupOptionVisibility: (productId, groupId, optionId, body, actor) => updateProductGroupOption(productId, groupId, optionId, { isVisible: body.isVisible }, actor, "visibility_changed"),
+  updateProductGroupOptionAvailability: (productId, groupId, optionId, body, actor) => updateProductGroupOption(productId, groupId, optionId, { isAvailable: body.isAvailable }, actor, "availability_changed"),
   setProductGroups,
   setProductGroupOptions,
   publishMenu,

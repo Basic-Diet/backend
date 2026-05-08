@@ -26,6 +26,8 @@ const MenuOptionSchema = new mongoose.Schema(
     extraWeightPriceHalala: { type: Number, min: 0, default: 0, validate: integerMinZero },
     currency: { type: String, default: SYSTEM_CURRENCY },
     isActive: { type: Boolean, default: true, index: true },
+    isVisible: { type: Boolean, default: true, index: true },
+    isAvailable: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
     publishedAt: { type: Date, default: null, index: true },
   },
@@ -33,6 +35,6 @@ const MenuOptionSchema = new mongoose.Schema(
 );
 
 MenuOptionSchema.index({ groupId: 1, key: 1 }, { unique: true });
-MenuOptionSchema.index({ groupId: 1, isActive: 1, publishedAt: 1, sortOrder: 1, createdAt: -1 });
+MenuOptionSchema.index({ groupId: 1, isActive: 1, isVisible: 1, isAvailable: 1, publishedAt: 1, sortOrder: 1, createdAt: -1 });
 
 module.exports = mongoose.model("MenuOption", MenuOptionSchema);

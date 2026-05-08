@@ -49,6 +49,8 @@ const MenuProductSchema = new mongoose.Schema(
     weightStepGrams: { type: Number, min: 1, default: 50, validate: integerMinZero },
     currency: { type: String, default: SYSTEM_CURRENCY },
     isActive: { type: Boolean, default: true, index: true },
+    isVisible: { type: Boolean, default: true, index: true },
+    isAvailable: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
     branchAvailability: { type: [String], default: [] },
     versionId: { type: mongoose.Schema.Types.ObjectId, ref: "MenuVersion", default: null },
@@ -58,6 +60,6 @@ const MenuProductSchema = new mongoose.Schema(
 );
 
 MenuProductSchema.index({ key: 1 }, { unique: true });
-MenuProductSchema.index({ categoryId: 1, isActive: 1, publishedAt: 1, sortOrder: 1, createdAt: -1 });
+MenuProductSchema.index({ categoryId: 1, isActive: 1, isVisible: 1, isAvailable: 1, publishedAt: 1, sortOrder: 1, createdAt: -1 });
 
 module.exports = mongoose.model("MenuProduct", MenuProductSchema);
