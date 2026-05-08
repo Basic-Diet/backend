@@ -81,9 +81,48 @@ Dynamic catalog fields:
 
 - top level: `source`, `fulfillmentMethod`, `currency`, `vatIncluded`, `vatPercentage`, `itemTypes`, `categories`
 - category: `id`, `key`, localized `name`, `nameI18n`, `description`, `imageUrl`, `sortOrder`, `products`
-- product: `id`, `key`, `categoryId`, localized `name`, `nameI18n`, `itemType`, `pricingModel`, `priceHalala`, `baseUnitGrams`, `defaultWeightGrams`, `minWeightGrams`, `maxWeightGrams`, `weightStepGrams`, `optionGroups`
+- product: `id`, `key`, `categoryId`, localized `name`, `nameI18n`, `itemType`, `pricingModel`, `priceHalala`, `baseUnitGrams`, `defaultWeightGrams`, `minWeightGrams`, `maxWeightGrams`, `weightStepGrams`, optional `requiresBuilder`, optional `canAddDirectly`, `optionGroups`
 - option group: `id`, `groupId`, `key`, localized `name`, `nameI18n`, `minSelections`, `maxSelections`, `isRequired`, `sortOrder`, `options`
 - option: `id`, `optionId`, `groupId`, `key`, localized `name`, `nameI18n`, `extraPriceHalala`, `extraWeightUnitGrams`, `extraWeightPriceHalala`, `sortOrder`
+
+Launch category keys:
+
+- `custom_order`: configurable Builder products. Frontend URL section `custom-order` maps to this backend category key.
+- `light_options`
+- `cold_sandwiches`
+- `sourdough`
+- `juices`
+- `desserts`
+- `drinks`
+- `ice_cream`
+
+Stable configurable product keys:
+
+- `basic_salad`
+- `basic_meal`
+- `fruit_salad`
+- `greek_yogurt`
+- `green_salad`
+
+Fixed direct-add launch product keys:
+
+- Cold sandwiches: `boiled_egg_cold_sandwich`, `turkey_cold_sandwich`, `classic_halloumi_cold_sandwich`, `tuna_cold_sandwich`, `scrambled_egg_cold_sandwich`, `chicken_fajita_cold_sandwich`, `mexican_chicken_cold_sandwich`, `grilled_chicken_cold_sandwich`
+- Sourdough: `halloumi_sourdough`, `turkey_sourdough`, `tuna_sourdough`, `grilled_chicken_sourdough`
+- Desserts: `apple_cinnamon_muffin_2pcs`, `berry_cheesecake`, `strawberry_cheesecake`, `dark_brownies`, `protein_bar`, `basic_classic`, `protein_chocolate_cake`
+- Juices: `berry_blast`, `berry_prot`, `classic_green`, `beet_punch`, `orange_carrot`, `watermelon_mint`
+- Drinks: `protein_drink`, `diet_iced_tea`, `diet_soda`, `water`
+- Ice cream: `vanilla_ice_cream`, `chocolate_ice_cream`, `ice_cream_add_on`
+
+Stable option group keys:
+
+- `leafy_greens`
+- `vegetables_legumes`
+- `fruits`
+- `proteins`
+- `cheese_nuts`
+- `sauces`
+- `carbs`
+- `nuts`
 
 Important localization note:
 
@@ -104,9 +143,9 @@ Example dynamic response:
     "categories": [
       {
         "id": "663000000000000000000001",
-        "key": "salads",
-        "name": "Salads",
-        "nameI18n": { "ar": "السلطات", "en": "Salads" },
+        "key": "custom_order",
+        "name": "Custom Order",
+        "nameI18n": { "ar": "اطلب على مزاجك", "en": "Custom Order" },
         "products": [
           {
             "id": "663000000000000000000101",
@@ -121,6 +160,8 @@ Example dynamic response:
             "minWeightGrams": 100,
             "maxWeightGrams": 0,
             "weightStepGrams": 50,
+            "requiresBuilder": true,
+            "canAddDirectly": false,
             "optionGroups": [
               {
                 "id": "663000000000000000000201",
@@ -128,7 +169,7 @@ Example dynamic response:
                 "key": "proteins",
                 "name": "Proteins",
                 "nameI18n": { "ar": "بروتينات", "en": "Proteins" },
-                "minSelections": 0,
+                "minSelections": 1,
                 "maxSelections": 1,
                 "options": [
                   {
@@ -160,6 +201,8 @@ Mobile behavior:
 - Do not depend on item order; use IDs, keys, and `sortOrder`.
 - Do not render inactive items if any appear unexpectedly.
 - Check each product's `pricingModel`; not every product is fixed price.
+- Open Builder when `product.requiresBuilder === true`. If the helper is absent, use `product.optionGroups.length > 0 || product.pricingModel === "per_100g"`.
+- Direct-add only when `product.canAddDirectly === true`. If the helper is absent, use `product.pricingModel === "fixed" && product.optionGroups.length === 0`.
 - Hide delivery address, delivery zone, delivery window, courier tracking, and notify-arrival UI.
 
 ## Step 2 - Build Cart Locally

@@ -148,6 +148,8 @@ function serializePublicCategory(category, lang, products) {
 }
 
 function serializePublicProduct(product, lang, optionGroups) {
+  const hasOptionGroups = Array.isArray(optionGroups) && optionGroups.length > 0;
+  const requiresBuilder = hasOptionGroups || product.pricingModel === "per_100g";
   return {
     id: String(product._id),
     key: product.key,
@@ -166,6 +168,8 @@ function serializePublicProduct(product, lang, optionGroups) {
     maxWeightGrams: Number(product.maxWeightGrams || 0),
     weightStepGrams: Number(product.weightStepGrams || 50),
     sortOrder: Number(product.sortOrder || 0),
+    requiresBuilder,
+    canAddDirectly: product.pricingModel === "fixed" && !hasOptionGroups,
     optionGroups,
   };
 }

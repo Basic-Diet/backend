@@ -23,6 +23,10 @@ const User = require("../src/models/User");
 const moyasarService = require("../src/services/moyasarService");
 const { DASHBOARD_JWT_SECRET } = require("../src/services/dashboardTokenService");
 const { JWT_SECRET } = require("../src/middleware/auth");
+const {
+  productRows: seededProductRows,
+  seedOneTimeMenu,
+} = require("../scripts/seed-one-time-menu");
 
 const TEST_TAG = `one-time-menu-${Date.now()}`;
 const TEST_KEY_TAG = TEST_TAG.replace(/-/g, "_");
@@ -63,6 +67,38 @@ function appAuth(userId) {
     { expiresIn: "1h" }
   );
   return { Authorization: `Bearer ${token}`, "Accept-Language": "en" };
+}
+
+function flattenMenuProducts(menu) {
+  return (menu.categories || []).flatMap((category) => (
+    category.products || []
+  ).map((product) => ({ ...product, categoryKey: category.key })));
+}
+
+function findProduct(menu, key) {
+  return flattenMenuProducts(menu).find((product) => product.key === key);
+}
+
+function findGroup(product, key) {
+  return (product.optionGroups || []).find((group) => group.key === key);
+}
+
+function assertGroupRule(product, groupKey, minSelections, maxSelections) {
+  const group = findGroup(product, groupKey);
+  assert(group, `${product.key} includes ${groupKey}`);
+  assert.strictEqual(group.minSelections, minSelections, `${product.key}.${groupKey} min`);
+  assert.strictEqual(group.maxSelections, maxSelections, `${product.key}.${groupKey} max`);
+  assert.strictEqual(group.isRequired, minSelections > 0, `${product.key}.${groupKey} required`);
+  return group;
+}
+
+function assertFixedDirectProduct(product, key, priceHalala) {
+  assert(product, `${key} appears`);
+  assert.strictEqual(product.pricingModel, "fixed", `${key} pricingModel`);
+  assert.strictEqual(product.priceHalala, priceHalala, `${key} price`);
+  assert.strictEqual(product.requiresBuilder, false, `${key} requiresBuilder`);
+  assert.strictEqual(product.canAddDirectly, true, `${key} canAddDirectly`);
+  assert.strictEqual(product.optionGroups.length, 0, `${key} option groups`);
 }
 
 async function startMemoryMongo() {
@@ -165,6 +201,18 @@ async function seedViaDashboard(api) {
 
   res = await api.post("/api/dashboard/menu/products").set(dashboardAuth()).send({
     categoryId: category.id,
+    key: `${TEST_TAG}_direct`.replace(/-/g, "_"),
+    name: { en: `${TEST_TAG} Direct Product`, ar: "منتج مباشر" },
+    itemType: "drink",
+    pricingModel: "fixed",
+    priceHalala: 800,
+    sortOrder: 0,
+  });
+  expectStatus(res, 201, "create direct product");
+  const directProduct = res.body.data;
+
+  res = await api.post("/api/dashboard/menu/products").set(dashboardAuth()).send({
+    categoryId: category.id,
     key: `${TEST_TAG}_fixed`.replace(/-/g, "_"),
     name: { en: `${TEST_TAG} Fixed Product`, ar: "منتج ثابت" },
     itemType: "dessert",
@@ -214,6 +262,30 @@ async function seedViaDashboard(api) {
   });
   expectStatus(res, 201, "create required product");
   const requiredProduct = res.body.data;
+
+  res = await api.post("/api/dashboard/menu/products").set(dashboardAuth()).send({
+    categoryId: category.id,
+    key: `${TEST_TAG}_fruit_salad`.replace(/-/g, "_"),
+    name: { en: `${TEST_TAG} Fruit Salad`, ar: "سلطة فواكه" },
+    itemType: "fruit_salad",
+    pricingModel: "fixed",
+    priceHalala: 1700,
+    sortOrder: 4,
+  });
+  expectStatus(res, 201, "create fixed configurable fruit salad");
+  const fruitSaladProduct = res.body.data;
+
+  res = await api.post("/api/dashboard/menu/products").set(dashboardAuth()).send({
+    categoryId: category.id,
+    key: `${TEST_TAG}_greek_yogurt`.replace(/-/g, "_"),
+    name: { en: `${TEST_TAG} Greek Yogurt`, ar: "زبادي يوناني" },
+    itemType: "greek_yogurt",
+    pricingModel: "fixed",
+    priceHalala: 1700,
+    sortOrder: 5,
+  });
+  expectStatus(res, 201, "create fixed configurable greek yogurt");
+  const greekYogurtProduct = res.body.data;
 
   res = await api.post("/api/dashboard/menu/option-groups").set(dashboardAuth()).send({
     key: `${TEST_TAG}_sauces`.replace(/-/g, "_"),
@@ -267,10 +339,44 @@ async function seedViaDashboard(api) {
   });
   expectStatus(res, 200, "set required product options");
 
+  res = await api.put(`/api/dashboard/menu/products/${fruitSaladProduct.id}/groups`).set(dashboardAuth()).send({
+    groups: [{ groupId: group.id, minSelections: 1, maxSelections: 1, sortOrder: 1 }],
+  });
+  expectStatus(res, 200, "set fruit salad groups");
+
+  res = await api.put(`/api/dashboard/menu/products/${fruitSaladProduct.id}/groups/${group.id}/options`).set(dashboardAuth()).send({
+    options: [{ optionId: options[1].id, extraPriceHalala: 0, sortOrder: 1 }],
+  });
+  expectStatus(res, 200, "set fruit salad options");
+
+  res = await api.put(`/api/dashboard/menu/products/${greekYogurtProduct.id}/groups`).set(dashboardAuth()).send({
+    groups: [{ groupId: group.id, minSelections: 0, maxSelections: 3, sortOrder: 1 }],
+  });
+  expectStatus(res, 200, "set greek yogurt groups");
+
+  res = await api.put(`/api/dashboard/menu/products/${greekYogurtProduct.id}/groups/${group.id}/options`).set(dashboardAuth()).send({
+    options: [
+      { optionId: options[0].id, extraPriceHalala: 0, sortOrder: 1 },
+      { optionId: options[1].id, extraPriceHalala: 0, sortOrder: 2 },
+    ],
+  });
+  expectStatus(res, 200, "set greek yogurt options");
+
   res = await api.post("/api/dashboard/menu/publish").set(dashboardAuth()).send({ notes: TEST_TAG });
   expectStatus(res, 200, "publish menu");
 
-  return { category, fixedProduct, per100Product, inactiveProduct, requiredProduct, group, options };
+  return {
+    category,
+    directProduct,
+    fixedProduct,
+    per100Product,
+    inactiveProduct,
+    requiredProduct,
+    fruitSaladProduct,
+    greekYogurtProduct,
+    group,
+    options,
+  };
 }
 
 (async function run() {
@@ -281,6 +387,112 @@ async function seedViaDashboard(api) {
     await resetDatabase();
     restoreMoyasar = installMoyasarMock();
     const api = request(createApp());
+
+    await seedOneTimeMenu({ actor: { role: "test" }, notes: TEST_TAG });
+
+    await test("seed-one-time-menu publishes the final Basic Diet dynamic menu", async () => {
+      const res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "seeded menu");
+      const menu = res.body.data;
+      const categoriesByKey = new Map((menu.categories || []).map((category) => [category.key, category]));
+      ["custom_order", "cold_sandwiches", "sourdough", "desserts", "juices", "drinks", "ice_cream"].forEach((categoryKey) => {
+        assert(categoriesByKey.has(categoryKey), `menu includes ${categoryKey}`);
+      });
+      assert.strictEqual(categoriesByKey.get("custom_order").nameI18n.ar, "اطلب على مزاجك");
+      assert.strictEqual(categoriesByKey.get("sourdough").nameI18n.ar, "الساندويشات");
+      assert.strictEqual(categoriesByKey.get("ice_cream").nameI18n.ar, "الايس كريم");
+
+      const customOrderKeys = new Set((categoriesByKey.get("custom_order").products || []).map((product) => product.key));
+      ["basic_salad", "basic_meal", "fruit_salad", "greek_yogurt", "green_salad"].forEach((productKey) => {
+        assert(customOrderKeys.has(productKey), `custom_order includes ${productKey}`);
+      });
+
+      const basicSalad = findProduct(menu, "basic_salad");
+      assert.strictEqual(basicSalad.categoryKey, "custom_order");
+      assert.strictEqual(basicSalad.nameI18n.en, "Basic Salad");
+      assert.strictEqual(basicSalad.pricingModel, "per_100g");
+      assert.strictEqual(basicSalad.priceHalala, 2900);
+      assert.strictEqual(basicSalad.baseUnitGrams, 100);
+      assert.strictEqual(basicSalad.defaultWeightGrams, 100);
+      assert.strictEqual(basicSalad.minWeightGrams, 100);
+      assert.strictEqual(basicSalad.maxWeightGrams, 0);
+      assert.strictEqual(basicSalad.weightStepGrams, 50);
+      assert.strictEqual(basicSalad.requiresBuilder, true);
+      assert.strictEqual(basicSalad.canAddDirectly, false);
+      assertGroupRule(basicSalad, "leafy_greens", 2, 2);
+      assertGroupRule(basicSalad, "vegetables_legumes", 0, 19);
+      assertGroupRule(basicSalad, "fruits", 0, 4);
+      const basicSaladProteins = assertGroupRule(basicSalad, "proteins", 1, 1);
+      assertGroupRule(basicSalad, "cheese_nuts", 0, 2);
+      assertGroupRule(basicSalad, "sauces", 1, 1);
+
+      const basicMeal = findProduct(menu, "basic_meal");
+      assert.strictEqual(basicMeal.pricingModel, "per_100g");
+      assert.strictEqual(basicMeal.priceHalala, 1900);
+      assert.strictEqual(basicMeal.requiresBuilder, true);
+      assert.strictEqual(basicMeal.canAddDirectly, false);
+      assertGroupRule(basicMeal, "carbs", 3, 3);
+      const basicMealProteins = assertGroupRule(basicMeal, "proteins", 1, 1);
+
+      const fruitSalad = findProduct(menu, "fruit_salad");
+      assert.strictEqual(fruitSalad.pricingModel, "fixed");
+      assert.strictEqual(fruitSalad.priceHalala, 1700);
+      assert.strictEqual(fruitSalad.requiresBuilder, true);
+      assert.strictEqual(fruitSalad.canAddDirectly, false);
+      const fruitSaladFruits = assertGroupRule(fruitSalad, "fruits", 9, 9);
+      assert(fruitSaladFruits.options.some((option) => option.nameI18n.ar === "عسل"), "fruit_salad fruits include honey");
+
+      const greekYogurt = findProduct(menu, "greek_yogurt");
+      assert.strictEqual(greekYogurt.pricingModel, "fixed");
+      assert.strictEqual(greekYogurt.priceHalala, 1700);
+      assert.strictEqual(greekYogurt.requiresBuilder, true);
+      assert.strictEqual(greekYogurt.canAddDirectly, false);
+      assertGroupRule(greekYogurt, "fruits", 5, 5);
+      assertGroupRule(greekYogurt, "nuts", 0, 3);
+
+      const greenSalad = findProduct(menu, "green_salad");
+      assert.strictEqual(greenSalad.categoryKey, "custom_order");
+      assert.strictEqual(greenSalad.pricingModel, "per_100g");
+      assert.strictEqual(greenSalad.priceHalala, 1500);
+      assertGroupRule(greenSalad, "leafy_greens", 2, 2);
+      assertGroupRule(greenSalad, "vegetables_legumes", 0, 19);
+      assertGroupRule(greenSalad, "sauces", 1, 1);
+
+      const premiumSaladOptions = new Map(basicSaladProteins.options.map((option) => [option.nameI18n.ar, option]));
+      ["ستيك لحم", "جمبري", "سالمون"].forEach((optionName) => {
+        assert.strictEqual(premiumSaladOptions.get(optionName).extraPriceHalala, 1600, `basic_salad ${optionName} extra price`);
+        assert.strictEqual(premiumSaladOptions.get(optionName).extraWeightUnitGrams, 50, `basic_salad ${optionName} extra unit`);
+        assert.strictEqual(premiumSaladOptions.get(optionName).extraWeightPriceHalala, 1000, `basic_salad ${optionName} extra weight price`);
+      });
+      ["فاهيتا", "دجاج سبايسي", "دجاج توابل إيطالية", "دجاج تكا", "دجاج آسيوي", "استربس", "دجاج مشوي", "دجاج مكسيكي"].forEach((optionName) => {
+        assert.strictEqual(premiumSaladOptions.get(optionName).extraWeightPriceHalala, 500, `basic_salad ${optionName} chicken extra weight`);
+      });
+      ["كرات لحم", "لحم استرغانوف"].forEach((optionName) => {
+        assert.strictEqual(premiumSaladOptions.get(optionName).extraPriceHalala, 300, `basic_salad ${optionName} extra price`);
+        assert.strictEqual(premiumSaladOptions.get(optionName).extraWeightPriceHalala, 600, `basic_salad ${optionName} meat extra weight`);
+      });
+
+      const premiumMealOptions = new Map(basicMealProteins.options.map((option) => [option.nameI18n.ar, option]));
+      ["ستيك لحم", "جمبري", "سالمون"].forEach((optionName) => {
+        assert.strictEqual(premiumMealOptions.get(optionName).extraPriceHalala, 2000, `basic_meal ${optionName} extra price`);
+        assert.strictEqual(premiumMealOptions.get(optionName).extraWeightUnitGrams, 50, `basic_meal ${optionName} extra unit`);
+        assert.strictEqual(premiumMealOptions.get(optionName).extraWeightPriceHalala, 1000, `basic_meal ${optionName} extra weight price`);
+      });
+      ["فاهيتا", "دجاج زبدة", "دجاج كريمة", "دجاج كاري وجوز الهند", "دجاج سبايسي", "دجاج توابل إيطالية", "دجاج تكا", "دجاج آسيوي", "استربس", "دجاج مشوي", "دجاج مكسيكي"].forEach((optionName) => {
+        assert.strictEqual(premiumMealOptions.get(optionName).extraWeightPriceHalala, 500, `basic_meal ${optionName} chicken extra weight`);
+      });
+      ["كرات لحم", "لحم استرغانوف"].forEach((optionName) => {
+        assert.strictEqual(premiumMealOptions.get(optionName).extraPriceHalala, 300, `basic_meal ${optionName} extra price`);
+        assert.strictEqual(premiumMealOptions.get(optionName).extraWeightPriceHalala, 600, `basic_meal ${optionName} meat extra weight`);
+      });
+
+      seededProductRows
+        .filter((product) => product.pricingModel === "fixed" && !product.groups)
+        .forEach((product) => assertFixedDirectProduct(findProduct(menu, product.key), product.key, product.priceHalala));
+    });
+
+    await resetDatabase();
+
     const user = await User.create({
       phone: `${TEST_TAG}-+966500000000`,
       name: `${TEST_TAG} User`,
@@ -298,6 +510,29 @@ async function seedViaDashboard(api) {
       const product = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.fixedProduct.id);
       assert(product, "published product appears");
       assert.strictEqual(product.priceHalala, 1000);
+      assert.strictEqual(product.requiresBuilder, true);
+      assert.strictEqual(product.canAddDirectly, false);
+      const directProduct = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.directProduct.id);
+      assert(directProduct, "direct fixed product appears");
+      assert.strictEqual(directProduct.requiresBuilder, false);
+      assert.strictEqual(directProduct.canAddDirectly, true);
+      const per100Product = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.per100Product.id);
+      assert(per100Product, "per_100g product appears");
+      assert.strictEqual(per100Product.requiresBuilder, true);
+      assert.strictEqual(per100Product.canAddDirectly, false);
+      const fruitSalad = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.fruitSaladProduct.id);
+      assert(fruitSalad, "fixed configurable fruit salad appears");
+      assert.strictEqual(fruitSalad.itemType, "fruit_salad");
+      assert.strictEqual(fruitSalad.pricingModel, "fixed");
+      assert.strictEqual(fruitSalad.requiresBuilder, true);
+      assert.strictEqual(fruitSalad.canAddDirectly, false);
+      const greekYogurt = res.body.data.categories.flatMap((category) => category.products).find((item) => item.id === ctx.greekYogurtProduct.id);
+      assert(greekYogurt, "fixed configurable greek yogurt appears");
+      assert.strictEqual(greekYogurt.itemType, "greek_yogurt");
+      assert.strictEqual(greekYogurt.pricingModel, "fixed");
+      assert.strictEqual(greekYogurt.requiresBuilder, true);
+      assert.strictEqual(greekYogurt.canAddDirectly, false);
+      assert.strictEqual(greekYogurt.optionGroups[0].maxSelections, 3);
       assert(!res.body.data.categories.flatMap((category) => category.products).some((item) => item.id === ctx.inactiveProduct.id), "inactive product is hidden");
       assert(!product.optionGroups[0].options.some((item) => item.id === ctx.options[3].id), "inactive option is hidden");
     });

@@ -479,6 +479,21 @@ basic_salad, basic_meal, fruit_salad, greek_yogurt, green_salad,
 cold_sandwich, sourdough, dessert, juice, drink, ice_cream, product
 ```
 
+Launch customer category keys:
+
+```text
+custom_order, light_options, cold_sandwiches, sourdough,
+juices, desserts, drinks, ice_cream
+```
+
+The mobile frontend URL section `custom-order` maps to backend category key `custom_order`.
+The seeded configurable products `basic_salad`, `basic_meal`, `fruit_salad`, and `greek_yogurt` live under `custom_order`.
+
+Customer menu product responses include optional derived helpers:
+
+- `requiresBuilder`: `true` when the product has any option groups or `pricingModel = "per_100g"`.
+- `canAddDirectly`: `true` only for fixed-price products with zero option groups.
+
 ### MenuOptionGroup
 
 Model: `src/models/MenuOptionGroup.js`
@@ -491,6 +506,13 @@ Fields:
 - `sortOrder`
 - `isActive`
 - `publishedAt`
+
+Launch Builder group keys:
+
+```text
+leafy_greens, vegetables_legumes, fruits, proteins,
+cheese_nuts, sauces, carbs, nuts
+```
 
 ### MenuOption
 
@@ -587,6 +609,8 @@ npm run seed:one-time-menu
 ```
 
 Use this on local or staging.
+
+The launch seed keeps `fruit_salad` and `greek_yogurt` as `pricingModel = "fixed"` configurable products. `greek_yogurt` uses `nuts` with `minSelections = 0` and `maxSelections = 3`.
 
 Production guard:
 
