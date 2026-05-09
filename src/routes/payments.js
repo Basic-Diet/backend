@@ -8,6 +8,8 @@ const apiRouter = Router();
 
 publicRouter.get("/payments/success", asyncHandler(controller.handlePaymentSuccess));
 publicRouter.get("/payments/cancel", asyncHandler(controller.handlePaymentCancel));
+publicRouter.get("/payment-success", asyncHandler(controller.handlePaymentSuccess));
+publicRouter.get("/payment-cancel", asyncHandler(controller.handlePaymentCancel));
 
 apiRouter.get("/verify", asyncHandler(controller.verifyPayment));
 

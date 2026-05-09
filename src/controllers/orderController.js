@@ -27,6 +27,7 @@ const { logger } = require("../utils/logger");
 const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
 const { validateRedirectUrl } = require("../utils/security");
+const { normalizePaymentRedirectUrls } = require("../utils/paymentRedirectUrls");
 const {
   computeVatBreakdown,
   normalizeStoredVatBreakdown,
@@ -327,14 +328,25 @@ async function createOrder(req, res) {
       },
     });
 
-    const appUrl = process.env.APP_URL || "https://example.com";
+    const appUrl = process.env.APP_URL || "";
+    const normalizedRedirects = normalizePaymentRedirectUrls({
+      successUrl: body.successUrl,
+      backUrl: body.backUrl,
+      req,
+      appUrl,
+    });
+    logger.info("One-time order payment redirect URLs normalized", {
+      orderId: String(order._id),
+      paymentId: String(payment._id),
+      ...normalizedRedirects.logContext,
+    });
     const invoice = await moyasarService.createInvoice({
       amount: quote.pricing.totalHalala,
       currency: quote.pricing.currency || SYSTEM_CURRENCY,
       description: `One-time order ${order.orderNumber || String(order._id)}`,
-      callbackUrl: `${appUrl}/api/webhooks/moyasar`,
-      successUrl: validateRedirectUrl(body.successUrl, `${appUrl}/payments/success`),
-      backUrl: validateRedirectUrl(body.backUrl, `${appUrl}/payments/cancel`),
+      callbackUrl: `${normalizedRedirects.backendOrigin}/api/webhooks/moyasar`,
+      successUrl: normalizedRedirects.successUrl,
+      backUrl: normalizedRedirects.backUrl,
       metadata: {
         source: "one_time_order",
         type: "one_time_order",
@@ -342,6 +354,8 @@ async function createOrder(req, res) {
         userId: String(req.userId),
         paymentId: String(payment._id),
         expiresAt: expiresAt.toISOString(),
+        clientSuccessDeepLinkScheme: normalizedRedirects.logContext.successOriginalScheme,
+        clientBackDeepLinkScheme: normalizedRedirects.logContext.backOriginalScheme,
       },
       // Internal context fields for structured error logging (not sent to Moyasar)
       _orderId: String(order._id),

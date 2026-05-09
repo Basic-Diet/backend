@@ -44,6 +44,7 @@ const SETTING_KEYS = [
 const settingSnapshots = new Map();
 let invoiceCounter = 0;
 const moyasarInvoices = new Map();
+const moyasarInvoicePayloads = [];
 
 async function test(name, fn) {
   try {
@@ -340,6 +341,7 @@ function installMoyasarInvoiceMock() {
   const originalGetInvoice = moyasarService.getInvoice;
   moyasarService.createInvoice = async (payload) => {
     invoiceCounter += 1;
+    moyasarInvoicePayloads.push(payload);
     const invoice = {
       id: `inv_${TEST_TAG}_${invoiceCounter}`,
       url: `https://payments.example.test/invoices/${invoiceCounter}`,
@@ -364,6 +366,7 @@ function installMoyasarInvoiceMock() {
     moyasarService.createInvoice = originalCreateInvoice;
     moyasarService.getInvoice = originalGetInvoice;
     moyasarInvoices.clear();
+    moyasarInvoicePayloads.length = 0;
   };
 }
 
@@ -675,17 +678,54 @@ function setMoyasarInvoice(invoiceId, updates = {}) {
     await test("POST /api/orders creates pending_payment order", async () => {
       await Order.deleteMany({ userId: ctx.user._id });
       await Payment.deleteMany({ userId: ctx.user._id });
-      const res = await api.post("/api/orders").set(auth(ctx.token)).send(sandwichQuotePayload(ctx, {
-        successUrl: "basicdiet://orders/payment-success",
-        backUrl: "basicdiet://orders/payment-cancel",
-      }));
+      const savedAppUrl = process.env.APP_URL;
+      process.env.APP_URL = "https://api.example.test";
+      const beforePayloads = moyasarInvoicePayloads.length;
+      let res;
+      try {
+        res = await api.post("/api/orders").set(auth(ctx.token)).send(sandwichQuotePayload(ctx, {
+          successUrl: "basicdiet://orders/payment-success",
+          backUrl: "basicdiet://orders/payment-cancel",
+        }));
+      } finally {
+        if (savedAppUrl !== undefined) process.env.APP_URL = savedAppUrl;
+        else delete process.env.APP_URL;
+      }
       expectStatus(res, 201, "create order");
       assert.strictEqual(res.body.data.status, "pending_payment");
+      const invoicePayload = moyasarInvoicePayloads[beforePayloads];
+      assert(invoicePayload, "Moyasar invoice payload was captured");
+      assert.strictEqual(invoicePayload.successUrl, "https://api.example.test/payment-success");
+      assert.strictEqual(invoicePayload.backUrl, "https://api.example.test/payment-cancel");
       const order = await Order.findById(res.body.data.orderId).lean();
       assert(order);
       assert.strictEqual(order.status, "pending_payment");
       assert.strictEqual(order.paymentStatus, "initiated");
       assert.strictEqual(order.fulfillmentMethod, "pickup");
+    });
+
+    await test("POST /api/orders passes valid HTTPS redirects to Moyasar unchanged", async () => {
+      await Order.deleteMany({ userId: ctx.user._id });
+      await Payment.deleteMany({ userId: ctx.user._id });
+      const savedAppUrl = process.env.APP_URL;
+      process.env.APP_URL = "https://api.example.test";
+      const beforePayloads = moyasarInvoicePayloads.length;
+      let res;
+      try {
+        res = await api.post("/api/orders").set(auth(ctx.token)).send(sandwichQuotePayload(ctx, {
+          successUrl: "https://client.example.test/orders/payment-success",
+          backUrl: "https://client.example.test/orders/payment-cancel",
+        }));
+      } finally {
+        if (savedAppUrl !== undefined) process.env.APP_URL = savedAppUrl;
+        else delete process.env.APP_URL;
+      }
+      expectStatus(res, 201, "create order with https redirects");
+      const invoicePayload = moyasarInvoicePayloads[beforePayloads];
+      assert(invoicePayload, "Moyasar invoice payload was captured");
+      assert.strictEqual(invoicePayload.successUrl, "https://client.example.test/orders/payment-success");
+      assert.strictEqual(invoicePayload.backUrl, "https://client.example.test/orders/payment-cancel");
+      assert.strictEqual(invoicePayload.callbackUrl, "https://api.example.test/api/webhooks/moyasar");
     });
 
     await test("POST /api/orders creates Payment type=one_time_order", async () => {

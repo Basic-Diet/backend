@@ -24,6 +24,10 @@ logger.error = (message, meta) => {
 
 // ── moyasarService reference ──────────────────────────────────────────────────
 const moyasarService = require("../src/services/moyasarService");
+const {
+  normalizePaymentRedirectUrls,
+  isValidHttpsUrl,
+} = require("../src/utils/paymentRedirectUrls");
 
 function stubCreateInvoice(behaviour) {
   const original = moyasarService.createInvoice;
@@ -48,6 +52,82 @@ async function test(name, fn) {
 }
 
 (async function run() {
+  console.log("\n── payment redirect URL normalization ───────────────────────────────────────");
+
+  await test("accepts valid HTTPS successUrl/backUrl unchanged", () => {
+    const normalized = normalizePaymentRedirectUrls({
+      successUrl: " https://app.example.com/orders/payment-success?ok=1 ",
+      backUrl: "https://app.example.com/orders/payment-cancel",
+      appUrl: "https://api.example.com",
+    });
+    assert.strictEqual(normalized.successUrl, "https://app.example.com/orders/payment-success?ok=1");
+    assert.strictEqual(normalized.backUrl, "https://app.example.com/orders/payment-cancel");
+    assert.strictEqual(normalized.logContext.successRedirectAccepted, true);
+    assert.strictEqual(normalized.logContext.backRedirectAccepted, true);
+    assert.strictEqual(normalized.backendOrigin, "https://api.example.com");
+  });
+
+  await test("replaces basicdiet deep links with APP_URL HTTPS fallbacks", () => {
+    const normalized = normalizePaymentRedirectUrls({
+      successUrl: "basicdiet://orders/payment-success",
+      backUrl: "basicdiet://orders/payment-cancel",
+      appUrl: "https://api.example.com",
+    });
+    assert.strictEqual(normalized.successUrl, "https://api.example.com/payment-success");
+    assert.strictEqual(normalized.backUrl, "https://api.example.com/payment-cancel");
+    assert.strictEqual(normalized.logContext.successRedirectAccepted, false);
+    assert.strictEqual(normalized.logContext.backRedirectAccepted, false);
+    assert.strictEqual(normalized.logContext.successOriginalScheme, "basicdiet");
+    assert.strictEqual(normalized.logContext.backOriginalScheme, "basicdiet");
+  });
+
+  await test("replaces http URLs in production", () => {
+    const savedNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const normalized = normalizePaymentRedirectUrls({
+        successUrl: "http://client.example.com/success",
+        backUrl: "http://client.example.com/cancel",
+        appUrl: "https://api.example.com",
+      });
+      assert.strictEqual(normalized.successUrl, "https://api.example.com/payment-success");
+      assert.strictEqual(normalized.backUrl, "https://api.example.com/payment-cancel");
+      assert.strictEqual(normalized.logContext.successOriginalScheme, "http");
+      assert.strictEqual(normalized.logContext.backOriginalScheme, "http");
+    } finally {
+      process.env.NODE_ENV = savedNodeEnv;
+    }
+  });
+
+  await test("missing URLs use HTTPS fallback", () => {
+    const normalized = normalizePaymentRedirectUrls({
+      appUrl: "https://api.example.com",
+    });
+    assert.strictEqual(normalized.successUrl, "https://api.example.com/payment-success");
+    assert.strictEqual(normalized.backUrl, "https://api.example.com/payment-cancel");
+    assert.strictEqual(normalized.logContext.successOriginalScheme, "none");
+    assert.strictEqual(normalized.logContext.backOriginalScheme, "none");
+  });
+
+  await test("invalid strings do not throw and use fallback", () => {
+    const normalized = normalizePaymentRedirectUrls({
+      successUrl: "not a url",
+      backUrl: "javascript:alert(1)",
+      appUrl: "https://api.example.com",
+    });
+    assert.strictEqual(normalized.successUrl, "https://api.example.com/payment-success");
+    assert.strictEqual(normalized.backUrl, "https://api.example.com/payment-cancel");
+    assert.strictEqual(normalized.logContext.successOriginalScheme, "invalid");
+    assert.strictEqual(normalized.logContext.backOriginalScheme, "javascript");
+  });
+
+  await test("isValidHttpsUrl rejects non-string and non-HTTPS values", () => {
+    assert.strictEqual(isValidHttpsUrl("https://example.com/ok"), true);
+    assert.strictEqual(isValidHttpsUrl("http://example.com/no"), false);
+    assert.strictEqual(isValidHttpsUrl("basicdiet://orders/payment-success"), false);
+    assert.strictEqual(isValidHttpsUrl(null), false);
+  });
+
   // ── unit: moyasarService.getMoyasarEnvStatus ────────────────────────────────
   console.log("\n── getMoyasarEnvStatus ──────────────────────────────────────────────────────");
 

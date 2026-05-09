@@ -33,6 +33,7 @@ const TEST_KEY_TAG = TEST_TAG.replace(/-/g, "_");
 const TEST_DB_NAME = `${TEST_KEY_TAG}_test`;
 const results = { passed: 0, failed: 0 };
 let invoiceCounter = 0;
+const moyasarInvoicePayloads = [];
 let mongoServer;
 
 async function test(name, fn) {
@@ -171,6 +172,7 @@ function installMoyasarMock() {
   const originalCreateInvoice = moyasarService.createInvoice;
   moyasarService.createInvoice = async (payload) => {
     invoiceCounter += 1;
+    moyasarInvoicePayloads.push(payload);
     return {
       id: `inv_${TEST_TAG}_${invoiceCounter}`,
       url: `https://payments.example.test/${invoiceCounter}`,
@@ -182,6 +184,7 @@ function installMoyasarMock() {
   };
   return () => {
     moyasarService.createInvoice = originalCreateInvoice;
+    moyasarInvoicePayloads.length = 0;
   };
 }
 
@@ -713,6 +716,50 @@ async function seedViaDashboard(api) {
       assert(payment, "one-time order payment was persisted");
       assert.strictEqual(payment.type, "one_time_order");
       assert.strictEqual(payment.status, "initiated");
+    });
+
+    await test("POST /api/orders normalizes Flutter deep link redirects for Moyasar", async () => {
+      const savedAppUrl = process.env.APP_URL;
+      process.env.APP_URL = "https://api.example.test";
+      const beforePayloads = moyasarInvoicePayloads.length;
+      let createRes;
+      try {
+        createRes = await api.post("/api/orders").set(appAuth(user._id)).send({
+          fulfillmentMethod: "pickup",
+          pickup: {
+            branchId: "main",
+            pickupWindow: "18:00-20:00",
+          },
+          items: [
+            {
+              productId: ctx.fixedProduct.id,
+              qty: 1,
+              weightGrams: 100,
+              selectedOptions: [
+                {
+                  groupId: ctx.group.id,
+                  optionId: ctx.options[0].id,
+                  extraWeightGrams: null,
+                },
+              ],
+            },
+          ],
+          successUrl: "basicdiet://orders/payment-success",
+          backUrl: "basicdiet://orders/payment-cancel",
+        });
+      } finally {
+        if (savedAppUrl !== undefined) process.env.APP_URL = savedAppUrl;
+        else delete process.env.APP_URL;
+      }
+
+      expectStatus(createRes, 201, "flutter deep link order");
+      assert.strictEqual(createRes.body.data.status, "pending_payment");
+      const invoicePayload = moyasarInvoicePayloads[beforePayloads];
+      assert(invoicePayload, "Moyasar invoice payload was captured");
+      assert.strictEqual(invoicePayload.successUrl, "https://api.example.test/payment-success");
+      assert.strictEqual(invoicePayload.backUrl, "https://api.example.test/payment-cancel");
+      assert.strictEqual(invoicePayload.callbackUrl, "https://api.example.test/api/webhooks/moyasar");
+      assert.strictEqual(invoicePayload.metadata.type, "one_time_order");
     });
 
     await test("Dashboard can edit relation selection rules and customer menu reflects them", async () => {
