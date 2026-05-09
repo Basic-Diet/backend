@@ -97,3 +97,14 @@
 - [ ] Postman/Newman نجح إذا كانت collection محدثة.
 - [ ] لم يتم تشغيل production seeds أثناء التحقق.
 - [ ] لا توجد migrations أو scripts تعدل البيانات بدون خطة rollback.
+
+## I. قائمة الإصدار النهائية
+
+- [ ] `npm run validate:backend` نجح.
+- [ ] `VALIDATE_DATA_INTEGRITY=true npm run validate:data` نجح على staging.
+- [ ] `npm run validate:staging` نجح على staging مع test/mock payment mode.
+- [ ] Flutter full flow نجح على staging.
+- [ ] Dashboard full flow نجح على staging.
+- [ ] Render logs أو logs منصة التشغيل تمت مراجعتها ولا تحتوي أخطاء حرجة.
+- [ ] Moyasar test payment أو mock payment verification تم التحقق منه.
+- [ ] rollback plan جاهز ومفهوم للفريق.
