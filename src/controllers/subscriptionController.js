@@ -170,6 +170,11 @@ const {
   preparePickupForClient,
 } = require("../services/subscription/subscriptionPickupClientService");
 const {
+  createSubscriptionPickupRequestForClient,
+  getSubscriptionPickupRequestStatusForClient,
+  listSubscriptionPickupRequestsForClient,
+} = require("../services/subscription/subscriptionPickupRequestClientService");
+const {
   getPickupLocationsSetting,
 } = require("../services/subscription/subscriptionFulfillmentSummaryService");
 const {
@@ -2531,6 +2536,85 @@ async function preparePickup(req, res) {
   return res.status(result.status).json({ status: true, data: result.data });
 }
 
+function resolvePickupRequestErrorStatus(err) {
+  if (err && typeof err.status === "number") return err.status;
+  const code = err && err.code ? err.code : "INTERNAL";
+  if (["INVALID_DELIVERY_MODE", "INVALID_DATE", "INVALID_MEAL_COUNT", "SUBSCRIPTION_MISMATCH", "MEAL_COUNT_MISMATCH"].includes(code)) {
+    return 400;
+  }
+  if (["INSUFFICIENT_CREDITS", "SUB_INACTIVE", "SUB_EXPIRED", "PLANNING_INCOMPLETE", "PLANNING_UNCONFIRMED", "PREMIUM_OVERAGE_PAYMENT_REQUIRED", "PREMIUM_PAYMENT_REQUIRED", "ONE_TIME_ADDON_PAYMENT_REQUIRED"].includes(code)) {
+    return 422;
+  }
+  if (code === "NOT_FOUND" || code === "PICKUP_REQUEST_NOT_FOUND") return 404;
+  if (code === "FORBIDDEN") return 403;
+  return 500;
+}
+
+async function createPickupRequest(req, res) {
+  try {
+    const { id } = req.params;
+    const { date, mealCount, idempotencyKey } = req.body || {};
+    const result = await createSubscriptionPickupRequestForClient({
+      userId: req.userId,
+      subscriptionId: id,
+      date,
+      mealCount,
+      idempotencyKey,
+      lang: getRequestLang(req),
+    });
+    return res.status(200).json({ status: true, data: result.data });
+  } catch (err) {
+    return errorResponse(
+      res,
+      resolvePickupRequestErrorStatus(err),
+      err.code || "INTERNAL",
+      err.message || "Failed to create pickup request",
+      err.details
+    );
+  }
+}
+
+async function listPickupRequests(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await listSubscriptionPickupRequestsForClient({
+      userId: req.userId,
+      subscriptionId: id,
+      date: req.query.date || null,
+      status: req.query.status || "all",
+    });
+    return res.status(200).json({ status: true, data: result });
+  } catch (err) {
+    return errorResponse(
+      res,
+      resolvePickupRequestErrorStatus(err),
+      err.code || "INTERNAL",
+      err.message || "Failed to list pickup requests",
+      err.details
+    );
+  }
+}
+
+async function getPickupRequestStatus(req, res) {
+  try {
+    const { id, requestId } = req.params;
+    const data = await getSubscriptionPickupRequestStatusForClient({
+      userId: req.userId,
+      subscriptionId: id,
+      requestId,
+    });
+    return res.status(200).json({ status: true, data });
+  } catch (err) {
+    return errorResponse(
+      res,
+      resolvePickupRequestErrorStatus(err),
+      err.code || "INTERNAL",
+      err.message || "Failed to get pickup request status",
+      err.details
+    );
+  }
+}
+
 async function getPickupStatus(req, res) {
   const { id, date } = req.params;
   const result = await getPickupStatusForClient({
@@ -2747,6 +2831,9 @@ module.exports = {
   consumeAddonSelection,
   removeAddonSelection,
   addOneTimeAddon,
+  createPickupRequest,
+  listPickupRequests,
+  getPickupRequestStatus,
   preparePickup,
   getPickupStatus,
   getDayFulfillmentStatus,

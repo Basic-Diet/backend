@@ -1,11 +1,12 @@
 const crypto = require("node:crypto");
 const mongoose = require("mongoose");
 const SubscriptionDay = require("../../models/SubscriptionDay");
+const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const Order = require("../../models/Order");
 const Delivery = require("../../models/Delivery");
 const Subscription = require("../../models/Subscription");
 const SubscriptionAuditLog = require("../../models/SubscriptionAuditLog");
-const { fulfillSubscriptionDay } = require("../fulfillmentService");
+const { fulfillSubscriptionDay, fulfillSubscriptionPickupRequest } = require("../fulfillmentService");
 const { canTransition } = require("../../utils/state");
 const { ORDER_STATUSES, canOrderTransition } = require("../../utils/orderState");
 const { writeLog } = require("../../utils/log");
@@ -16,6 +17,10 @@ const {
   shouldBlockOneTimeOrderDelivery,
   createOneTimeOrderDeliveryDisabledError,
 } = require("../../utils/oneTimeOrderDeliveryGate");
+const {
+  consumeReservedPickupMeals,
+  releaseReservedPickupMeals,
+} = require("../subscription/subscriptionPickupRequestBalanceService");
 
 /**
  * Unified Operations Transition Service.
@@ -51,6 +56,9 @@ async function executeAction(actionId, { entityId, entityType, userId, role, pay
         break;
       case "cancel":
         result = await handleCancel({ entityId, entityType: normalizedEntityType, userId, role, payload, session });
+        break;
+      case "no_show":
+        result = await handleNoShow({ entityId, entityType: normalizedEntityType, userId, role, payload, session });
         break;
       case "reopen":
         result = await handleReopen({ entityId, entityType: normalizedEntityType, userId, role, payload, session });
@@ -88,6 +96,16 @@ function appendOperationAudit(doc, action, userId, role) {
   });
 }
 
+function appendPickupRequestAudit(doc, action, userId, role) {
+  if (!doc || doc.constructor.modelName !== "SubscriptionPickupRequest") return;
+  doc.operationAuditLog = Array.isArray(doc.operationAuditLog) ? doc.operationAuditLog : [];
+  doc.operationAuditLog.push({
+    action,
+    by: [role, userId].filter(Boolean).join(":"),
+    at: new Date(),
+  });
+}
+
 async function writeSubscriptionDayAudit({ day, action, fromStatus, toStatus, userId, role, payload, session }) {
   if (!day || !day._id) return;
   await SubscriptionAuditLog.create([{
@@ -108,6 +126,24 @@ async function writeSubscriptionDayAudit({ day, action, fromStatus, toStatus, us
 }
 
 async function handlePrepare({ entityId, entityType, userId, role, payload, session }) {
+  if (entityType === "subscription_pickup_request") {
+    const doc = await SubscriptionPickupRequest.findById(entityId).session(session);
+    if (!doc) throw new Error("Entity not found");
+    if (doc.status === "in_preparation") {
+      return { data: doc, idempotent: true };
+    }
+    const fromStatus = doc.status;
+    validateTransition(entityType, fromStatus, "in_preparation");
+    doc.status = "in_preparation";
+    doc.preparationStartedAt = doc.preparationStartedAt || new Date();
+    appendPickupRequestAudit(doc, "prepare", userId, role);
+    await doc.save({ session });
+    return {
+      data: doc,
+      sideEffects: { action: "prepare", entityType, entityId, toStatus: "in_preparation" },
+    };
+  }
+
   const Model = entityType === "subscription" ? SubscriptionDay : Order;
   const doc = await Model.findById(entityId).session(session);
   if (!doc) throw new Error("Entity not found");
@@ -227,6 +263,33 @@ async function handleDispatch({ entityId, entityType, userId, role, payload, ses
 }
 
 async function handleFulfill({ entityId, entityType, payload, userId, role, session }) {
+  if (entityType === "subscription_pickup_request") {
+    const doc = await SubscriptionPickupRequest.findById(entityId).session(session);
+    if (!doc) throw new Error("Pickup request not found");
+    if (doc.status === "fulfilled") {
+      return { data: doc, idempotent: true };
+    }
+    if (payload.pickupCode && doc.pickupCode !== String(payload.pickupCode).trim()) {
+      throw new Error("INVALID_PICKUP_CODE");
+    }
+    const fromStatus = doc.status;
+    validateTransition(entityType, fromStatus, "fulfilled");
+    const result = await fulfillSubscriptionPickupRequest({ requestId: entityId, actorId: userId, session });
+    if (!result.ok) {
+      const err = new Error(result.message || "Fulfillment failed");
+      err.code = result.code;
+      throw err;
+    }
+    appendPickupRequestAudit(result.pickupRequest || doc, "fulfill", userId, role);
+    if (result.pickupRequest && typeof result.pickupRequest.save === "function") {
+      await result.pickupRequest.save({ session });
+    }
+    return {
+      data: result.pickupRequest || doc,
+      sideEffects: { action: "fulfill", entityType, entityId, toStatus: "fulfilled" },
+    };
+  }
+
   if (entityType === "subscription") {
     const day = await SubscriptionDay.findById(entityId).session(session);
     if (!day) throw new Error("Subscription day not found");
@@ -304,6 +367,34 @@ async function handleFulfill({ entityId, entityType, payload, userId, role, sess
 }
 
 async function handleReadyForPickup({ entityId, entityType, userId, role, payload, session }) {
+  if (entityType === "subscription_pickup_request") {
+    const doc = await SubscriptionPickupRequest.findById(entityId).session(session);
+    if (!doc) throw new Error("Entity not found");
+
+    const toStatus = "ready_for_pickup";
+    if (doc.status === toStatus) {
+      return { data: doc, idempotent: true };
+    }
+    const fromStatus = doc.status;
+    validateTransition(entityType, fromStatus, toStatus);
+    doc.status = toStatus;
+    doc.pickupCode = doc.pickupCode || String(crypto.randomInt(100000, 999999));
+    doc.pickupCodeIssuedAt = doc.pickupCodeIssuedAt || new Date();
+    doc.pickupPreparedAt = doc.pickupPreparedAt || new Date();
+    appendPickupRequestAudit(doc, "ready_for_pickup", userId, role);
+    await doc.save({ session });
+    return {
+      data: doc,
+      sideEffects: {
+        action: "ready_for_pickup",
+        entityType,
+        entityId,
+        toStatus,
+        pickupCode: doc.pickupCode,
+      },
+    };
+  }
+
   const Model = entityType === "subscription" ? SubscriptionDay : Order;
   const doc = await Model.findById(entityId).session(session);
   if (!doc) throw new Error("Entity not found");
@@ -355,6 +446,32 @@ async function verifyPickupCode(dayId, code, userId, session) {
 }
 
 async function handleCancel({ entityId, entityType, payload, userId, role, session }) {
+  if (entityType === "subscription_pickup_request") {
+    const doc = await SubscriptionPickupRequest.findById(entityId).session(session);
+    if (!doc) throw new Error("Entity not found");
+    if (doc.status === "canceled") {
+      return { data: doc, idempotent: true };
+    }
+    const fromStatus = doc.status;
+    validateTransition(entityType, fromStatus, "canceled");
+    await releaseReservedPickupMeals({
+      subscriptionId: doc.subscriptionId,
+      pickupRequestId: doc._id,
+      session,
+    });
+    doc.status = "canceled";
+    doc.canceledAt = new Date();
+    doc.canceledBy = String(userId || "");
+    doc.cancellationReason = payload.reason;
+    doc.cancellationNote = payload.notes || payload.note;
+    appendPickupRequestAudit(doc, "cancel", userId, role);
+    await doc.save({ session });
+    return {
+      data: doc,
+      sideEffects: { action: "cancel", entityType, entityId, toStatus: "canceled" },
+    };
+  }
+
   const Model = entityType === "subscription" ? SubscriptionDay : Order;
   const doc = await Model.findById(entityId).session(session);
   if (!doc) throw new Error("Entity not found");
@@ -406,6 +523,43 @@ async function handleCancel({ entityId, entityType, payload, userId, role, sessi
       entityId,
       toStatus,
     },
+  };
+}
+
+async function handleNoShow({ entityId, entityType, payload, userId, role, session }) {
+  if (entityType !== "subscription_pickup_request") {
+    return handleCancel({
+      entityId,
+      entityType,
+      payload: { ...payload, noShow: true },
+      userId,
+      role,
+      session,
+    });
+  }
+
+  const doc = await SubscriptionPickupRequest.findById(entityId).session(session);
+  if (!doc) throw new Error("Entity not found");
+  if (doc.status === "no_show") {
+    return { data: doc, idempotent: true };
+  }
+  const fromStatus = doc.status;
+  validateTransition(entityType, fromStatus, "no_show");
+  doc.status = "no_show";
+  doc.pickupNoShowAt = new Date();
+  doc.canceledAt = doc.canceledAt || new Date();
+  doc.cancellationReason = payload.reason || "no_show";
+  doc.cancellationNote = payload.notes || payload.note;
+  appendPickupRequestAudit(doc, "no_show", userId, role);
+  await doc.save({ session });
+  await consumeReservedPickupMeals({
+    pickupRequestId: doc._id,
+    session,
+  });
+  const updated = await SubscriptionPickupRequest.findById(entityId).session(session);
+  return {
+    data: updated || doc,
+    sideEffects: { action: "no_show", entityType, entityId, toStatus: "no_show" },
   };
 }
 
@@ -462,7 +616,22 @@ async function handleNotifyArrival({ entityId, entityType, session }) {
 
 // Utility Helpers
 function validateTransition(type, from, to) {
-  const allowed = type === "subscription" ? canTransition(from, to) : canOrderTransition(from, to);
+  let allowed;
+  if (type === "subscription") {
+    allowed = canTransition(from, to);
+  } else if (type === "subscription_pickup_request") {
+    const transitions = {
+      locked: ["in_preparation", "ready_for_pickup", "canceled", "no_show"],
+      in_preparation: ["ready_for_pickup", "canceled", "no_show"],
+      ready_for_pickup: ["fulfilled", "no_show"],
+      fulfilled: [],
+      no_show: [],
+      canceled: [],
+    };
+    allowed = Boolean(transitions[from] && transitions[from].includes(to));
+  } else {
+    allowed = canOrderTransition(from, to);
+  }
   if (!allowed) {
     throw new Error("INVALID_STATE_TRANSITION");
   }
@@ -492,6 +661,8 @@ async function triggerSideEffects(effects, { userId, role }) {
           body: "طلبك سيصل خلال وقت قصير",
         });
       }
+    } else if (entityType === "subscription_pickup_request") {
+      return;
     } else {
       const order = await Order.findById(entityId).lean();
       if (["dispatch", "fulfill"].includes(action)) {

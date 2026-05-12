@@ -1,11 +1,13 @@
 const Plan = require("../../models/Plan");
 const Subscription = require("../../models/Subscription");
 const SubscriptionDay = require("../../models/SubscriptionDay");
+const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const BuilderProtein = require("../../models/BuilderProtein");
 const { logger } = require("../../utils/logger");
 const { resolveSubscriptionSkipPolicy } = require("./subscriptionContractReadService");
 const { resolveSkipRemainingDays } = require("./subscriptionSkipService");
 const { resolvePickupPreparationState } = require("./subscriptionPickupPreparationService");
+const { mapSubscriptionPickupRequestStatus } = require("./subscriptionPickupRequestClientService");
 const { serializeSubscriptionForClientWithGuard } = require("./subscriptionClientSerializationService");
 const { getRestaurantHours } = require("../restaurantHoursService");
 const { pickLang } = require("../../utils/i18n");
@@ -18,6 +20,8 @@ const {
   resolvePremiumKeyFromName,
   CANONICAL_PREMIUM_KEYS 
 } = require("../../utils/subscription/premiumIdentity");
+
+const ACTIVE_PICKUP_REQUEST_STATUSES = ["locked", "in_preparation", "ready_for_pickup"];
 
 function isPopulatedPlanDocument(plan) {
   return Boolean(
@@ -330,6 +334,24 @@ function defaultRuntime() {
         date,
       }).lean();
     },
+    async findPickupRequestOverview(subscriptionId, date) {
+      const [activePickupRequestCount, latestPickupRequest] = await Promise.all([
+        SubscriptionPickupRequest.countDocuments({
+          subscriptionId,
+          date,
+          status: { $in: ACTIVE_PICKUP_REQUEST_STATUSES },
+        }),
+        SubscriptionPickupRequest.findOne({ subscriptionId, date })
+          .sort({ createdAt: -1 })
+          .lean(),
+      ]);
+      return {
+        activePickupRequestCount,
+        latestPickupRequest: latestPickupRequest
+          ? mapSubscriptionPickupRequestStatus(latestPickupRequest, { includeNextAction: false })
+          : null,
+      };
+    },
     getPickupLocationsSetting,
     resolvePickupPreparationState,
   };
@@ -376,10 +398,15 @@ async function buildCurrentSubscriptionOverview({ userId, lang, runtime: runtime
   try {
     const todayKSA = restaurantHours.businessDate;
     const todayDay = await runtime.findSubscriptionDay(sub._id, todayKSA);
+    const pickupRequestOverview = sub.deliveryMode === "pickup" && runtime.findPickupRequestOverview
+      ? await runtime.findPickupRequestOverview(sub._id, todayKSA)
+      : { activePickupRequestCount: 0, latestPickupRequest: null };
 
     pickupPreparation = runtime.resolvePickupPreparationState(sub, todayDay, {
       lang,
       getTodayKSADate: () => todayKSA,
+      activePickupRequestCount: pickupRequestOverview.activePickupRequestCount,
+      latestPickupRequest: pickupRequestOverview.latestPickupRequest,
     });
 
     logger.info("currentOverview: pickupPreparation resolved", {

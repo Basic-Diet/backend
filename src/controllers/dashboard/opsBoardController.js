@@ -1,6 +1,7 @@
 "use strict";
 
 const SubscriptionDay = require("../../models/SubscriptionDay");
+const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const Subscription = require("../../models/Subscription");
 const Order = require("../../models/Order");
 const Delivery = require("../../models/Delivery");
@@ -137,6 +138,16 @@ function mapDay(day, latestAction, zoneMap, lang, role) {
   };
 }
 
+function mapPickupRequest(pickupRequest, subscription, user, lang, role) {
+  return dashboardDtoService.mapSubscriptionPickupRequestToDTO(
+    pickupRequest,
+    subscription || {},
+    user || null,
+    role,
+    lang
+  );
+}
+
 function matchesSearch(item, q) {
   if (!q) return true;
   const needle = q.toLowerCase();
@@ -164,7 +175,7 @@ async function queryBoardDays(req, { screen }) {
   const defaultStatuses = screen === "courier"
     ? ["in_preparation", "out_for_delivery", "fulfilled", "delivery_canceled"]
     : screen === "pickup"
-      ? ["in_preparation", "ready_for_pickup", "fulfilled", "canceled_at_branch", "no_show"]
+      ? ["locked", "in_preparation", "ready_for_pickup", "fulfilled", "canceled_at_branch", "no_show"]
       : ["open", "locked", "in_preparation", "ready_for_pickup", "out_for_delivery", "delivery_canceled", "canceled_at_branch"];
   const statuses = normalizeStatusList(
     req.query.status,
@@ -254,7 +265,39 @@ async function queryBoardDays(req, { screen }) {
     return dashboardDtoService.mapOrderToDTO(order, null, order.userId, role, lang);
   });
 
-  items = [...items, ...orderItems];
+  let pickupRequestItems = [];
+  if (method === "all" || method === "pickup") {
+    const defaultPickupRequestStatuses = screen === "pickup" || screen === "kitchen"
+      ? ["locked", "in_preparation", "ready_for_pickup"]
+      : ["locked", "in_preparation", "ready_for_pickup"];
+    const pickupRequestStatuses = req.query.status
+      ? statuses.filter((status) => ["locked", "in_preparation", "ready_for_pickup", "fulfilled", "no_show", "canceled"].includes(status))
+      : defaultPickupRequestStatuses;
+    const pickupRequests = await SubscriptionPickupRequest.find({
+      date,
+      status: { $in: pickupRequestStatuses.length ? pickupRequestStatuses : defaultPickupRequestStatuses },
+    })
+      .populate({
+        path: "subscriptionId",
+        select: "_id userId deliveryMode pickupLocationId",
+        populate: { path: "userId", select: "_id name phone" },
+      })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    pickupRequestItems = pickupRequests.map((pickupRequest) => {
+      const subscription = pickupRequest.subscriptionId || {};
+      return mapPickupRequest(
+        pickupRequest,
+        subscription,
+        subscription.userId || null,
+        lang,
+        role
+      );
+    });
+  }
+
+  items = [...items, ...orderItems, ...pickupRequestItems];
 
   if (req.query.zoneId) {
     items = items.filter((item) => (item.delivery && item.delivery.zoneId) === String(req.query.zoneId));
@@ -297,7 +340,21 @@ async function queueDetail(req, res) {
       populate: { path: "userId", select: "_id name phone" },
     })
     .lean();
-  if (!day) return errorResponse(res, 404, "NOT_FOUND", "Subscription day not found");
+  if (!day) {
+    const pickupRequest = await SubscriptionPickupRequest.findById(req.params.dayId)
+      .populate({
+        path: "subscriptionId",
+        select: "_id userId deliveryMode pickupLocationId",
+        populate: { path: "userId", select: "_id name phone" },
+      })
+      .lean();
+    if (!pickupRequest) return errorResponse(res, 404, "NOT_FOUND", "Subscription day not found");
+    const subscription = pickupRequest.subscriptionId || {};
+    return res.status(200).json({
+      status: true,
+      data: mapPickupRequest(pickupRequest, subscription, subscription.userId || null, getRequestLang(req), req.dashboardUserRole),
+    });
+  }
   const [latestActionMap, zoneMap] = await Promise.all([
     buildLatestActionMap([day._id]),
     buildZoneMap([day.subscriptionId || {}]),
@@ -317,6 +374,8 @@ async function action(req, res) {
   let entityType = "subscription_day";
   if (req.body && (req.body.entityType === "order" || req.body.source === "one_time_order")) {
     entityType = "order";
+  } else if (req.body && req.body.entityType === "subscription_pickup_request") {
+    entityType = "subscription_pickup_request";
   }
 
   if (entityType === "order") {
@@ -337,6 +396,32 @@ async function action(req, res) {
         err.details
       );
     }
+  }
+
+  if (entityType === "subscription_pickup_request") {
+    const pickupRequest = await SubscriptionPickupRequest.findById(entityId).lean();
+    if (!pickupRequest) return errorResponse(res, 404, "NOT_FOUND", "Pickup request not found");
+    const validation = opsActionPolicy.validateAction({
+      entityType: "subscription_pickup_request",
+      status: pickupRequest.status,
+      mode: "pickup",
+      role: req.dashboardUserRole,
+      actionId,
+    });
+    if (!validation.allowed) {
+      return errorResponse(res, 409, validation.reason, `Action ${actionId} is not allowed in current state`);
+    }
+
+    await opsTransitionService.executeAction(actionId, {
+      entityId,
+      entityType: "subscription_pickup_request",
+      userId: req.dashboardUserId,
+      role: req.dashboardUserRole,
+      payload,
+    });
+
+    req.params.dayId = entityId;
+    return queueDetail(req, res);
   }
 
   const existingDay = await SubscriptionDay.findById(entityId).select("date").lean();

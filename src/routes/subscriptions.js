@@ -138,6 +138,9 @@ if (ENABLE_DEV_SUBSCRIPTION_ACTIVATION) {
 }
 router.get("/:id/renewal-seed", asyncHandler(controller.getSubscriptionRenewalSeed));
 router.post("/:id/renew", asyncHandler(controller.renewSubscription));
+router.post("/:id/pickup-requests", asyncHandler(controller.createPickupRequest));
+router.get("/:id/pickup-requests", asyncHandler(controller.listPickupRequests));
+router.get("/:id/pickup-requests/:requestId/status", asyncHandler(controller.getPickupRequestStatus));
 router.get("/:id", asyncHandler(controller.getSubscription));
 router.get("/:id/operations-meta", asyncHandler(controller.getSubscriptionOperationsMeta));
 router.get("/:id/freeze-preview", asyncHandler(controller.getSubscriptionFreezePreview));

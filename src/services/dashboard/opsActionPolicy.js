@@ -57,6 +57,14 @@ const ACTION_REGISTRY = {
     roles: ["admin", "kitchen", "courier"],
     requiresReason: true,
   },
+  no_show: {
+    label: { ar: "لم يحضر", en: "No-show" },
+    color: "red",
+    icon: "user-x",
+    roles: ["admin", "kitchen"],
+    modes: ["pickup"],
+    requiresReason: true,
+  },
   reopen: {
     label: { ar: "إعادة فتح", en: "Reopen" },
     color: "gray",
@@ -89,6 +97,14 @@ const TRANSITION_RULES = {
     cancelled: [],
     expired: [],
     pending_payment: [],
+  },
+  subscription_pickup_request: {
+    locked: ["prepare", "ready_for_pickup", "cancel", "no_show"],
+    in_preparation: ["ready_for_pickup", "cancel", "no_show"],
+    ready_for_pickup: ["fulfill", "no_show"],
+    fulfilled: [],
+    no_show: [],
+    canceled: [],
   },
 };
 

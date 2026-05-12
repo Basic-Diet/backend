@@ -1,6 +1,7 @@
 "use strict";
 
 const SubscriptionDay = require("../../models/SubscriptionDay");
+const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const Order = require("../../models/Order");
 const Delivery = require("../../models/Delivery");
 const Subscription = require("../../models/Subscription");
@@ -31,9 +32,13 @@ async function listOperations({ date, role, lang = "ar" }) {
     paymentStatus: "paid",
     status: { $in: ["confirmed", "in_preparation", "preparing", "ready_for_pickup", "out_for_delivery"] },
   }).lean();
+  const pickupRequests = await SubscriptionPickupRequest.find({
+    date,
+    status: { $in: ["locked", "in_preparation", "ready_for_pickup"] },
+  }).lean();
   
   // 3. Collect IDs for mass fetching
-  const subscriptionIds = [...new Set(days.map(d => d.subscriptionId))];
+  const subscriptionIds = [...new Set(days.map(d => d.subscriptionId).concat(pickupRequests.map((request) => request.subscriptionId)).filter(Boolean).map(String))];
   
   // 4. Enrich data
   const [subscriptions, users, deliveries] = await Promise.all([
@@ -43,6 +48,7 @@ async function listOperations({ date, role, lang = "ar" }) {
         ...new Set([
           ...subs.map((subscription) => subscription.userId),
           ...orders.filter((order) => !shouldBlockOneTimeOrderDelivery(order)).map((order) => order.userId),
+          ...pickupRequests.map((request) => request.userId),
         ].filter(Boolean).map(String)),
       ];
       return User.find({ _id: { $in: userIds } }).lean();
@@ -88,9 +94,22 @@ async function listOperations({ date, role, lang = "ar" }) {
     dto.ui.label = getLocalizedLabel(order.status, lang);
     return dto;
   });
+  const pickupRequestDTOs = pickupRequests.map((pickupRequest) => {
+    const sub = subMap.get(String(pickupRequest.subscriptionId));
+    const user = userMap.get(String(pickupRequest.userId));
+    const dto = dashboardDtoService.mapSubscriptionPickupRequestToDTO(
+      pickupRequest,
+      sub || {},
+      user,
+      role,
+      lang
+    );
+    dto.ui.label = getLocalizedLabel(pickupRequest.status, lang);
+    return dto;
+  });
 
   // 6. Merge and Sort (by createdAt desc for now)
-  const all = [...dayDTOs, ...orderDTOs].sort((a, b) => {
+  const all = [...dayDTOs, ...orderDTOs, ...pickupRequestDTOs].sort((a, b) => {
     const dateA = new Date(a.timestamps.createdAt);
     const dateB = new Date(b.timestamps.createdAt);
     return dateB - dateA;
@@ -100,6 +119,18 @@ async function listOperations({ date, role, lang = "ar" }) {
 }
 
 async function getEnrichedDTO({ entityId, entityType, role, lang = "ar" }) {
+  if (entityType === "subscription_pickup_request") {
+    const pickupRequest = await SubscriptionPickupRequest.findById(entityId).lean();
+    if (!pickupRequest) return null;
+    const [sub, user] = await Promise.all([
+      Subscription.findById(pickupRequest.subscriptionId).lean(),
+      User.findById(pickupRequest.userId).lean(),
+    ]);
+    const dto = dashboardDtoService.mapSubscriptionPickupRequestToDTO(pickupRequest, sub || {}, user, role, lang);
+    dto.ui.label = getLocalizedLabel(pickupRequest.status, lang);
+    return dto;
+  }
+
   if (entityType === "subscription") {
     const existingDay = await SubscriptionDay.findById(entityId).select("date").lean();
     // Settlement on read intentionally removed — meals are not consumed by date passage.

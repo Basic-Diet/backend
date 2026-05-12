@@ -4,6 +4,7 @@ const { buildSubscriptionDayFulfillmentState } = require("../subscription/subscr
 const { getAllowedOrderActions } = require("../orders/orderOpsTransitionService");
 const { normalizeLegacyOrderStatus } = require("../../utils/orderState");
 const { getOrderFulfillmentMethod } = require("../../utils/oneTimeOrderDeliveryGate");
+const { mapSubscriptionPickupRequestStatus } = require("../subscription/subscriptionPickupRequestClientService");
 
 /**
  * Service to map internal models to the UnifiedOperationalDTO.
@@ -22,6 +23,7 @@ const STATUS_METADATA = {
   delivery_canceled: { badge: "danger", icon: "x-circle" },
   canceled_at_branch: { badge: "danger", icon: "x-circle" },
   no_show: { badge: "danger", icon: "user-x" },
+  canceled: { badge: "danger", icon: "x-circle" },
   skipped: { badge: "secondary", icon: "skip-forward" },
   
   // Specific for Orders/Deliveries
@@ -170,8 +172,79 @@ function mapOrderToDTO(order, delivery, user, role, lang) {
   };
 }
 
+function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, role, lang) {
+  const statusPayload = mapSubscriptionPickupRequestStatus(pickupRequest, { includeNextAction: false });
+  const status = statusPayload.status;
+  const ui = resolveUiMetadata(status, lang);
+  const allowedActions = opsActionPolicy.getAllowedActions({
+    entityType: "subscription_pickup_request",
+    status,
+    mode: "pickup",
+    role,
+    lang,
+  });
+
+  return {
+    source: "subscription_pickup_request",
+    entityType: "subscription_pickup_request",
+    entityId: String(pickupRequest._id),
+    requestId: String(pickupRequest._id),
+    id: String(pickupRequest._id),
+    type: "subscription_pickup_request",
+    mode: "pickup",
+    reference: `PICK-${String(pickupRequest._id).slice(-6).toUpperCase()}`,
+    subscriptionId: String(pickupRequest.subscriptionId || ""),
+    subscriptionDayId: pickupRequest.subscriptionDayId ? String(pickupRequest.subscriptionDayId) : null,
+    userId: String(pickupRequest.userId || ""),
+    date: pickupRequest.date,
+    mealCount: Number(pickupRequest.mealCount || 0),
+    status,
+    statusLabel: statusPayload.statusLabel,
+    currentStep: statusPayload.currentStep,
+    isReady: statusPayload.isReady,
+    isCompleted: statusPayload.isCompleted,
+    pickupCode: statusPayload.pickupCode,
+    pickupCodeIssuedAt: statusPayload.pickupCodeIssuedAt,
+    fulfilledAt: statusPayload.fulfilledAt,
+    ui: {
+      ...ui,
+      label: status,
+    },
+    customer: {
+      id: String(user ? user._id : pickupRequest.userId || ""),
+      name: user ? user.name : "Unknown",
+      phone: user ? user.phone : "",
+    },
+    pickup: {
+      pickupLocationId: subscription && subscription.pickupLocationId ? String(subscription.pickupLocationId) : null,
+      pickupCode: statusPayload.pickupCode,
+      pickupCodeIssuedAt: statusPayload.pickupCodeIssuedAt,
+      pickupPreparedAt: pickupRequest.pickupPreparedAt || null,
+      pickupNoShowAt: pickupRequest.pickupNoShowAt || null,
+    },
+    context: {
+      date: pickupRequest.date,
+      branch: "Main Branch",
+      pickupCode: statusPayload.pickupCode,
+      mealCount: Number(pickupRequest.mealCount || 0),
+      snapshot: pickupRequest.snapshot || null,
+      creditsReserved: Boolean(pickupRequest.creditsReserved),
+      creditsConsumedAt: pickupRequest.creditsConsumedAt || null,
+      creditsReleasedAt: pickupRequest.creditsReleasedAt || null,
+    },
+    snapshot: pickupRequest.snapshot || null,
+    allowedActions,
+    createdAt: pickupRequest.createdAt || null,
+    timestamps: {
+      createdAt: pickupRequest.createdAt,
+      updatedAt: pickupRequest.updatedAt,
+    },
+  };
+}
+
 module.exports = {
   mapSubscriptionDayToDTO,
+  mapSubscriptionPickupRequestToDTO,
   mapOrderToDTO,
   resolveUiMetadata,
 };

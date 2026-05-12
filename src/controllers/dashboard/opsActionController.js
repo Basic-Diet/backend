@@ -2,6 +2,7 @@ const opsTransitionService = require("../../services/dashboard/opsTransitionServ
 const opsActionPolicy = require("../../services/dashboard/opsActionPolicy");
 const opsReadService = require("../../services/dashboard/opsReadService");
 const SubscriptionDay = require("../../models/SubscriptionDay");
+const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const Subscription = require("../../models/Subscription");
 const { executeDashboardOrderAction } = require("../../services/orders/orderDashboardService");
 const errorResponse = require("../../utils/errorResponse");
@@ -31,8 +32,8 @@ async function handleAction(req, res) {
     if (!entityId || !rawEntityType) {
       return errorResponse(res, 400, "INVALID_REQUEST", "entityId and entityType are required");
     }
-    if (!["subscription", "subscription_day", "pickup_day", "order"].includes(rawEntityType)) {
-      return errorResponse(res, 400, "INVALID_ENTITY_TYPE", "entityType must be subscription_day, subscription, pickup_day, or order");
+    if (!["subscription", "subscription_day", "pickup_day", "subscription_pickup_request", "order"].includes(rawEntityType)) {
+      return errorResponse(res, 400, "INVALID_ENTITY_TYPE", "entityType must be subscription_day, subscription, pickup_day, subscription_pickup_request, or order");
     }
 
     if (entityType === "order") {
@@ -50,6 +51,30 @@ async function handleAction(req, res) {
         }
         throw err;
       }
+    } else if (entityType === "subscription_pickup_request") {
+      const doc = await SubscriptionPickupRequest.findById(entityId).lean();
+      if (!doc) {
+        return errorResponse(res, 404, "NOT_FOUND", "Entity not found");
+      }
+      const validation = opsActionPolicy.validateAction({
+        entityType,
+        status: doc.status,
+        mode: "pickup",
+        role,
+        actionId: action,
+      });
+
+      if (!validation.allowed) {
+        return errorResponse(res, 409, validation.reason, `Action ${action} is not allowed in current state`);
+      }
+
+      await opsTransitionService.executeAction(action, {
+        entityId,
+        entityType,
+        userId: req.dashboardUserId || req.userId,
+        role,
+        payload,
+      });
     } else {
       // 1. Fetch current state for validation
       const Model = SubscriptionDay;

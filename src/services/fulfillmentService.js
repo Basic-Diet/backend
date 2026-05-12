@@ -1,10 +1,12 @@
 const Subscription = require("../models/Subscription");
 const SubscriptionDay = require("../models/SubscriptionDay");
+const SubscriptionPickupRequest = require("../models/SubscriptionPickupRequest");
 const { canTransition } = require("../utils/state");
 const { resolveMealsPerDay, resolveDayWalletSelections } = require("../utils/subscription/subscriptionDaySelectionSync");
 const { isPhase2CanonicalDayPlanningEnabled } = require("../utils/featureFlags");
 const { buildScopedCanonicalPlanningSnapshot } = require("./subscription/subscriptionDayPlanningService");
 const { consumeSubscriptionDayCredits, resolveDayMealsToDeduct } = require("./subscription/subscriptionDayConsumptionService");
+const { consumeReservedPickupMeals } = require("./subscription/subscriptionPickupRequestBalanceService");
 
 async function fulfillSubscriptionDay({ subscriptionId, date, dayId, session }) {
   const dayQuery = dayId ? { _id: dayId } : { subscriptionId, date };
@@ -138,4 +140,57 @@ async function fulfillSubscriptionDay({ subscriptionId, date, dayId, session }) 
   }
 }
 
-module.exports = { fulfillSubscriptionDay };
+async function fulfillSubscriptionPickupRequest({ requestId, actorId = null, session }) {
+  const pickupRequest = await SubscriptionPickupRequest.findById(requestId).session(session);
+  if (!pickupRequest) {
+    return { ok: false, code: "NOT_FOUND", message: "Pickup request not found" };
+  }
+
+  if (pickupRequest.status === "fulfilled" && pickupRequest.creditsConsumedAt) {
+    return {
+      ok: true,
+      alreadyFulfilled: true,
+      pickupRequest,
+      consumedCredits: 0,
+    };
+  }
+
+  if (pickupRequest.status !== "ready_for_pickup" && pickupRequest.status !== "fulfilled") {
+    return { ok: false, code: "INVALID_TRANSITION", message: "Invalid pickup request state transition" };
+  }
+
+  if (pickupRequest.creditsReleasedAt) {
+    return { ok: false, code: "CREDITS_RELEASED", message: "Reserved pickup credits were already released" };
+  }
+
+  if (pickupRequest.status !== "fulfilled") {
+    pickupRequest.status = "fulfilled";
+    pickupRequest.fulfilledAt = new Date();
+    if (actorId) {
+      pickupRequest.fulfilledByDashboardUserId = actorId;
+    }
+    await pickupRequest.save({ session });
+  }
+
+  try {
+    const consumption = await consumeReservedPickupMeals({
+      pickupRequestId: pickupRequest._id,
+      session,
+    });
+    const currentRequest = await SubscriptionPickupRequest.findById(pickupRequest._id).session(session);
+    return {
+      ok: true,
+      alreadyFulfilled: Boolean(consumption.alreadyConsumed),
+      pickupRequest: currentRequest || pickupRequest,
+      consumedCredits: consumption.consumed ? consumption.mealCount : 0,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      code: err.code || "CONSUMPTION_FAILED",
+      message: err.message || "Pickup request consumption failed",
+    };
+  }
+}
+
+module.exports = { fulfillSubscriptionDay, fulfillSubscriptionPickupRequest };

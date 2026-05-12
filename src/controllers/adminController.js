@@ -5255,8 +5255,8 @@ module.exports = {
   listNotificationLogs,
   triggerDailyCutoff: async (req, res) => {
     try {
-      await processDailyCutoff();
-      return res.status(200).json({ status: true, message: "Cutoff processed successfully" });
+      const data = await processDailyCutoff();
+      return res.status(200).json({ status: true, message: "Cutoff processed successfully", data });
     } catch (err) {
       if (err && err.code === "JOB_RUNNING") {
         // MEDIUM AUDIT FIX: Surface cutoff lock contention as explicit 409 so callers can retry safely.
