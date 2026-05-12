@@ -372,7 +372,7 @@ function buildCanonicalActivationPayload({ userId, planId, contractVersion, cont
     deliverySlot: { type: slot.type === "pickup" ? "pickup" : (delivery.mode === "pickup" ? "pickup" : "delivery"), window: String(slot.window || ""), slotId: String(slot.slotId || "") },
     deliveryZoneId: delivery.zoneId || null,
     deliveryZoneName: delivery.zoneName || "",
-    pickupLocationId: delivery.pickupLocationId ? String(delivery.pickupLocationId) : "",
+    pickupLocationId: String(delivery.pickupLocationId || legacyRuntimeData.delivery?.pickupLocationId || ""),
     deliveryFeeHalala: Number(pricing.deliveryFeeHalala || 0),
     contractVersion,
     contractMode,
@@ -419,6 +419,7 @@ async function buildCanonicalSubscriptionActivationPayload({ draft }) {
       startDate: draft.startDate,
       daysCount: draft.daysCount,
       mealsPerDay: draft.mealsPerDay,
+      delivery: draft.delivery,
     },
   });
 }

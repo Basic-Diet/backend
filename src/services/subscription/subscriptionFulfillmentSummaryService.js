@@ -208,8 +208,12 @@ function buildFulfillmentReadFields({
   statusLabel = "",
 } = {}) {
   const mode = subscription && subscription.deliveryMode === "pickup" ? "pickup" : "delivery";
+  const effectivePickupLocationId = (mode === "pickup" && !subscription.pickupLocationId)
+    ? (subscription.contractSnapshot && subscription.contractSnapshot.delivery && subscription.contractSnapshot.delivery.pickupLocationId)
+    : (subscription && subscription.pickupLocationId);
+    
   const pickupLocation = mode === "pickup"
-    ? buildPickupLocationSummary(subscription, pickupLocations, lang)
+    ? buildPickupLocationSummary({ ...subscription, pickupLocationId: effectivePickupLocationId }, pickupLocations, lang)
     : null;
   const effectiveAddress = mode === "delivery" ? resolveEffectiveAddress(subscription, day) : null;
   const deliveryAddress = mode === "delivery"

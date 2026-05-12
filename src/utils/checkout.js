@@ -91,6 +91,10 @@ function normalizeCheckoutDeliveryForPersistence(delivery = {}) {
       normalizedType === "delivery"
         ? String(delivery && delivery.zoneName ? delivery.zoneName : "").trim()
         : "",
+    pickupLocationId:
+      normalizedType === "pickup"
+        ? String(delivery && delivery.pickupLocationId ? delivery.pickupLocationId : "").trim()
+        : "",
     slot: {
       type: normalizedType,
       window: slot && slot.window ? String(slot.window) : "",

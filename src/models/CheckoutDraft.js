@@ -81,6 +81,7 @@ const CheckoutDraftSchema = new mongoose.Schema(
       address: { type: mongoose.Schema.Types.Mixed },
       zoneId: { type: mongoose.Schema.Types.ObjectId, default: null },
       zoneName: { type: String, default: "" },
+      pickupLocationId: { type: String, default: "" },
       slot: {
         type: {
           type: String,
