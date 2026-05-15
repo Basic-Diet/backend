@@ -23,6 +23,7 @@ Ensure the following variables are configured in the production environment:
 | **Payment** | `MOYASAR_WEBHOOK_ALLOWED_IPS` | Optional: Configure if strict IP filtering is required |
 | **WhatsApp** | `TWILIO_ACCOUNT_SID` | Production Twilio SID |
 | **WhatsApp** | `TWILIO_AUTH_TOKEN` | Production Twilio Auth Token |
+| **WhatsApp** | `TWILIO_VERIFY_SERVICE_SID` | Production Twilio Verify Service SID (`VA...`) |
 | **Flags** | `OTP_TEST_MODE` | `false` |
 | **Flags** | `ALLOW_TEST_AUTH` | `false` |
 | **Flags** | `SUBSCRIPTION_AUTO_SETTLEMENT_ENABLED` | `false` |

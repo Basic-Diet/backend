@@ -54,8 +54,8 @@ function applyPendingProfile(coreUser, appUser, pendingProfile) {
 async function requestOtp(req, res) {
   try {
     const { phoneE164 } = req.body || {};
-    await requestOtpForPhone(phoneE164);
-    return res.status(200).json({ status: true });
+    const { phone } = await requestOtpForPhone(phoneE164);
+    return res.status(200).json({ status: "otp_sent", phoneE164: phone });
   } catch (err) {
     return handleError(res, err);
   }
@@ -106,7 +106,7 @@ async function verifyOtp(req, res) {
     }
 
     return res.status(200).json({
-      status: true,
+      status: "otp_verified",
       token: issueAppAccessToken(coreUser),
       user: serializeCoreUser(coreUser),
     });

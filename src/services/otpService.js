@@ -1,6 +1,9 @@
 const crypto = require("crypto");
 const Otp = require("../models/Otp");
-const { sendWhatsappMessage } = require("./twilioWhatsappService");
+const {
+  createVerificationCheck,
+  requestWhatsappVerification,
+} = require("./twilioWhatsappService");
 const { ApiError } = require("../utils/apiError");
 const { isTestAuthEnabled, getTestOtpCode, getTestOtpPhone } = require("../utils/security");
 const { logger } = require("../utils/logger");
@@ -57,7 +60,33 @@ function logTestOtpUse(phoneE164, context) {
 /* ── normalisation helpers ────────────────────────────────────────────── */
 
 function normalizePhoneE164(phoneE164) {
-  return String(phoneE164 || "").trim();
+  const raw = String(phoneE164 || "").trim();
+  if (!raw) return "";
+
+  const withoutWhatsappPrefix = raw.replace(/^whatsapp:/i, "");
+  const compact = withoutWhatsappPrefix.replace(/[\s().-]/g, "");
+  const digitsOnly = compact.replace(/\D/g, "");
+
+  if (compact.startsWith("+")) {
+    return `+${digitsOnly}`;
+  }
+  if (compact.startsWith("00")) {
+    return `+${digitsOnly.slice(2)}`;
+  }
+  if (compact.startsWith("9665") && digitsOnly.length === 12) {
+    return `+${digitsOnly}`;
+  }
+  if (compact.startsWith("05") && digitsOnly.length === 10) {
+    return `+966${digitsOnly.slice(1)}`;
+  }
+  if (compact.startsWith("201") && digitsOnly.length === 12) {
+    return `+${digitsOnly}`;
+  }
+  if (compact.startsWith("01") && digitsOnly.length === 11) {
+    return `+20${digitsOnly.slice(1)}`;
+  }
+
+  return compact;
 }
 
 function normalizeOtpContext(context) {
@@ -95,6 +124,20 @@ function assertValidPhoneE164(phoneE164) {
       message: "phoneE164 must be a valid E.164 phone number",
     });
   }
+  if (normalized.startsWith("+966") && !/^\+9665\d{8}$/.test(normalized)) {
+    throw new ApiError({
+      status: 400,
+      code: "INVALID_PHONE",
+      message: "Saudi phone numbers must be mobile E.164 numbers like +9665XXXXXXXX",
+    });
+  }
+  if (normalized.startsWith("+20") && !/^\+201[0125]\d{8}$/.test(normalized)) {
+    throw new ApiError({
+      status: 400,
+      code: "INVALID_PHONE",
+      message: "Egypt phone numbers must be mobile E.164 numbers like +201XXXXXXXXX",
+    });
+  }
   return normalized;
 }
 
@@ -108,10 +151,6 @@ function assertValidOtpCode(otp) {
     });
   }
   return normalized;
-}
-
-function generateOtpCode() {
-  return crypto.randomInt(0, 1000000).toString().padStart(6, "0");
 }
 
 function hashOtp(phoneE164, otp) {
@@ -144,7 +183,7 @@ async function requestOtpForPhone(phoneE164, options = {}) {
     }
   }
 
-  const otp = useTestMode ? testOtp.code : generateOtpCode();
+  const otp = useTestMode ? testOtp.code : null;
   const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
 
   if (useTestMode) {
@@ -152,36 +191,44 @@ async function requestOtpForPhone(phoneE164, options = {}) {
   }
 
   if (!useTestMode) {
-    await sendWhatsappMessage({
-      toPhoneE164: phone,
-      body: `Your BasicDiet OTP is ${otp}. It expires in ${ttlMinutes} minutes.`,
-    });
+    await requestWhatsappVerification({ toPhoneE164: phone });
   }
 
   const setPayload = {
     phone,
-    codeHash: hashOtp(phone, otp),
+    codeHash: useTestMode ? hashOtp(phone, otp) : undefined,
     expiresAt,
     attemptsLeft: maxAttempts,
     lastSentAt: now,
     context,
   };
 
+  const update = useTestMode
+    ? { $set: setPayload }
+    : { $set: setPayload, $unset: { codeHash: 1 } };
+
   if (pendingProfile) {
     setPayload.pendingProfile = pendingProfile;
     await Otp.findOneAndUpdate(
       { phone },
-      { $set: setPayload },
+      update,
       { upsert: true, setDefaultsOnInsert: true }
     );
-    return;
+    return { phone, status: "otp_sent" };
+  }
+
+  if (!useTestMode) {
+    update.$unset.pendingProfile = 1;
   }
 
   await Otp.findOneAndUpdate(
     { phone },
-    { $set: setPayload, $unset: { pendingProfile: 1 } },
+    useTestMode
+      ? { $set: setPayload, $unset: { pendingProfile: 1 } }
+      : update,
     { upsert: true, setDefaultsOnInsert: true }
   );
+  return { phone, status: "otp_sent" };
 }
 
 async function verifyOtpCode({ phoneE164, otp }) {
@@ -220,8 +267,8 @@ async function verifyOtpCode({ phoneE164, otp }) {
     });
   }
 
-  const candidateHash = hashOtp(phone, code);
-  if (candidateHash !== otpRecord.codeHash) {
+  const candidateHash = otpRecord.codeHash ? hashOtp(phone, code) : null;
+  if (otpRecord.codeHash && candidateHash !== otpRecord.codeHash) {
     if (matchesConfiguredTestOtp(phone, code)) {
       logTestOtpUse(phone, "verify");
       const context = normalizeOtpContext(otpRecord.context);
@@ -244,6 +291,26 @@ async function verifyOtpCode({ phoneE164, otp }) {
       message: "Invalid OTP",
       details: { attemptsLeft },
     });
+  }
+
+  if (!otpRecord.codeHash) {
+    const check = await createVerificationCheck({ toPhoneE164: phone, code });
+    if (!check.approved) {
+      const attemptsLeft = Math.max(otpRecord.attemptsLeft - 1, 0);
+      if (attemptsLeft === 0) {
+        await Otp.deleteOne({ _id: otpRecord._id });
+      } else {
+        otpRecord.attemptsLeft = attemptsLeft;
+        await otpRecord.save();
+      }
+
+      throw new ApiError({
+        status: 401,
+        code: "INVALID_OTP",
+        message: "Invalid OTP",
+        details: { attemptsLeft },
+      });
+    }
   }
 
   const context = normalizeOtpContext(otpRecord.context);

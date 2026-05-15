@@ -15,14 +15,11 @@ const isProduction = process.env.NODE_ENV === "production";
  * before the data reaches any transport (console, file, or remote).
  */
 const sanitizeFormat = winston.format((info) => {
-  // info may contain spread metadata keys — sanitise the whole object
+  // info carries Winston symbols; keep the original object so transports
+  // can still route/write the entry after metadata has been sanitised.
   const sanitized = sanitizeLogData(info);
-  // Preserve winston internals that must not be stripped
-  sanitized.level = info.level;
-  sanitized.message = info.message;
-  if (info.timestamp) sanitized.timestamp = info.timestamp;
-  if (info.stack) sanitized.stack = info.stack;
-  return sanitized;
+  Object.assign(info, sanitized);
+  return info;
 });
 
 const logger = winston.createLogger({

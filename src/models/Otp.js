@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const OtpSchema = new mongoose.Schema(
   {
     phone: { type: String, required: true, unique: true },
-    codeHash: { type: String, required: true },
+    codeHash: { type: String },
     expiresAt: { type: Date, required: true },
     attemptsLeft: { type: Number, required: true, min: 0 },
     lastSentAt: { type: Date, required: true },

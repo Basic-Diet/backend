@@ -1,25 +1,33 @@
 const https = require("https");
 const { URLSearchParams } = require("url");
 const { ApiError } = require("../utils/apiError");
+const { logger } = require("../utils/logger");
 
-function getTwilioConfig() {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const from = process.env.TWILIO_WHATSAPP_FROM;
+const VERIFY_HOSTNAME = "verify.twilio.com";
+const VERIFY_API_PREFIX = "/v2/Services";
 
-  if (!accountSid || !authToken || !from) {
+function getTwilioVerifyConfig() {
+  const accountSid = String(process.env.TWILIO_ACCOUNT_SID || "").trim();
+  const authToken = String(process.env.TWILIO_AUTH_TOKEN || "").trim();
+  const serviceSid = String(process.env.TWILIO_VERIFY_SERVICE_SID || "").trim();
+
+  if (!accountSid || !authToken || !serviceSid) {
     throw new ApiError({
       status: 500,
       code: "TWILIO_CONFIG_MISSING",
-      message: "Twilio WhatsApp configuration is missing",
+      message: "Twilio Verify configuration is missing",
     });
   }
 
-  return { accountSid, authToken, from };
-}
+  if (!/^VA[a-f0-9]{32}$/i.test(serviceSid)) {
+    throw new ApiError({
+      status: 500,
+      code: "TWILIO_VERIFY_SERVICE_INVALID",
+      message: "Twilio Verify service SID is invalid",
+    });
+  }
 
-function toWhatsappAddress(phoneE164) {
-  return phoneE164.startsWith("whatsapp:") ? phoneE164 : `whatsapp:${phoneE164}`;
+  return { accountSid, authToken, serviceSid };
 }
 
 function parseJsonSafely(text) {
@@ -30,26 +38,24 @@ function parseJsonSafely(text) {
   }
 }
 
-async function sendWhatsappMessage({ toPhoneE164, body }) {
-  const { accountSid, authToken, from } = getTwilioConfig();
-  const payload = new URLSearchParams({
-    From: toWhatsappAddress(from),
-    To: toWhatsappAddress(toPhoneE164),
-    Body: body,
-  }).toString();
+function buildAuthHeader(accountSid, authToken) {
+  return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
+}
 
-  const authHeader = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+async function postTwilioVerifyForm({ path, payload }) {
+  const { accountSid, authToken } = getTwilioVerifyConfig();
+  const body = new URLSearchParams(payload).toString();
 
   const response = await new Promise((resolve, reject) => {
     const req = https.request(
       {
-        hostname: "api.twilio.com",
-        path: `/2010-04-01/Accounts/${accountSid}/Messages.json`,
+        hostname: VERIFY_HOSTNAME,
+        path,
         method: "POST",
         headers: {
-          Authorization: `Basic ${authHeader}`,
+          Authorization: buildAuthHeader(accountSid, authToken),
           "Content-Type": "application/x-www-form-urlencoded",
-          "Content-Length": Buffer.byteLength(payload),
+          "Content-Length": Buffer.byteLength(body),
         },
       },
       (res) => {
@@ -65,20 +71,150 @@ async function sendWhatsappMessage({ toPhoneE164, body }) {
     );
 
     req.on("error", reject);
-    req.write(payload);
+    req.write(body);
     req.end();
   });
 
-  const parsed = parseJsonSafely(response.body);
-  if (response.statusCode < 200 || response.statusCode >= 300) {
+  return {
+    statusCode: response.statusCode,
+    parsed: parseJsonSafely(response.body),
+  };
+}
+
+function normalizeTwilioErrorPayload(response, fallbackError) {
+  const parsed = response && response.parsed ? response.parsed : {};
+  return {
+    code: parsed.code || (fallbackError && fallbackError.code),
+    status: parsed.status || (response && response.statusCode),
+    message: parsed.message || (fallbackError && fallbackError.message),
+    moreInfo: parsed.more_info || parsed.moreInfo,
+    details: parsed.details,
+  };
+}
+
+function logTwilioFailure(action, { response, error, toPhoneE164, serviceSid }) {
+  const twilioError = normalizeTwilioErrorPayload(response, error);
+  logger.error("Twilio Verify request failed", {
+    action,
+    toPhoneE164,
+    serviceSid,
+    error: twilioError,
+  });
+}
+
+function buildVerifyPath(serviceSid, resource) {
+  return `${VERIFY_API_PREFIX}/${encodeURIComponent(serviceSid)}/${resource}`;
+}
+
+async function requestWhatsappVerification({ toPhoneE164 }) {
+  const { serviceSid } = getTwilioVerifyConfig();
+  let response;
+  try {
+    response = await postTwilioVerifyForm({
+      path: buildVerifyPath(serviceSid, "Verifications"),
+      payload: {
+        To: toPhoneE164,
+        Channel: "whatsapp",
+        Locale: "en",
+      },
+    });
+  } catch (err) {
+    logTwilioFailure("verifications.create", {
+      toPhoneE164,
+      serviceSid,
+      error: err,
+    });
     throw new ApiError({
       status: 502,
-      code: "TWILIO_SEND_FAILED",
-      message: parsed && parsed.message ? parsed.message : "Failed to send WhatsApp OTP",
+      code: "TWILIO_VERIFY_SEND_FAILED",
+      message: "Failed to send WhatsApp OTP",
     });
   }
 
-  return parsed;
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    logTwilioFailure("verifications.create", {
+      response,
+      toPhoneE164,
+      serviceSid,
+    });
+    throw new ApiError({
+      status: 502,
+      code: "TWILIO_VERIFY_SEND_FAILED",
+      message: "Failed to send WhatsApp OTP",
+    });
+  }
+
+  const parsed = response.parsed || {};
+  logger.info("Twilio Verify WhatsApp OTP requested", {
+    action: "verifications.create",
+    toPhoneE164,
+    channel: parsed.channel || "whatsapp",
+    serviceSid,
+    verificationSid: parsed.sid,
+    twilioStatus: parsed.status,
+  });
+
+  return {
+    sid: parsed.sid,
+    status: parsed.status,
+    channel: parsed.channel || "whatsapp",
+  };
 }
 
-module.exports = { sendWhatsappMessage };
+async function createVerificationCheck({ toPhoneE164, code }) {
+  const { serviceSid } = getTwilioVerifyConfig();
+  let response;
+  try {
+    response = await postTwilioVerifyForm({
+      path: buildVerifyPath(serviceSid, "VerificationCheck"),
+      payload: {
+        To: toPhoneE164,
+        Code: code,
+      },
+    });
+  } catch (err) {
+    logTwilioFailure("verificationChecks.create", {
+      toPhoneE164,
+      serviceSid,
+      error: err,
+    });
+    throw new ApiError({
+      status: 502,
+      code: "TWILIO_VERIFY_CHECK_FAILED",
+      message: "Failed to verify OTP",
+    });
+  }
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    logTwilioFailure("verificationChecks.create", {
+      response,
+      toPhoneE164,
+      serviceSid,
+    });
+    throw new ApiError({
+      status: 502,
+      code: "TWILIO_VERIFY_CHECK_FAILED",
+      message: "Failed to verify OTP",
+    });
+  }
+
+  const parsed = response.parsed || {};
+  logger.info("Twilio Verify OTP check completed", {
+    action: "verificationChecks.create",
+    toPhoneE164,
+    serviceSid,
+    verificationCheckSid: parsed.sid,
+    twilioStatus: parsed.status,
+  });
+
+  return {
+    sid: parsed.sid,
+    status: parsed.status,
+    approved: parsed.status === "approved",
+  };
+}
+
+module.exports = {
+  createVerificationCheck,
+  requestWhatsappVerification,
+};

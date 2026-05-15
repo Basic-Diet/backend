@@ -44,7 +44,7 @@ function validateEnv() {
   addMissingIfEmpty(missing, "MOYASAR_SECRET_KEY");
   addMissingBypassAware(missing, "TWILIO_ACCOUNT_SID", shouldRequireOtpProvider);
   addMissingBypassAware(missing, "TWILIO_AUTH_TOKEN", shouldRequireOtpProvider);
-  addMissingBypassAware(missing, "TWILIO_WHATSAPP_FROM", shouldRequireOtpProvider);
+  addMissingBypassAware(missing, "TWILIO_VERIFY_SERVICE_SID", shouldRequireOtpProvider);
   addMissingBypassAware(missing, "OTP_HASH_SECRET", shouldRequireOtpProvider);
   if (providedCloudinaryKeys.length > 0 && providedCloudinaryKeys.length < cloudinaryKeys.length) {
     cloudinaryKeys
@@ -80,6 +80,10 @@ function validateEnv() {
   if (!Number.isFinite(otpVerifyWindowMs) || otpVerifyWindowMs <= 0) invalid.push("RATE_LIMIT_OTP_VERIFY_WINDOW_MS");
   const otpVerifyMax = Number(process.env.RATE_LIMIT_OTP_VERIFY_MAX || 10);
   if (!Number.isFinite(otpVerifyMax) || otpVerifyMax <= 0) invalid.push("RATE_LIMIT_OTP_VERIFY_MAX");
+  const twilioVerifyServiceSid = String(process.env.TWILIO_VERIFY_SERVICE_SID || "").trim();
+  if (shouldRequireOtpProvider && !/^VA[a-f0-9]{32}$/i.test(twilioVerifyServiceSid)) {
+    invalid.push("TWILIO_VERIFY_SERVICE_SID");
+  }
 
   // Validate unified test OTP code if test mode is active
   if (testAuthActive) {
