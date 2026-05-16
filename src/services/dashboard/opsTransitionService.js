@@ -164,10 +164,15 @@ async function handlePrepare({ entityId, entityType, userId, role, payload, sess
     if (sub.deliveryMode === "pickup" && !doc.pickupRequested) {
       throw new Error("PICKUP_PREPARE_REQUIRED");
     }
+  } else {
+    ensurePaidOrder(doc);
   }
 
   const fromStatus = doc.status;
   validateTransition(entityType, fromStatus, toStatus);
+  if (entityType === "order") {
+    ensurePaidOrder(doc);
+  }
 
   doc.status = toStatus;
   if (entityType === "subscription" && !doc.pickupPreparationStartedAt) {
@@ -371,8 +376,15 @@ async function handleFulfill({ entityId, entityType, payload, userId, role, sess
       return { data: order, idempotent: true };
     }
 
+    ensurePaidOrder(order);
+    validateTransition(entityType, order.status, "fulfilled");
+
     order.status = "fulfilled";
     order.fulfilledAt = new Date();
+    if (order.deliveryMode === "pickup" && order.pickupCode && !order.pickupVerifiedAt) {
+      order.pickupVerifiedAt = new Date();
+      order.pickupVerifiedByDashboardUserId = userId;
+    }
     await order.save({ session });
 
     await Delivery.updateOne(
@@ -435,6 +447,9 @@ async function handleReadyForPickup({ entityId, entityType, userId, role, payloa
     }
   }
   const fromStatus = doc.status;
+  if (entityType === "order") {
+    ensurePaidOrder(doc);
+  }
   validateTransition(entityType, fromStatus, toStatus);
 
   doc.status = toStatus;
@@ -442,6 +457,13 @@ async function handleReadyForPickup({ entityId, entityType, userId, role, payloa
     doc.pickupPreparedAt = new Date();
     doc.pickupCode = String(crypto.randomInt(100000, 999999));
     doc.pickupCodeIssuedAt = new Date();
+  } else if (doc.deliveryMode === "pickup" || doc.fulfillmentMethod === "pickup") {
+    const pickupCode = doc.pickupCode || (doc.pickup && doc.pickup.pickupCode) || String(crypto.randomInt(100000, 999999));
+    doc.pickupCode = pickupCode;
+    doc.pickupCodeIssuedAt = doc.pickupCodeIssuedAt || new Date();
+    doc.pickup = doc.pickup || {};
+    doc.pickup.pickupCode = doc.pickup.pickupCode || pickupCode;
+    doc.pickup.readyAt = doc.pickup.readyAt || new Date();
   }
   appendOperationAudit(doc, "ready_for_pickup", userId, role);
   await doc.save({ session });
@@ -661,6 +683,14 @@ function validateTransition(type, from, to) {
   }
   if (!allowed) {
     throw new Error("INVALID_STATE_TRANSITION");
+  }
+}
+
+function ensurePaidOrder(order) {
+  if (!order || order.paymentStatus !== "paid") {
+    const err = new Error("ORDER_PAYMENT_REQUIRED");
+    err.code = "ORDER_PAYMENT_REQUIRED";
+    throw err;
   }
 }
 

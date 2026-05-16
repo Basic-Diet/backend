@@ -5,6 +5,7 @@ const Payment = require("../src/models/Payment");
 const User = require("../src/models/User");
 const Addon = require("../src/models/Addon");
 const BuilderProtein = require("../src/models/BuilderProtein");
+const ActivityLog = require("../src/models/ActivityLog");
 
 const INDEX_DEFINITIONS = [
   {
@@ -43,6 +44,19 @@ const INDEX_DEFINITIONS = [
     name: "isActive_1_isPremium_1_sortOrder_1",
     key: { isActive: 1, isPremium: 1, sortOrder: 1 },
     options: {},
+  },
+  {
+    model: ActivityLog,
+    name: "delivery_manual_subscription_deduction_once_per_day",
+    key: { entityType: 1, action: 1, entityId: 1, "meta.businessDate": 1 },
+    options: {
+      unique: true,
+      partialFilterExpression: {
+        entityType: "subscription",
+        action: "manual_subscription_meal_deduction",
+        "meta.fulfillmentMethod": "delivery",
+      },
+    },
   },
 ];
 

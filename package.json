@@ -13,6 +13,8 @@
     "test:balance-policy": "NODE_ENV=test node tests/subscriptionBalancePolicy.test.js",
     "test:integration": "NODE_ENV=test node tests/mealPlanner.integration.test.js",
     "test:checkout": "NODE_ENV=test node tests/checkout.integration.test.js",
+    "test:dashboard-manual-deduction": "NODE_ENV=test node tests/dashboardManualDeductionAndOrderPickup.test.js",
+    "test:dashboard-accounting": "NODE_ENV=test node tests/dashboardAccountingDailyReport.test.js",
     "test:one-time-menu": "NODE_ENV=test node tests/oneTimeMenuCatalog.test.js",
     "test:one-time-full-flow": "NODE_ENV=test node tests/oneTimeOrderFullFlow.test.js",
     "test:mobile-contracts": "NODE_ENV=test node tests/mobileApiContracts.test.js",

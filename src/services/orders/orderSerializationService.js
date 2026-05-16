@@ -161,18 +161,33 @@ function serializeOrderForDashboard(order, { allowedActions = [], payment = null
   const plain = toPlain(order);
   if (!plain) return null;
   const fulfillmentMethod = plain.fulfillmentMethod || plain.deliveryMode || "";
+  const pickup = plain.pickup || {};
+  const pickupCode = plain.pickupCode || pickup.pickupCode || null;
 
   const base = {
+    id: String(plain._id),
+    type: "order",
     source: "one_time_order",
     entityType: "order",
     entityId: String(plain._id),
     orderId: String(plain._id),
+    reference: `ORD-${String(plain._id).slice(-6).toUpperCase()}`,
     orderNumber: plain.orderNumber || "",
     status: normalizeLegacyOrderStatus(plain.status, { paymentStatus: plain.paymentStatus }),
     paymentStatus: plain.paymentStatus,
     fulfillmentMethod,
+    mode: fulfillmentMethod,
     customer: normalizeCustomer(plain),
     pricing: normalizePricing(plain.pricing || {}),
+    context: {
+      date: plain.fulfillmentDate || plain.deliveryDate || "",
+      window: plain.deliveryWindow || (plain.delivery && plain.delivery.deliveryWindow ? plain.delivery.deliveryWindow : ""),
+      address: plain.deliveryAddress || (plain.delivery && plain.delivery.address ? plain.delivery.address : null),
+      branch: fulfillmentMethod === "pickup" ? "Main Branch" : null,
+      pickupCode,
+      pickupCodeIssuedAt: plain.pickupCodeIssuedAt || null,
+      pickupVerifiedAt: plain.pickupVerifiedAt || null,
+    },
     createdAt: plain.createdAt || null,
     allowedActions,
   };

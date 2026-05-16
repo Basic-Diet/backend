@@ -1,3 +1,4 @@
+const crypto = require("node:crypto");
 const Order = require("../models/Order");
 const Delivery = require("../models/Delivery");
 const { notifyOrderUser } = require("../services/orderNotificationService");
@@ -64,6 +65,14 @@ async function transitionOrder(req, res, toStatus) {
   const fromStatus = order.status;
   order.status = normalizedToStatus;
   if (normalizedToStatus === ORDER_STATUSES.CONFIRMED && !order.confirmedAt) order.confirmedAt = new Date();
+  if (normalizedToStatus === ORDER_STATUSES.READY_FOR_PICKUP && mode === "pickup") {
+    const pickupCode = order.pickupCode || (order.pickup && order.pickup.pickupCode) || String(crypto.randomInt(100000, 999999));
+    order.pickupCode = pickupCode;
+    order.pickupCodeIssuedAt = order.pickupCodeIssuedAt || new Date();
+    order.pickup = order.pickup || {};
+    order.pickup.pickupCode = order.pickup.pickupCode || pickupCode;
+    order.pickup.readyAt = order.pickup.readyAt || new Date();
+  }
   if (normalizedToStatus === ORDER_STATUSES.FULFILLED && !order.fulfilledAt) order.fulfilledAt = new Date();
   if (normalizedToStatus === ORDER_STATUSES.CANCELLED && !order.cancelledAt) order.cancelledAt = new Date();
   let delivery = null;

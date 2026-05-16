@@ -48,14 +48,18 @@ async function handleAction(req, res) {
 
     if (entityType === "order") {
       try {
+        const orderAction = action === "start_preparation" ? "prepare" : action;
         const data = await executeDashboardOrderAction({
           orderId: entityId,
-          action,
+          action: orderAction,
           actor: { userId: req.dashboardUserId || req.userId, role },
           payload,
         });
         return res.status(200).json({ status: true, data });
       } catch (err) {
+        if (err.code === "PAYMENT_NOT_PAID" || err.code === "ORDER_PAYMENT_REQUIRED" || err.message === "ORDER_PAYMENT_REQUIRED") {
+          return errorResponse(res, 409, "ORDER_PAYMENT_REQUIRED", "Paid orders are required for operational fulfillment");
+        }
         if (err.status || err.code) {
           return errorResponse(res, err.status || 500, err.code || "INTERNAL", err.message, err.details);
         }
@@ -140,6 +144,12 @@ async function handleAction(req, res) {
     }
     if (err.message === "INVALID_STATE_TRANSITION") {
       return errorResponse(res, 409, "INVALID_TRANSITION", "This transition is not allowed");
+    }
+    if (err.message && err.message.startsWith("Invalid state transition")) {
+      return errorResponse(res, 409, "INVALID_STATE_TRANSITION", "This transition is not allowed");
+    }
+    if (err.code === "PAYMENT_NOT_PAID" || err.code === "ORDER_PAYMENT_REQUIRED" || err.message === "ORDER_PAYMENT_REQUIRED") {
+      return errorResponse(res, 409, "ORDER_PAYMENT_REQUIRED", "Paid orders are required for operational fulfillment");
     }
     if (err.message === "PICKUP_PREPARE_REQUIRED") {
       return errorResponse(res, 409, "PICKUP_PREPARE_REQUIRED", "Pickup preparation requires an explicit client request");

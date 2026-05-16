@@ -193,6 +193,8 @@ async function executeOrderAction({ orderId, action, actor = {}, payload = {} })
         ? String(payload.pickupCode).trim()
         : String(crypto.randomInt(100000, 999999));
     }
+    order.pickupCode = order.pickup.pickupCode;
+    order.pickupCodeIssuedAt = order.pickupCodeIssuedAt || now;
   } else if (normalizedAction === ACTIONS.DISPATCH) {
     if (mode !== "delivery") throw createServiceError(409, "INVALID_FULFILLMENT_METHOD", "Action requires delivery order");
     toStatus = ORDER_STATUSES.OUT_FOR_DELIVERY;
@@ -206,6 +208,11 @@ async function executeOrderAction({ orderId, action, actor = {}, payload = {} })
     if (mode === "pickup") {
       order.pickup = order.pickup || {};
       order.pickup.pickedUpAt = order.pickup.pickedUpAt || now;
+      if (order.pickup.pickupCode && !order.pickupCode) order.pickupCode = order.pickup.pickupCode;
+      order.pickupVerifiedAt = order.pickupVerifiedAt || now;
+      order.pickupVerifiedByDashboardUserId = actor && actor.userId && mongoose.Types.ObjectId.isValid(actor.userId)
+        ? actor.userId
+        : order.pickupVerifiedByDashboardUserId;
     }
   } else if (normalizedAction === ACTIONS.CANCEL) {
     toStatus = ORDER_STATUSES.CANCELLED;

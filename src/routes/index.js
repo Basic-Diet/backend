@@ -21,6 +21,8 @@ const dashboardMenuRoutes = require("./dashboardMenu");
 const courierRoutes = require("./courier");
 const kitchenRoutes = require("./kitchen");
 const dashboardOpsRoutes = require("./dashboardOps");
+const dashboardSubscriptionRoutes = require("./dashboardSubscriptions");
+const dashboardAccountingRoutes = require("./dashboardAccounting");
 const dashboardOrderRoutes = require("./dashboardOrders");
 const dashboardBoardRoutes = require("./dashboardBoards");
 const dashboardMenuIdentityRoutes = require("./dashboardMenuIdentity");
@@ -57,6 +59,8 @@ router.use("/admin/meal-planner-menu", adminMealPlannerMenuRoutes);
 router.use("/dashboard/meal-planner", adminMealPlannerMenuRoutes);
 router.use("/dashboard/menu", dashboardMenuRoutes);
 router.use("/dashboard/ops", dashboardOpsRoutes);
+router.use("/dashboard/subscriptions", dashboardSubscriptionRoutes);
+router.use("/dashboard/accounting", dashboardAccountingRoutes);
 router.use("/dashboard/orders", dashboardOrderRoutes);
 router.use("/dashboard", dashboardBoardRoutes);
 router.use("/dashboard/menu-identities-audit", dashboardMenuIdentityRoutes); // For internal audit
