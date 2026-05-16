@@ -9,6 +9,7 @@ For dashboard API implementation, treat `docs/dashboard-api/openapi.dashboard.js
 | Folder | Purpose | Audience | Source of truth? |
 | --- | --- | --- | --- |
 | `frontend-handoff` | Final dashboard frontend implementation docs | Frontend | Yes |
+| `auth` | Mobile/app authentication, OTP, token storage, and Flutter auth integration | Frontend/Backend | Yes for mobile auth docs |
 | `dashboard-api` | Dashboard API contracts and generated API docs | Frontend/Backend | Yes for API |
 | `one-time-orders` | One-Time Order specific docs | Frontend/Backend | Reference |
 | `backend` | Backend QA, release, validation, and production readiness docs | Backend | Reference |
@@ -19,6 +20,7 @@ For dashboard API implementation, treat `docs/dashboard-api/openapi.dashboard.js
 ## Quick Links
 
 - Frontend source of truth: [`frontend-handoff/`](frontend-handoff/)
+- Mobile/app authentication: [`auth/`](auth/)
 - Dashboard API primary references: [`dashboard-api/openapi.dashboard.json`](dashboard-api/openapi.dashboard.json) and [`dashboard-api/DASHBOARD_API_GUIDE.md`](dashboard-api/DASHBOARD_API_GUIDE.md)
 - One-Time Orders: [`one-time-orders/`](one-time-orders/)
 - Backend readiness and validation: [`backend/`](backend/)
