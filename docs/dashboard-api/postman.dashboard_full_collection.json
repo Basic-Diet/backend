@@ -7995,7 +7995,7 @@
                 "disabled": false
               }
             ],
-            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.\n\nRequired role: admin dashboard user unless noted otherwise.",
+            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.\n\nRequired role: admin dashboard user unless noted otherwise.",
             "url": {
               "raw": "{{baseUrl}}/dashboard/dashboard-users?page=1&limit=20",
               "host": [
@@ -8082,7 +8082,7 @@
                 "disabled": false
               }
             ],
-            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.\n\nRequired role: admin dashboard user unless noted otherwise.",
+            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.\n\nRequired role: admin dashboard user unless noted otherwise.",
             "url": {
               "raw": "{{baseUrl}}/dashboard/dashboard-users",
               "host": [
@@ -8168,7 +8168,7 @@
                 "disabled": false
               }
             ],
-            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.\n\nRequired role: admin dashboard user unless noted otherwise.",
+            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.\n\nRequired role: admin dashboard user unless noted otherwise.",
             "url": {
               "raw": "{{baseUrl}}/dashboard/dashboard-users/{{dashboardUserId}}",
               "host": [
@@ -8246,7 +8246,7 @@
                 "disabled": false
               }
             ],
-            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.\n\nRequired role: admin dashboard user unless noted otherwise.",
+            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.\n\nRequired role: admin dashboard user unless noted otherwise.",
             "url": {
               "raw": "{{baseUrl}}/dashboard/dashboard-users/{{dashboardUserId}}",
               "host": [
@@ -8333,7 +8333,7 @@
                 "disabled": false
               }
             ],
-            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.\n\nRequired role: admin dashboard user unless noted otherwise.\nSoft delete/toggle note: catalog-style deletes deactivate records with isActive=false where implemented; avoid hard deletion of historical data.",
+            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.\n\nRequired role: admin dashboard user unless noted otherwise.\nSoft delete/toggle note: catalog-style deletes deactivate records with isActive=false where implemented; avoid hard deletion of historical data.",
             "url": {
               "raw": "{{baseUrl}}/dashboard/dashboard-users/{{dashboardUserId}}",
               "host": [
@@ -8411,7 +8411,7 @@
                 "disabled": false
               }
             ],
-            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.\n\nRequired role: admin dashboard user unless noted otherwise.",
+            "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.\n\nRequired role: admin dashboard user unless noted otherwise.",
             "url": {
               "raw": "{{baseUrl}}/dashboard/dashboard-users/{{dashboardUserId}}/reset-password",
               "host": [

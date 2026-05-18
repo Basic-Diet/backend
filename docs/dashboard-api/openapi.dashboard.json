@@ -9870,7 +9870,7 @@
           "Dashboard Users"
         ],
         "summary": "List dashboard users",
-        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.",
+        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.",
         "operationId": "listDashboardUsers",
         "security": [
           {
@@ -9986,7 +9986,7 @@
           "Dashboard Users"
         ],
         "summary": "Create dashboard user",
-        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.",
+        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.",
         "operationId": "createDashboardUser",
         "security": [
           {
@@ -10138,7 +10138,7 @@
           "Dashboard Users"
         ],
         "summary": "Get dashboard user",
-        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.",
+        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.",
         "operationId": "getDashboardUser",
         "security": [
           {
@@ -10261,7 +10261,7 @@
           "Dashboard Users"
         ],
         "summary": "Update dashboard user",
-        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.",
+        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.",
         "operationId": "updateDashboardUser",
         "security": [
           {
@@ -10416,7 +10416,7 @@
           "Dashboard Users"
         ],
         "summary": "Delete dashboard user",
-        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.",
+        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.",
         "operationId": "deleteDashboardUser",
         "security": [
           {
@@ -10541,7 +10541,7 @@
           "Dashboard Users"
         ],
         "summary": "Reset dashboard user password",
-        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier.",
+        "description": "Dashboard user management. Roles: superadmin, admin, kitchen, courier, cashier.",
         "operationId": "resetDashboardUserPassword",
         "security": [
           {

@@ -61,10 +61,11 @@ const { getRestaurantBusinessDate } = require("../services/restaurantHoursServic
 const { normalizeStoredVatBreakdown, buildMoneySummary } = require("../utils/pricing");
 const { resolveSubscriptionAddonBillingMode } = require("../utils/subscription/subscriptionCatalog");
 const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
+const { DASHBOARD_ROLES, DASHBOARD_ROLE_LABEL } = require("../constants/dashboardRoles");
 
 const MAX_PREMIUM_PRICE = 10000;
 const MAX_VAT_PERCENTAGE = 100;
-const DASHBOARD_ROLES = new Set(["superadmin", "admin", "kitchen", "courier"]);
+const DASHBOARD_ROLE_SET = new Set(DASHBOARD_ROLES);
 const LEGACY_PLAN_FIELDS_TO_UNSET = {
   mealsPerDay: "",
   grams: "",
@@ -3346,6 +3347,33 @@ async function patchSettings(req, res) {
   }
 }
 
+async function getDashboardSettings(req, res) {
+  const settings = await Setting.find().lean();
+  const data = settings.reduce((acc, setting) => {
+    acc[setting.key] = setting.value;
+    return acc;
+  }, {});
+
+  data.cutoff_time = data.cutoff_time ?? "00:00";
+  data.restaurant_open_time = data.restaurant_open_time ?? "00:00";
+  data.restaurant_close_time = data.restaurant_close_time ?? "23:59";
+  data.delivery_windows = data.delivery_windows ?? ["08:00-11:00", "12:00-15:00"];
+  data.pickup_locations = data.pickup_locations ?? [];
+  data.skip_allowance = data.skip_allowance ?? data.skipAllowance;
+  data.skip_allowance = data.skip_allowance ?? 3;
+  data.premium_price = data.premium_price ?? 20;
+  data.subscription_delivery_fee_halala = data.subscription_delivery_fee_halala ?? 0;
+  data.vat_percentage = data.vat_percentage ?? 0;
+  data.one_time_meal_price = data.one_time_meal_price ?? 25;
+  data.one_time_premium_price = data.one_time_premium_price ?? data.one_time_meal_price;
+  data.one_time_delivery_fee = data.one_time_delivery_fee ?? 0;
+  data.custom_salad_base_price = data.custom_salad_base_price ?? 0;
+  data.custom_meal_base_price = data.custom_meal_base_price ?? 0;
+  delete data.skipAllowance;
+
+  return res.status(200).json({ status: true, data });
+}
+
 async function listDashboardUsers(req, res) {
   const pagination = resolvePaginationOrRespond(res, req.query || {});
   if (!pagination) {
@@ -4002,6 +4030,26 @@ async function updateSubscriptionAddonEntitlementsAdmin(req, res) {
   }
 }
 
+async function getSubscriptionAddonEntitlementsAdmin(req, res) {
+  const { id } = req.params;
+  if (!validateObjectIdOrRespond(res, id, "id")) {
+    return undefined;
+  }
+
+  const subscription = await Subscription.findById(id).select("_id addonSubscriptions").lean();
+  if (!subscription) {
+    return errorResponse(res, 404, "NOT_FOUND", "Subscription not found");
+  }
+
+  return res.status(200).json({
+    status: true,
+    data: {
+      subscriptionId: String(subscription._id),
+      addonEntitlements: subscription.addonSubscriptions || [],
+    },
+  });
+}
+
 async function normalizePremiumBalanceRowsOrThrow(rows) {
   if (!Array.isArray(rows)) {
     throw createControlledError(400, "INVALID", "premiumBalance must be an array");
@@ -4147,6 +4195,33 @@ async function updateSubscriptionBalancesAdmin(req, res) {
     });
     return errorResponse(res, 500, "INTERNAL", "Subscription balances update failed");
   }
+}
+
+async function getSubscriptionBalancesAdmin(req, res) {
+  const { id } = req.params;
+  if (!validateObjectIdOrRespond(res, id, "id")) {
+    return undefined;
+  }
+
+  const subscription = await Subscription.findById(id)
+    .select("_id premiumBalance addonBalance")
+    .lean();
+  if (!subscription) {
+    return errorResponse(res, 404, "NOT_FOUND", "Subscription not found");
+  }
+
+  return res.status(200).json({
+    status: true,
+    data: {
+      subscriptionId: String(subscription._id),
+      balances: {
+        premiumBalance: subscription.premiumBalance || [],
+        addonBalance: subscription.addonBalance || [],
+      },
+      premiumBalance: subscription.premiumBalance || [],
+      addonBalance: subscription.addonBalance || [],
+    },
+  });
 }
 
 async function getSubscriptionAuditLogAdmin(req, res) {
@@ -4949,8 +5024,8 @@ async function createDashboardUser(req, res) {
   if (!isValidEmailFormat(normalizedEmail)) {
     return errorResponse(res, 400, "INVALID", "Invalid email format");
   }
-  if (!DASHBOARD_ROLES.has(role)) {
-    return errorResponse(res, 400, "INVALID", "role must be one of: superadmin, admin, kitchen, courier");
+  if (!DASHBOARD_ROLE_SET.has(role)) {
+    return errorResponse(res, 400, "INVALID", `role must be one of: ${DASHBOARD_ROLE_LABEL}`);
   }
   const passwordValidation = validateDashboardPassword(password);
   if (!passwordValidation.ok) {
@@ -4993,8 +5068,8 @@ async function updateDashboardUser(req, res) {
 
   if (hasRole) {
     const normalizedRole = typeof body.role === "string" ? body.role.trim() : body.role;
-    if (!DASHBOARD_ROLES.has(normalizedRole)) {
-      return errorResponse(res, 400, "INVALID", "role must be one of: superadmin, admin, kitchen, courier");
+    if (!DASHBOARD_ROLE_SET.has(normalizedRole)) {
+      return errorResponse(res, 400, "INVALID", `role must be one of: ${DASHBOARD_ROLE_LABEL}`);
     }
     if (String(user._id) === String(req.dashboardUserId) && normalizedRole !== user.role) {
       return errorResponse(res, 400, "INVALID", "You cannot change your own role");
@@ -5217,6 +5292,7 @@ module.exports = {
   updateVatPercentage,
   updateCustomSaladBasePrice,
   updateCustomMealBasePrice,
+  getDashboardSettings,
   patchSettings,
   searchDashboard,
   getDashboardNotificationSummary,
@@ -5235,7 +5311,9 @@ module.exports = {
   getSubscriptionAdmin,
   listSubscriptionDaysAdmin,
   updateSubscriptionDeliveryAdmin,
+  getSubscriptionAddonEntitlementsAdmin,
   updateSubscriptionAddonEntitlementsAdmin,
+  getSubscriptionBalancesAdmin,
   updateSubscriptionBalancesAdmin,
   getSubscriptionAuditLogAdmin,
   cancelSubscriptionAdmin,

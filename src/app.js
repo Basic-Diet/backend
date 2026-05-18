@@ -26,7 +26,10 @@ function normalizeTopLevelStatusField(payload, responseStatusCode, reqPath = "")
     return payload;
   }
 
-  if (payload.status === true && !Object.prototype.hasOwnProperty.call(payload, "ok")) {
+  if (
+    (payload.status === true || payload.status === false)
+    && !Object.prototype.hasOwnProperty.call(payload, "ok")
+  ) {
     return payload;
   }
 
@@ -78,10 +81,19 @@ function createApp() {
 
   app.use(helmet());
 
-  const allowedOrigins = (process.env.CORS_ORIGINS || "")
+  const configuredCorsOrigins = (process.env.CORS_ORIGINS || "")
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean);
+  const localDashboardOrigins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ];
+  const allowedOrigins = process.env.NODE_ENV === "production"
+    ? configuredCorsOrigins
+    : Array.from(new Set([...configuredCorsOrigins, ...localDashboardOrigins]));
 
   const corsOptions = {
     origin: (origin, callback) => {

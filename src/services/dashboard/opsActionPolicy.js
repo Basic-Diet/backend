@@ -115,7 +115,6 @@ const TRANSITION_RULES = {
 };
 
 function normalizeActionId(actionId) {
-  if (actionId === "prepare") return "start_preparation";
   if (actionId === "ready-for-pickup") return "ready_for_pickup";
   return actionId;
 }

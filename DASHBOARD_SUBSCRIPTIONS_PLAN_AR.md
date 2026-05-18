@@ -82,7 +82,7 @@ Dashboard/Auth:
 - `GET /api/dashboard/auth/me`
 - `POST /api/dashboard/auth/logout`
 - JWT خاص بالداشبورد في `src/middleware/dashboardAuth.js`.
-- أدوار Dashboard في `DashboardUser`: `superadmin`, `admin`, `kitchen`, `courier`.
+- أدوار Dashboard في `DashboardUser`: `superadmin`, `admin`, `kitchen`, `courier`, `cashier`.
 - `dashboardRoleMiddleware` يسمح لـ `superadmin` بكل شيء، وباقي الأدوار حسب route.
 
 Dashboard APIs موجودة:
@@ -233,6 +233,8 @@ Dashboard APIs موجودة:
 | POST | `/api/dashboard/subscriptions/quote` | حساب quote قبل إنشاء اشتراك Admin | admin/superadmin | جديد مقترح |
 | GET | `/api/dashboard/subscriptions/:id` | تفاصيل اشتراك | admin/superadmin | موجود |
 | GET | `/api/dashboard/subscriptions/:id/days` | أيام الاشتراك | admin/superadmin | موجود |
+| GET | `/api/dashboard/subscriptions/:id/balances` | قراءة أرصدة الاشتراك | admin/superadmin/cashier | موجود |
+| GET | `/api/dashboard/subscriptions/:id/addon-entitlements` | قراءة Addon entitlements | admin/superadmin/cashier | موجود |
 | POST | `/api/dashboard/subscriptions/:id/cancel` | إلغاء اشتراك | admin/superadmin | موجود |
 | PUT | `/api/dashboard/subscriptions/:id/extend` | تمديد اشتراك | admin/superadmin | موجود |
 | POST | `/api/dashboard/subscriptions/:id/freeze` | تجميد اشتراك | admin/superadmin | موجود |
@@ -525,6 +527,7 @@ Dashboard APIs موجودة:
 | PUT | `/api/dashboard/subscriptions/:id/delivery` | تعديل بيانات التوصيل | جديد | يسجل audit/activity. |
 | PATCH | `/api/dashboard/subscriptions/:id/addon-entitlements` | تعديل addon subscriptions | جديد | يتطلب `reason`. |
 | PATCH | `/api/dashboard/subscriptions/:id/balances` | تعديل premium/addon balances | جديد | superadmin فقط ويتطلب `reason`. |
+| GET | `/api/dashboard/settings` | قراءة إعدادات الداشبورد | موجود | admin/superadmin فقط. |
 | GET | `/api/dashboard/subscriptions/:id/audit-log` | سجل audit/activity للاشتراك | جديد | يشمل subscription وsubscription days. |
 | POST | `/api/dashboard/subscriptions/:id/cancel` | إلغاء اشتراك | موجود/معدل | أضيف audit log. |
 | PUT | `/api/dashboard/subscriptions/:id/extend` | تمديد اشتراك | موجود/معدل | أضيف audit log. |

@@ -48,6 +48,7 @@ Required environment variables:
 
 - [API Integration Guide](API_INTEGRATION_GUIDE.md) - Arabic API reference
 - [Meal Planner Integration](MEAL_PLANNER_INTEGRATION.md) - Meal planner API guide
+- [Flutter Auth Integration](docs/auth/flutter-otp-auth-integration.md) - canonical mobile auth contract
 - [Test Coverage](docs/MEAL_PLANNER_TEST_COVERAGE.md) - Test documentation
 
 ## Project Structure

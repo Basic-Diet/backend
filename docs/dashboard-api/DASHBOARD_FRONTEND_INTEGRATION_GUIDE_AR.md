@@ -47,7 +47,7 @@
 ## 2. Overview
 
 **الهدف**: الشاشة الرئيسية التي يراها الإدارة للملخص والإحصائيات السريعة.
-**Roles**: admin, superadmin
+**Roles**: admin, superadmin, cashier (قراءة فقط للملخص والبحث)
 
 **Endpoints**:
 - `GET /api/dashboard/overview?limit=5`
@@ -69,7 +69,7 @@
 ## 3. Subscriptions List
 
 **الهدف**: استعراض، بحث، وفلترة قائمة الاشتراكات.
-**Roles**: admin, superadmin
+**Roles**: admin, superadmin, cashier (قراءة فقط)
 
 **Endpoints**:
 - `GET /api/dashboard/subscriptions`
@@ -159,6 +159,8 @@
 - `GET /api/dashboard/subscriptions/:id` 
 - `GET /api/dashboard/subscriptions/:id/days`
 - `GET /api/dashboard/subscriptions/:id/audit-log`
+- `GET /api/dashboard/subscriptions/:id/addon-entitlements`
+- `GET /api/dashboard/subscriptions/:id/balances`
 - `PUT /api/dashboard/subscriptions/:id/delivery`
 - `PATCH /api/dashboard/subscriptions/:id/addon-entitlements`
 - `PATCH /api/dashboard/subscriptions/:id/balances` (superadmin only)
@@ -177,6 +179,19 @@
 *Extend*:
 ```json
 { "days": 3, "reason": "Manual extension approved by support" }
+```
+*Delivery Update*:
+```json
+{
+  "deliveryMode": "delivery",
+  "deliveryZoneId": "64abcdef2222222222",
+  "deliveryAddress": {
+    "line1": "New address",
+    "notes": "Customer note"
+  },
+  "deliveryWindow": "16:00-18:00",
+  "reason": "Customer requested address change"
+}
 ```
 *Freeze*:
 ```json
@@ -923,6 +938,7 @@ Idempotency-Key: <stable-key-per-checkout-attempt>
 | **admin** | إعدادات النظام، التسعير، الاشتراكات ولوحة التشغيل | صلاحية واسعة ما عدا `balances` المالية. |
 | **kitchen** | Kitchen Board وشاشة متابعة المنيو | إمكانية الوصول لقوائم الطبخ وبدائل الـ Pickup (الـ `prepare`, `ready_for_pickup`). |
 | **courier** | Courier Board وجداول التوصيل حصراً | يملك تولي إجراءات النقل (`dispatch`, `fulfill`). |
+| **cashier** | Overview، المدفوعات، الطلبات، الاشتراكات، قراءة الأرصدة، وبحث المستخدمين الأساسي | قراءة فقط، مع السماح بتحقق الدفع اليدوي. ممنوع من الإعدادات، الخطط، Dashboard Users، الكتالوج، وعمليات المطبخ/التوصيل. |
 
 ---
 

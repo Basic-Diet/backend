@@ -26,10 +26,13 @@ const PromoCode = require("../src/models/PromoCode");
 const Delivery = require("../src/models/Delivery");
 const SubscriptionAuditLog = require("../src/models/SubscriptionAuditLog");
 const ActivityLog = require("../src/models/ActivityLog");
+const DashboardUser = require("../src/models/DashboardUser");
+const Setting = require("../src/models/Setting");
 const { DASHBOARD_JWT_SECRET } = require("../src/services/dashboardTokenService");
 
 const TEST_TAG = `dashboard-admin-${Date.now()}`;
 const ORIGINAL_ONE_TIME_ORDER_DELIVERY_ENABLED = process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
+let originalPremiumPriceSetting;
 
 function dashboardToken(role = "admin") {
   return jwt.sign(
@@ -39,8 +42,20 @@ function dashboardToken(role = "admin") {
   );
 }
 
+function dashboardTokenForUser(userId, role = "admin") {
+  return jwt.sign(
+    { userId: String(userId), role, tokenType: "dashboard_access" },
+    DASHBOARD_JWT_SECRET,
+    { expiresIn: "1h" }
+  );
+}
+
 function auth(role = "admin") {
   return { Authorization: `Bearer ${dashboardToken(role)}`, "Accept-Language": "en" };
+}
+
+function authForUser(userId, role = "admin") {
+  return { Authorization: `Bearer ${dashboardTokenForUser(userId, role)}`, "Accept-Language": "en" };
 }
 
 async function connect() {
@@ -79,6 +94,7 @@ async function cleanup() {
       ],
     }),
     PromoCode.deleteMany({ _id: { $in: promoIds } }),
+    DashboardUser.deleteMany({ email: { $regex: TEST_TAG } }),
     Subscription.deleteMany({ _id: { $in: subIds } }),
     Addon.deleteMany({ _id: { $in: addonIds } }),
     BuilderCategory.deleteMany({ _id: { $in: builderCategoryIds } }),
@@ -541,6 +557,11 @@ async function main() {
     expectStatus(res, 200, "update addon entitlements");
     assert.strictEqual(res.body.data.addonSubscriptions[0].category, "juice");
 
+    res = await api.get(`/api/dashboard/subscriptions/${ctx.subscription._id}/addon-entitlements`).set(auth());
+    expectStatus(res, 200, "get addon entitlements");
+    assert.strictEqual(res.body.data.subscriptionId, String(ctx.subscription._id));
+    assert.strictEqual(res.body.data.addonEntitlements[0].category, "juice");
+
     res = await api.patch(`/api/dashboard/subscriptions/${ctx.subscription._id}/balances`).set(auth("superadmin")).send({
       premiumBalance: [],
     });
@@ -553,6 +574,18 @@ async function main() {
     });
     expectStatus(res, 200, "update balances");
     assert.strictEqual(res.body.data.premiumBalance[0].premiumKey, "shrimp");
+
+    res = await api.get(`/api/dashboard/subscriptions/${ctx.subscription._id}/balances`).set(auth("cashier"));
+    expectStatus(res, 200, "cashier reads balances");
+    assert.strictEqual(res.body.data.subscriptionId, String(ctx.subscription._id));
+    assert.strictEqual(res.body.data.premiumBalance[0].premiumKey, "shrimp");
+    assert.strictEqual(res.body.data.addonBalance[0].remainingQty, 2);
+
+    res = await api.patch(`/api/dashboard/subscriptions/${ctx.subscription._id}/balances`).set(auth("cashier")).send({
+      reason: "cashier should not edit balances",
+      premiumBalance: [],
+    });
+    expectStatus(res, 403, "cashier cannot update balances");
 
     res = await api.get(`/api/dashboard/subscriptions/${ctx.subscription._id}/audit-log`).set(auth());
     expectStatus(res, 200, "get audit log");
@@ -756,6 +789,36 @@ async function main() {
     expectStatus(res, 200, "get restaurant hours");
     assert.strictEqual(res.body.data.restaurant_is_open, false);
 
+    originalPremiumPriceSetting = await Setting.findOne({ key: "premium_price" }).lean();
+    await Setting.findOneAndUpdate(
+      { key: "premium_price" },
+      { $set: { key: "premium_price", value: 33 } },
+      { upsert: true, new: true }
+    );
+    res = await api.get("/api/dashboard/settings").set(auth());
+    expectStatus(res, 200, "get dashboard settings");
+    assert.strictEqual(res.body.status, true);
+    assert.strictEqual(res.body.data.premium_price, 33);
+    res = await api.get("/api/dashboard/settings").set(auth("cashier"));
+    expectStatus(res, 403, "cashier cannot read settings");
+
+    const cashierUser = await DashboardUser.create({
+      email: `${TEST_TAG}-cashier@example.com`,
+      passwordHash: "not-used-in-this-test",
+      role: "cashier",
+      isActive: true,
+    });
+    res = await api.get("/api/dashboard/auth/me").set(authForUser(cashierUser._id, "cashier"));
+    expectStatus(res, 200, "dashboard auth me cashier");
+    assert.strictEqual(res.body.status, true);
+    assert.strictEqual(res.body.user.role, "cashier");
+    assert.strictEqual(res.body.data.user.role, "cashier");
+    res = await api.get("/api/dashboard/auth/me");
+    expectStatus(res, 200, "dashboard auth me anonymous");
+    assert.strictEqual(res.body.status, false);
+    assert.strictEqual(res.body.user, null);
+    assert.strictEqual(res.body.data.user, null);
+
     res = await api.post("/api/dashboard/zones").set(auth()).send({
       name: { en: `${TEST_TAG} API Zone` },
       deliveryFeeHalala: 1500,
@@ -815,6 +878,15 @@ async function main() {
       delete process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
     } else {
       process.env.ONE_TIME_ORDER_DELIVERY_ENABLED = ORIGINAL_ONE_TIME_ORDER_DELIVERY_ENABLED;
+    }
+    if (originalPremiumPriceSetting) {
+      await Setting.findOneAndUpdate(
+        { key: "premium_price" },
+        { $set: { value: originalPremiumPriceSetting.value, description: originalPremiumPriceSetting.description } },
+        { upsert: true }
+      );
+    } else if (originalPremiumPriceSetting === null) {
+      await Setting.deleteOne({ key: "premium_price" });
     }
     await cleanup();
     await mongoose.disconnect();

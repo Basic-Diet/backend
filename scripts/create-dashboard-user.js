@@ -12,8 +12,9 @@ const {
   validateDashboardPassword,
   hashDashboardPassword,
 } = require("../src/services/dashboardPasswordService");
+const { DASHBOARD_ROLES, DASHBOARD_ROLE_LABEL } = require("../src/constants/dashboardRoles");
 
-const VALID_ROLES = new Set(["superadmin", "admin", "kitchen", "courier"]);
+const VALID_ROLES = new Set(DASHBOARD_ROLES);
 
 function parseArgs(argv) {
   const args = {};
@@ -79,7 +80,7 @@ async function main() {
     process.exit(2);
   }
   if (role && !VALID_ROLES.has(role)) {
-    console.error("❌ invalid role. Allowed: superadmin, admin, kitchen, courier");
+    console.error(`❌ invalid role. Allowed: ${DASHBOARD_ROLE_LABEL}`);
     process.exit(2);
   }
   if (password !== undefined) {

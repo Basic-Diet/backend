@@ -17,7 +17,38 @@ const { adminImageUploadMiddleware } = require("../middleware/imageUpload");
 
 const router = Router();
 
-router.use(dashboardAuthMiddleware, dashboardRoleMiddleware(["admin"]));
+router.use(dashboardAuthMiddleware);
+
+const dashboardAdminOrCashierRead = dashboardRoleMiddleware(["admin", "cashier"]);
+
+router.get("/overview", dashboardAdminOrCashierRead, asyncHandler(controller.getDashboardOverview));
+router.get("/search", dashboardAdminOrCashierRead, asyncHandler(controller.searchDashboard));
+router.get("/subscriptions/summary", dashboardAdminOrCashierRead, asyncHandler(controller.getSubscriptionsSummaryAdmin));
+router.get("/subscriptions/export", dashboardAdminOrCashierRead, asyncHandler(controller.exportSubscriptionsAdmin));
+router.get("/subscriptions", dashboardAdminOrCashierRead, asyncHandler(controller.listSubscriptionsAdmin));
+router.get("/subscriptions/:id/days", dashboardAdminOrCashierRead, asyncHandler(controller.listSubscriptionDaysAdmin));
+router.get(
+  "/subscriptions/:id/addon-entitlements",
+  dashboardAdminOrCashierRead,
+  asyncHandler(controller.getSubscriptionAddonEntitlementsAdmin)
+);
+router.get(
+  "/subscriptions/:id/balances",
+  dashboardAdminOrCashierRead,
+  asyncHandler(controller.getSubscriptionBalancesAdmin)
+);
+router.get("/subscriptions/:id", dashboardAdminOrCashierRead, asyncHandler(controller.getSubscriptionAdmin));
+router.get("/users", dashboardAdminOrCashierRead, asyncHandler(controller.listAppUsers));
+router.get("/users/:id/subscriptions", dashboardAdminOrCashierRead, asyncHandler(controller.listAppUserSubscriptions));
+router.get("/users/:id", dashboardAdminOrCashierRead, asyncHandler(controller.getAppUser));
+router.get("/orders", dashboardAdminOrCashierRead, asyncHandler(controller.listOrdersAdmin));
+router.get("/orders/:id", dashboardAdminOrCashierRead, asyncHandler(controller.getOrderAdmin));
+router.get("/payments", dashboardAdminOrCashierRead, asyncHandler(controller.listPaymentsAdmin));
+router.get("/payments/:id/breakdown", dashboardAdminOrCashierRead, asyncHandler(controller.getPaymentAdmin));
+router.get("/payments/:id", dashboardAdminOrCashierRead, asyncHandler(controller.getPaymentAdmin));
+router.post("/payments/:id/verify", dashboardAdminOrCashierRead, asyncHandler(controller.verifyPaymentAdmin));
+
+router.use(dashboardRoleMiddleware(["admin"]));
 
 /**
  * @openapi
@@ -231,6 +262,7 @@ router.put("/meals/:id", adminImageUploadMiddleware, asyncHandler(mealController
 router.delete("/meals/:id", asyncHandler(mealController.deleteMeal));
 router.patch("/meals/:id/toggle", asyncHandler(mealController.toggleMealActive));
 
+router.get("/settings", asyncHandler(controller.getDashboardSettings));
 router.patch("/settings", asyncHandler(controller.patchSettings));
 /**
  * @openapi
@@ -341,7 +373,13 @@ router.get("/subscriptions/:id/days", asyncHandler(controller.listSubscriptionDa
 router.get("/subscriptions/:id/audit-log", asyncHandler(controller.getSubscriptionAuditLogAdmin));
 router.get("/subscriptions/:id", asyncHandler(controller.getSubscriptionAdmin));
 router.put("/subscriptions/:id/delivery", asyncHandler(controller.updateSubscriptionDeliveryAdmin));
+router.get("/subscriptions/:id/addon-entitlements", asyncHandler(controller.getSubscriptionAddonEntitlementsAdmin));
 router.patch("/subscriptions/:id/addon-entitlements", asyncHandler(controller.updateSubscriptionAddonEntitlementsAdmin));
+router.get(
+  "/subscriptions/:id/balances",
+  dashboardRoleMiddleware(["superadmin", "cashier"]),
+  asyncHandler(controller.getSubscriptionBalancesAdmin)
+);
 router.patch(
   "/subscriptions/:id/balances",
   dashboardRoleMiddleware(["superadmin"]),
@@ -349,6 +387,7 @@ router.patch(
 );
 router.post("/subscriptions/:id/cancel", asyncHandler(controller.cancelSubscriptionAdmin));
 router.put("/subscriptions/:id/extend", asyncHandler(controller.extendSubscriptionAdmin));
+router.post("/subscriptions/:id/extend", asyncHandler(controller.extendSubscriptionAdmin));
 router.post("/subscriptions/:id/freeze", asyncHandler(controller.freezeSubscriptionAdmin));
 router.post("/subscriptions/:id/unfreeze", asyncHandler(controller.unfreezeSubscriptionAdmin));
 router.post("/subscriptions/:id/days/:date/skip", asyncHandler(controller.skipSubscriptionDayAdmin));

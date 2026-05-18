@@ -62,6 +62,7 @@ node_modules/
 dist/
 .env
 .env.*
+!.env.example
 *.log
 logs/
 scripts/logs/

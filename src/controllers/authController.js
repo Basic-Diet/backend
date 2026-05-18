@@ -29,6 +29,8 @@ function serializeCoreUser(user) {
 function serializeAuthUser(user) {
   return {
     id: String(user._id),
+    fullName: user.name || null,
+    email: user.email || null,
     phoneE164: user.phoneE164 || user.phone,
     phoneVerified: Boolean(user.phoneVerified),
   };
@@ -55,6 +57,9 @@ function handleError(res, err) {
       : err.details;
     return errorResponse(res, err.status, mapAuthErrorCode(err.code), err.message, details);
   }
+  if (err && err.status && err.code) {
+    return errorResponse(res, err.status, err.code, err.message, err.details);
+  }
   return errorResponse(res, 500, "INTERNAL", "Unexpected error");
 }
 
@@ -67,6 +72,67 @@ function findClientUserByPhone(phoneE164) {
     role: "client",
     $or: [{ phoneE164 }, { phone: phoneE164 }],
   });
+}
+
+function normalizeOptionalFullName(fullName) {
+  if (fullName === undefined) return undefined;
+  if (fullName === null) return null;
+  const normalized = String(fullName).trim();
+  if (!normalized) return null;
+  if (normalized.length > 120) {
+    const err = new Error("fullName must be at most 120 characters");
+    err.status = 422;
+    err.code = "VALIDATION_ERROR";
+    throw err;
+  }
+  return normalized;
+}
+
+function normalizeOptionalEmail(email) {
+  if (email === undefined) return undefined;
+  if (email === null) return null;
+  const normalized = String(email).trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+    const err = new Error("email must be a valid email address");
+    err.status = 422;
+    err.code = "VALIDATION_ERROR";
+    throw err;
+  }
+  return normalized;
+}
+
+async function ensureRegistrationEmailAvailable(email, phone, userId = null) {
+  if (!email) return;
+
+  const [existingUser, existingAppUser] = await Promise.all([
+    User.findOne({ email }).lean(),
+    AppUser.findOne({ email }).lean(),
+  ]);
+  const normalizedPhone = String(phone || "");
+  const normalizedUserId = userId ? String(userId) : null;
+
+  if (
+    existingUser
+    && String(existingUser.phoneE164 || existingUser.phone || "") !== normalizedPhone
+    && (!normalizedUserId || String(existingUser._id) !== normalizedUserId)
+  ) {
+    const err = new Error("email is already in use");
+    err.status = 409;
+    err.code = "EMAIL_IN_USE";
+    throw err;
+  }
+
+  if (
+    existingAppUser
+    && String(existingAppUser.phone || "") !== normalizedPhone
+    && (!normalizedUserId || String(existingAppUser.coreUserId || "") !== normalizedUserId)
+  ) {
+    const err = new Error("email is already in use");
+    err.status = 409;
+    err.code = "EMAIL_IN_USE";
+    throw err;
+  }
 }
 
 async function ensureLinkedAppUser(coreUser) {
@@ -137,8 +203,10 @@ async function requestOtp(req, res) {
 
 async function requestRegisterOtp(req, res) {
   try {
-    const { phoneE164 } = req.body || {};
+    const { phoneE164, fullName, email } = req.body || {};
     const phone = assertValidPhoneE164(phoneE164);
+    const normalizedFullName = normalizeOptionalFullName(fullName);
+    const normalizedEmail = normalizeOptionalEmail(email);
     const existingUser = await findClientUserByPhone(phone);
 
     if (existingUser && existingUser.phoneVerified === true && existingUser.passwordHash) {
@@ -149,10 +217,19 @@ async function requestRegisterOtp(req, res) {
         "User already registered. Please login with phone and password."
       );
     }
+    await ensureRegistrationEmailAvailable(
+      normalizedEmail,
+      phone,
+      existingUser ? existingUser._id : null
+    );
 
     const result = await requestOtpForPhone(phone, {
       context: "app_register",
       ipAddress: getRequestIp(req),
+      pendingProfile: {
+        ...(normalizedFullName !== undefined ? { fullName: normalizedFullName } : {}),
+        ...(normalizedEmail !== undefined ? { email: normalizedEmail } : {}),
+      },
     });
 
     return res.status(200).json({
@@ -222,13 +299,15 @@ async function verifyOtp(req, res) {
 
 async function verifyRegister(req, res) {
   try {
-    const { phoneE164, otp, password, deviceId, deviceName } = req.body || {};
+    const { phoneE164, otp, password, deviceId, deviceName, fullName, email } = req.body || {};
     const passwordValidation = validateAppPassword(password);
     if (!passwordValidation.ok) {
       return errorResponse(res, 400, "WEAK_PASSWORD", passwordValidation.message);
     }
+    const requestFullName = normalizeOptionalFullName(fullName);
+    const requestEmail = normalizeOptionalEmail(email);
 
-    const { phone } = await verifyOtpCode({ phoneE164, otp });
+    const { phone, context, pendingProfile } = await verifyOtpCode({ phoneE164, otp });
     let coreUser = await findClientUserByPhone(phone);
     if (coreUser && coreUser.phoneVerified === true && coreUser.passwordHash) {
       return errorResponse(
@@ -246,9 +325,26 @@ async function verifyRegister(req, res) {
       return errorResponse(res, 403, "FORBIDDEN", "User account is inactive");
     }
 
+    const pendingFullName = context === "app_register" && pendingProfile
+      ? normalizeOptionalFullName(pendingProfile.fullName)
+      : undefined;
+    const pendingEmail = context === "app_register" && pendingProfile
+      ? normalizeOptionalEmail(pendingProfile.email)
+      : undefined;
+    const effectiveFullName = requestFullName !== undefined ? requestFullName : pendingFullName;
+    const effectiveEmail = requestEmail !== undefined ? requestEmail : pendingEmail;
+
+    await ensureRegistrationEmailAvailable(effectiveEmail, phone, coreUser._id);
+
     coreUser.phone = phone;
     coreUser.phoneE164 = phone;
     coreUser.phoneVerified = true;
+    if (effectiveFullName !== undefined) {
+      coreUser.name = effectiveFullName || undefined;
+    }
+    if (effectiveEmail !== undefined) {
+      coreUser.email = effectiveEmail || undefined;
+    }
     coreUser.passwordHash = await hashAppPassword(password);
     coreUser.lastLoginAt = new Date();
     await coreUser.save();

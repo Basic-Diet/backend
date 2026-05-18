@@ -161,6 +161,74 @@ async function run() {
     expectErrorCode(res, "USER_ALREADY_REGISTERED", "registered duplicate");
   });
 
+  await test("register request/verify with fullName and email saves profile fields", async () => {
+    const profilePhone = "+201110021112";
+    process.env.OTP_TEST_PHONE = profilePhone;
+    const requestRes = await api
+      .post("/api/auth/register/request-otp")
+      .send({
+        phoneE164: profilePhone,
+        fullName: "  Flutter Client  ",
+        email: "Flutter.Client@Example.COM",
+      });
+    expectStatus(requestRes, 200, "profile otp request");
+
+    const verifyRes = await api
+      .post("/api/auth/register/verify")
+      .send({
+        phoneE164: profilePhone,
+        otp: TEST_OTP,
+        password: TEST_PASSWORD,
+      });
+    expectStatus(verifyRes, 200, "profile verify");
+    assert.strictEqual(verifyRes.body.user.fullName, "Flutter Client");
+    assert.strictEqual(verifyRes.body.user.email, "flutter.client@example.com");
+
+    const user = await User.findOne({ phoneE164: profilePhone }).lean();
+    assert.strictEqual(user.name, "Flutter Client");
+    assert.strictEqual(user.email, "flutter.client@example.com");
+    process.env.OTP_TEST_PHONE = TEST_PHONE;
+  });
+
+  await test("register verify accepts fullName and email for backward-compatible clients", async () => {
+    const profilePhone = "+201110021113";
+    process.env.OTP_TEST_PHONE = profilePhone;
+    const requestRes = await api
+      .post("/api/auth/register/request-otp")
+      .send({ phoneE164: profilePhone });
+    expectStatus(requestRes, 200, "otp request without profile");
+
+    const verifyRes = await api
+      .post("/api/auth/register/verify")
+      .send({
+        phoneE164: profilePhone,
+        otp: TEST_OTP,
+        password: TEST_PASSWORD,
+        fullName: "Verify Payload",
+        email: "verify.payload@example.com",
+      });
+    expectStatus(verifyRes, 200, "verify profile payload");
+    assert.strictEqual(verifyRes.body.user.fullName, "Verify Payload");
+    assert.strictEqual(verifyRes.body.user.email, "verify.payload@example.com");
+    process.env.OTP_TEST_PHONE = TEST_PHONE;
+  });
+
+  await test("register invalid email returns VALIDATION_ERROR", async () => {
+    const res = await api
+      .post("/api/auth/register/request-otp")
+      .send({ phoneE164: "+201110021114", email: "not-an-email" });
+    expectStatus(res, 422, "invalid register email");
+    expectErrorCode(res, "VALIDATION_ERROR", "invalid register email");
+  });
+
+  await test("register duplicate email returns EMAIL_IN_USE", async () => {
+    const res = await api
+      .post("/api/auth/register/request-otp")
+      .send({ phoneE164: "+201110021115", email: "flutter.client@example.com" });
+    expectStatus(res, 409, "duplicate register email");
+    expectErrorCode(res, "EMAIL_IN_USE", "duplicate register email");
+  });
+
   await test("/me works with accessToken", async () => {
     const res = await api.get("/api/auth/me").set(authHeader(accessToken));
     expectStatus(res, 200, "me");
@@ -315,6 +383,33 @@ async function run() {
     expectStatus(refreshRes, 200, "startup refresh");
     const retryMe = await api.get("/api/auth/me").set(authHeader(refreshRes.body.accessToken));
     expectStatus(retryMe, 200, "startup retry me");
+    resetAccessToken = refreshRes.body.accessToken;
+  });
+
+  await test("canonical client profile update saves fullName and email", async () => {
+    const res = await api
+      .put("/api/client/profile")
+      .set(authHeader(resetAccessToken))
+      .send({ fullName: "Updated Client", email: "updated.client@example.com" });
+    expectStatus(res, 200, "client profile update");
+    assert.strictEqual(res.body.status, true);
+    assert.strictEqual(res.body.data.user.fullName, "Updated Client");
+    assert.strictEqual(res.body.data.user.email, "updated.client@example.com");
+
+    const getRes = await api.get("/api/client/profile").set(authHeader(resetAccessToken));
+    expectStatus(getRes, 200, "client profile get");
+    assert.strictEqual(getRes.body.data.user.fullName, "Updated Client");
+    assert.strictEqual(getRes.body.data.user.email, "updated.client@example.com");
+  });
+
+  await test("public app config returns safe mobile config shape", async () => {
+    const res = await api.get("/api/app/config");
+    expectStatus(res, 200, "app config");
+    assert.strictEqual(res.body.status, true);
+    assert(res.body.data.support, "support object returned");
+    assert(res.body.data.features, "features object returned");
+    assert(res.body.data.payment, "payment object returned");
+    assert(res.body.data.app, "app object returned");
   });
 
   await test("legacy OTP/app endpoints still respond", async () => {

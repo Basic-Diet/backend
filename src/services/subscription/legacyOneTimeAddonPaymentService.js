@@ -52,8 +52,11 @@ async function createLegacyOneTimeAddonPaymentFlow({
   cutoffAction,
   validateRedirectUrlFn,
 }) {
-  if (!addonId || !date) {
-    return buildErrorResult(400, "INVALID", "Missing addonId or date");
+  if (!addonId) {
+    return buildErrorResult(422, "VALIDATION_ERROR", "addonId is required");
+  }
+  if (!date) {
+    return buildErrorResult(422, "VALIDATION_ERROR", "date is required");
   }
 
   const sub = await Subscription.findById(subscriptionId).populate("planId");

@@ -28,4 +28,65 @@ async function getSettings(_req, res) {
     return res.status(200).json({ status: true, data });
 }
 
-module.exports = { getSettings };
+function pickSetting(data, key, fallback = null) {
+    return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback;
+}
+
+async function getAppConfig(_req, res) {
+    const settings = await Setting.find({
+        key: {
+            $in: [
+                "support_phone",
+                "support_whatsapp",
+                "support_email",
+                "payment_provider",
+                "pickup_locations",
+                "delivery_windows",
+                "vat_percentage",
+                "restaurant_open_time",
+                "restaurant_close_time",
+                "cutoff_time",
+            ],
+        },
+    }).lean();
+    const data = settings.reduce((acc, s) => {
+        acc[s.key] = s.value;
+        return acc;
+    }, {});
+
+    return res.status(200).json({
+        status: true,
+        data: {
+            support: {
+                phone: pickSetting(data, "support_phone"),
+                whatsapp: pickSetting(data, "support_whatsapp"),
+                email: pickSetting(data, "support_email"),
+            },
+            features: {
+                pickup: true,
+                delivery: true,
+                subscriptions: true,
+                oneTimeOrders: true,
+                mealPlanner: true,
+            },
+            payment: {
+                provider: pickSetting(data, "payment_provider", "moyasar"),
+                vatPercentage: Number(pickSetting(data, "vat_percentage", 0)) || 0,
+                callbackMode: "backend_redirect_or_client_url",
+            },
+            fulfillment: {
+                pickupLocations: Array.isArray(data.pickup_locations) ? data.pickup_locations : [],
+                deliveryWindows: Array.isArray(data.delivery_windows) ? data.delivery_windows : [],
+                restaurantOpenTime: pickSetting(data, "restaurant_open_time", "00:00"),
+                restaurantCloseTime: pickSetting(data, "restaurant_close_time", "23:59"),
+                cutoffTime: pickSetting(data, "cutoff_time", "00:00"),
+            },
+            app: {
+                minVersion: null,
+                latestVersion: null,
+            },
+        },
+    });
+}
+
+module.exports = { getSettings, getAppConfig };

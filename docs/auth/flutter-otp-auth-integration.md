@@ -42,6 +42,22 @@ All canonical mobile auth endpoints are mounted under:
 
 Dashboard auth is separate and is not documented here.
 
+## Canonical Mobile Auth API
+
+Flutter/mobile should use these canonical endpoints:
+
+- `POST /api/auth/login`
+- `POST /api/auth/register/request-otp`
+- `POST /api/auth/register/verify`
+- `POST /api/auth/refresh`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
+- `POST /api/auth/logout-all`
+
+Dashboard clients must use dashboard auth routes only. Dashboard auth and mobile auth are intentionally separate.
+
+`/api/app/*` is legacy/alternate app auth and profile compatibility. New Flutter code should not use it unless explicitly required for an old flow.
+
 ## Token Storage In Flutter
 
 Use `flutter_secure_storage` for:
@@ -90,9 +106,13 @@ Request:
 
 ```json
 {
-  "phoneE164": "+201110021106"
+  "phoneE164": "+201110021106",
+  "fullName": "Optional User Name",
+  "email": "optional.user@example.com"
 }
 ```
+
+`fullName` and `email` are optional. If sent here, they are preserved with the pending OTP registration and saved after successful verification.
 
 Success:
 
@@ -108,6 +128,8 @@ Success:
 Errors:
 
 - `INVALID_PHONE`
+- `VALIDATION_ERROR`
+- `EMAIL_IN_USE`
 - `USER_ALREADY_REGISTERED`
 - `OTP_RATE_LIMITED`
 - `OTP_SEND_FAILED`
@@ -126,10 +148,14 @@ Request:
   "phoneE164": "+201110021106",
   "otp": "123456",
   "password": "UserStrongPassword123",
+  "fullName": "Optional User Name",
+  "email": "optional.user@example.com",
   "deviceId": "optional-device-id",
   "deviceName": "iPhone 15"
 }
 ```
+
+`fullName` and `email` may also be sent here for older clients that did not send them during `request-otp`. They remain optional; phone-only users are allowed.
 
 Success:
 
@@ -143,6 +169,8 @@ Success:
   "refreshExpiresIn": 2592000,
   "user": {
     "id": "user_id",
+    "fullName": "Optional User Name",
+    "email": "optional.user@example.com",
     "phoneE164": "+201110021106",
     "phoneVerified": true
   }
@@ -152,6 +180,8 @@ Success:
 Errors:
 
 - `WEAK_PASSWORD`
+- `VALIDATION_ERROR`
+- `EMAIL_IN_USE`
 - `OTP_EXPIRED_OR_INVALID`
 - `OTP_VERIFY_FAILED`
 - `USER_ALREADY_REGISTERED`
@@ -188,6 +218,8 @@ Success:
   "refreshExpiresIn": 2592000,
   "user": {
     "id": "user_id",
+    "fullName": "User Name",
+    "email": "user@example.com",
     "phoneE164": "+201110021106",
     "phoneVerified": true
   }
@@ -251,6 +283,8 @@ Success:
   "ok": true,
   "user": {
     "id": "user_id",
+    "fullName": "User Name",
+    "email": "user@example.com",
     "phoneE164": "+201110021106",
     "phoneVerified": true
   }
@@ -260,6 +294,7 @@ Success:
 Errors:
 
 - `AUTH_REQUIRED`
+- `MISSING_TOKEN` (legacy clients may use this name; current backend returns `AUTH_REQUIRED` for missing bearer token)
 - `TOKEN_EXPIRED`
 - `TOKEN_INVALID`
 - `SESSION_REVOKED`
@@ -267,6 +302,8 @@ Errors:
 ## 6. Logout Current Device
 
 Revokes the submitted refresh token/current session.
+
+Flutter should call this endpoint with the current `refreshToken` before clearing secure storage on intentional logout.
 
 ```http
 POST /api/auth/logout
@@ -448,12 +485,15 @@ Forgot password:
 | `INVALID_PHONE` | Invalid phone number | Ask user to check phone number |
 | `USER_ALREADY_REGISTERED` | User already has verified phone and password | Move to Login |
 | `INVALID_CREDENTIALS` | Phone or password is wrong | Show generic login error |
+| `VALIDATION_ERROR` | Request body failed validation | Show the field message |
+| `EMAIL_IN_USE` | Email belongs to another user | Ask user to use another email |
 | `WEAK_PASSWORD` | Password is too weak | Ask for stronger password |
 | `OTP_RATE_LIMITED` | OTP requests are too frequent | Show wait timer |
 | `OTP_SEND_FAILED` | OTP provider send failed | Ask user to retry later |
 | `OTP_VERIFY_FAILED` | OTP provider verification failed | Show retry later message |
 | `OTP_EXPIRED_OR_INVALID` | OTP expired or invalid | Ask user to retry or request new OTP |
 | `REFRESH_TOKEN_INVALID` | Refresh token is unknown/malformed | Clear tokens and open Login |
+| `INVALID_REFRESH_TOKEN` | Older naming for invalid refresh token | Treat like `REFRESH_TOKEN_INVALID` |
 | `REFRESH_TOKEN_EXPIRED` | Refresh token expired | Clear tokens and open Login |
 | `AUTH_REQUIRED` | Missing auth token | Open Login |
 | `TOKEN_EXPIRED` | Access token expired | Call `/api/auth/refresh` |

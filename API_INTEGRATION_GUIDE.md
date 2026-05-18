@@ -3,6 +3,193 @@
 > مرجع تنفيذي لمطور التطبيق (Frontend / Mobile)
 > مبني على الكود الفعلي — لا افتراضات قديمة
 
+> ملاحظة Dashboard: توثيق Dashboard التفصيلي موجود في `docs/dashboard-api/DASHBOARD_API_GUIDE.md`. يدعم الباك إند دور `cashier` للقراءة فقط في المدفوعات/الطلبات/الاشتراكات وبحث المستخدمين الأساسي، مع منع الإعدادات والخطط والكتالوج وإدارة مستخدمي الداشبورد. تمت إضافة `GET /api/dashboard/settings` للـ admin/superadmin، و`GET /api/dashboard/subscriptions/:id/balances` و`GET /api/dashboard/subscriptions/:id/addon-entitlements` للـ admin/superadmin/cashier.
+
+---
+
+## Flutter canonical APIs
+
+Dashboard authentication and mobile authentication are intentionally separate.
+
+Flutter/mobile should use:
+
+- `POST /api/auth/login`
+- `POST /api/auth/register/request-otp`
+- `POST /api/auth/register/verify`
+- `POST /api/auth/refresh`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
+- `POST /api/auth/logout-all`
+- `GET /api/client/profile`
+- `PUT /api/client/profile`
+- `GET /api/app/config`
+- `GET /api/settings` for the broader public settings payload when needed
+- `POST /api/subscriptions/quote`
+- `POST /api/subscriptions/checkout`
+
+Dashboard should use dashboard auth routes only. `/api/app/*` is legacy/alternate mobile compatibility and should not be used by new Flutter code unless a legacy flow explicitly requires it.
+
+### Mobile registration profile fields
+
+`POST /api/auth/register/request-otp` accepts optional `fullName` and `email`:
+
+```json
+{
+  "phoneE164": "+201110021106",
+  "fullName": "Client Name",
+  "email": "client@example.com"
+}
+```
+
+`POST /api/auth/register/verify` remains backward compatible and may also receive `fullName` and `email`:
+
+```json
+{
+  "phoneE164": "+201110021106",
+  "otp": "123456",
+  "password": "UserStrongPassword123",
+  "fullName": "Client Name",
+  "email": "client@example.com"
+}
+```
+
+`email` is optional, normalized lowercase, and duplicate email returns:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "EMAIL_IN_USE",
+    "message": "email is already in use"
+  }
+}
+```
+
+Validation errors use:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "email must be a valid email address"
+  }
+}
+```
+
+### Auth logout/session contract
+
+Flutter should call `POST /api/auth/logout` with the current refresh token before clearing local secure storage:
+
+```json
+{
+  "refreshToken": "secure_refresh_token"
+}
+```
+
+Success:
+
+```json
+{ "ok": true, "status": "logged_out" }
+```
+
+`POST /api/auth/logout-all` revokes all active refresh sessions for the current user:
+
+```json
+{ "ok": true, "status": "logged_out_all_devices" }
+```
+
+On refresh failure with `TOKEN_EXPIRED`, `TOKEN_INVALID`, `SESSION_REVOKED`, `REFRESH_TOKEN_INVALID`, `REFRESH_TOKEN_EXPIRED`, or old-client `INVALID_REFRESH_TOKEN`, Flutter should clear the local session and navigate to login.
+
+### Payment redirect/callback contract
+
+Payment creation endpoints may accept:
+
+- `successUrl`: optional client success redirect URL.
+- `backUrl`: optional client cancel/back redirect URL.
+- `cancelUrl`: not a general canonical field today; use `backUrl` unless a specific endpoint documents otherwise.
+
+If `successUrl`/`backUrl` are omitted, backend/provider callbacks use backend web routes such as:
+
+- `/payments/success`
+- `/payments/cancel`
+- `/payment-success`
+- `/payment-cancel`
+
+Flutter may either pass mobile deep links as `successUrl`/`backUrl`, or pass backend/web callback URLs and then poll/verify payment status. The backend does not force a product decision. Do not hardcode production domains in Flutter; configure URLs per environment.
+
+Some payment payloads include `verify_url`, for example `/api/payments/verify?...`. This is a backend verification helper for redirect flows. For mobile UX, direct endpoint verification/polling is usually clearer:
+
+- Subscription checkout: `GET /api/subscriptions/checkout-drafts/:draftId` and `POST /api/subscriptions/checkout-drafts/:draftId/verify-payment`
+- Day payments: `POST /api/subscriptions/:id/days/:date/payments/:paymentId/verify`
+- One-time add-on day payments: `POST /api/subscriptions/:id/days/:date/one-time-addons/payments/:paymentId/verify`
+- One-time orders: `POST /api/orders/:orderId/payments/:paymentId/verify`
+
+Use placeholder examples only, such as `https://your-app.example/payment-success`.
+
+### One-time add-on payment contract
+
+Canonical day-planning payment endpoint:
+
+```http
+POST /api/subscriptions/:id/days/:date/one-time-addons/payments
+```
+
+This endpoint pays pending one-time add-ons already saved on the subscription day. Request body is optional for the current canonical planner flow:
+
+```json
+{
+  "successUrl": "https://your-app.example/payment-success",
+  "backUrl": "https://your-app.example/payment-cancel"
+}
+```
+
+Legacy direct add-on purchase endpoint:
+
+```http
+POST /api/subscriptions/:id/addons/one-time
+```
+
+Required body:
+
+```json
+{
+  "addonId": "addon_id",
+  "date": "2026-05-20",
+  "successUrl": "https://your-app.example/payment-success",
+  "backUrl": "https://your-app.example/payment-cancel"
+}
+```
+
+If `addonId` is missing on the legacy endpoint, backend returns `422 VALIDATION_ERROR` with message `addonId is required`.
+
+### Pickup behavior
+
+For subscription quote/checkout with `delivery.type = "pickup"`:
+
+- One active pickup location: `pickupLocationId` may be omitted; backend auto-selects it.
+- More than one active pickup location: `pickupLocationId` is required.
+- No active pickup location: backend returns `VALIDATION_ERROR`.
+
+`pickupLocationId` is optional for the current one-branch production setup and future-proofed for multi-branch.
+
+### Profile and app config
+
+`GET /api/client/profile` returns the official Flutter profile read model.
+
+`PUT /api/client/profile` updates only:
+
+```json
+{
+  "fullName": "Client Name",
+  "email": "client@example.com"
+}
+```
+
+Address book, preferences, allergies, and goals are not currently implemented as canonical client profile systems. Product confirmation is needed before adding those surfaces.
+
+`GET /api/app/config` is a safe public mobile config endpoint. It returns support, feature flags, safe payment metadata, fulfillment settings, and app version placeholders without exposing provider keys or secrets.
+
 ---
 
 ## المحتويات

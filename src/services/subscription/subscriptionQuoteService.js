@@ -510,20 +510,40 @@ async function resolveCheckoutQuoteOrThrow(
     err.code = "VALIDATION_ERROR";
     throw err;
   }
-  if (delivery.type === "pickup" && delivery.pickupLocationId && !delivery.address) {
+  if (delivery.type === "pickup") {
     const pickupLocations = await getSettingValue("pickup_locations", []);
-    const resolvedPickupLocation = resolvePickupLocationSelection(
-      pickupLocations,
-      delivery.pickupLocationId,
-      lang,
-      windows
-    );
+    const activePickupLocations = Array.isArray(pickupLocations)
+      ? pickupLocations.filter((location) => location && location.isActive !== false)
+      : [];
+
+    if (!delivery.pickupLocationId) {
+      if (activePickupLocations.length === 1) {
+        const onlyLocation = activePickupLocations[0];
+        delivery.pickupLocationId = String(
+          onlyLocation.id
+          || onlyLocation.locationId
+          || "pickup_location_1"
+        );
+      } else if (activePickupLocations.length > 1) {
+        const err = new Error("pickupLocationId is required when multiple pickup locations are active");
+        err.code = "VALIDATION_ERROR";
+        throw err;
+      } else {
+        const err = new Error("No active pickup location is configured");
+        err.code = "VALIDATION_ERROR";
+        throw err;
+      }
+    }
+
+    const resolvedPickupLocation = resolvePickupLocationSelection(activePickupLocations, delivery.pickupLocationId, lang, windows);
     if (!resolvedPickupLocation) {
       const err = new Error("Invalid pickup location");
       err.code = "VALIDATION_ERROR";
       throw err;
     }
-    delivery.address = resolvedPickupLocation.address || null;
+    if (!delivery.address) {
+      delivery.address = resolvedPickupLocation.address || null;
+    }
   }
   if (delivery.type === "delivery" && !delivery.address && !allowMissingDeliveryAddress) {
     const err = new Error("Missing delivery address");

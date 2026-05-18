@@ -56,4 +56,4 @@ Dashboard auth is separate from mobile app auth. Use:
 
 `Authorization: Bearer {{dashboardToken}}`
 
-Roles: `superadmin`, `admin`, `kitchen`, `courier`.
+Roles: `superadmin`, `admin`, `kitchen`, `courier`, `cashier`.

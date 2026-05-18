@@ -428,6 +428,23 @@ async function runTests() {
     assertEqual(Number(res.body.data?.breakdown?.addonsTotalHalala || 0), expectedAddonsTotal, 'plan add-on total uses per-day pricing');
   });
 
+  await test('POST /api/subscriptions/quote auto-selects sole pickup location when omitted', async () => {
+    const quotePayload = {
+      planId: String(testPlan._id),
+      grams: 300,
+      mealsPerDay: 2,
+      startDate,
+      delivery: {
+        type: 'pickup',
+      },
+    };
+
+    const res = await makeRequest('POST', '/api/subscriptions/quote', quotePayload);
+    assertEqual(res.status, 200, 'pickup quote status');
+    assertEqual(res.body.status, true, 'pickup quote status field');
+    assertEqual(Number(res.body.data?.breakdown?.deliveryFeeHalala || 0), 0, 'pickup delivery fee is zero');
+  });
+
   await test('POST /api/subscriptions/quote rejects direct purchase of item add-ons', async () => {
     const quotePayload = {
       planId: String(testPlan._id),

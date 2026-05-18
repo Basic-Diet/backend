@@ -14,7 +14,7 @@ Send it on every protected request:
 
 `Authorization: Bearer {{dashboardToken}}`
 
-Roles in code are `superadmin`, `admin`, `kitchen`, and `courier`. Most `/api/dashboard` admin routes require `admin`; `/api/dashboard/subscriptions/:id/balances` adds `superadmin`; operations board allows `admin`, `kitchen`, and `courier` with action policy checks.
+Roles in code are `superadmin`, `admin`, `kitchen`, `courier`, and `cashier`. Most mutating `/api/dashboard` admin routes require `admin`; `superadmin` bypasses role checks. `cashier` is intentionally read-only for overview/search, payments, orders, subscriptions, subscription balances, addon entitlements, and basic user lookup, plus payment verification where the payment workflow allows manual verification. Settings, plans, dashboard users, catalog/menu, and kitchen/courier operations remain forbidden for cashier.
 
 ## 3. Endpoint Groups
 
@@ -44,6 +44,12 @@ Use `PATCH /api/dashboard/subscriptions/{id}/addon-entitlements` with `reason` a
 ### Adjust balances with audit
 
 Use `PATCH /api/dashboard/subscriptions/{id}/balances` as `superadmin`. A reason is required. Current implementation replaces `premiumBalance` and/or `addonBalance` arrays; it does not apply delta objects even though delta-style examples are useful for product discussion.
+
+Read balances with `GET /api/dashboard/subscriptions/{id}/balances` as `admin`, `superadmin`, or `cashier`. The response is `{ "status": true, "data": { "subscriptionId", "balances", "premiumBalance", "addonBalance" } }`.
+
+Read addon entitlements with `GET /api/dashboard/subscriptions/{id}/addon-entitlements` as `admin`, `superadmin`, or `cashier`. The response is `{ "status": true, "data": { "subscriptionId", "addonEntitlements" } }`. Mutations still use the replacement-style `PATCH` endpoint and require admin/superadmin.
+
+Read dashboard settings with `GET /api/dashboard/settings` as `admin` or `superadmin`. The response is `{ "status": true, "data": { ...settings } }`. `cashier` cannot read or update settings.
 
 ### Manage addon plans/items
 

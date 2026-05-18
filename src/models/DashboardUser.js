@@ -1,10 +1,11 @@
 const mongoose = require("mongoose");
+const { DASHBOARD_ROLES } = require("../constants/dashboardRoles");
 
 const DashboardUserSchema = new mongoose.Schema(
   {
     email: { type: String, required: true, unique: true, trim: true, lowercase: true },
     passwordHash: { type: String, required: true },
-    role: { type: String, enum: ["superadmin", "admin", "kitchen", "courier"], required: true },
+    role: { type: String, enum: DASHBOARD_ROLES, required: true },
     isActive: { type: Boolean, default: true },
     lastLoginAt: { type: Date, default: null },
     failedAttempts: { type: Number, default: 0 },

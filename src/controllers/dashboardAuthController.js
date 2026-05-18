@@ -74,16 +74,29 @@ async function login(req, res) {
 
 async function me(req, res) {
   if (!req.dashboardUserId) {
-    return res.status(200).json({ ok: false, user: null });
+    return res.status(200).json({
+      status: false,
+      data: { user: null },
+      user: null,
+    });
   }
   const user = await DashboardUser.findOne({
     _id: req.dashboardUserId,
     isActive: true,
   }).lean();
   if (!user) {
-    return res.status(200).json({ ok: false, user: null });
+    return res.status(200).json({
+      status: false,
+      data: { user: null },
+      user: null,
+    });
   }
-  return res.status(200).json({ status: true, user: sanitizeDashboardUser(user) });
+  const sanitizedUser = sanitizeDashboardUser(user);
+  return res.status(200).json({
+    status: true,
+    data: { user: sanitizedUser },
+    user: sanitizedUser,
+  });
 }
 
 async function logout(_req, res) {

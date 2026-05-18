@@ -13,6 +13,67 @@
 
 هذا الدليل مبني على **الكود الحالي الفعلي** داخل المشروع، وليس على افتراضات قديمة.
 
+## Flutter auth/profile/payment notes
+
+- Flutter auth canonical API هو `/api/auth/*` وليس Dashboard auth.
+- Dashboard auth و Mobile auth منفصلان عمدًا.
+- `/api/app/*` legacy/alternate compatibility فقط، ولا يستخدمه Flutter الجديد إلا لو كان مطلوبًا صراحة.
+- الملف الشخصي الرسمي للتطبيق:
+  - `GET /api/client/profile`
+  - `PUT /api/client/profile` لتحديث `fullName` و`email` فقط.
+- إعدادات التطبيق العامة الآمنة:
+  - `GET /api/app/config`
+  - ويمكن استخدام `GET /api/settings` عند الحاجة للـ settings العامة الأوسع.
+
+### Payment redirects
+
+مدفوعات الـ Meal Planner واليوم الواحد تدعم تمرير:
+
+```json
+{
+  "successUrl": "https://your-app.example/payment-success",
+  "backUrl": "https://your-app.example/payment-cancel"
+}
+```
+
+لو لم تُرسل هذه القيم يستخدم backend مسارات الويب العامة مثل `/payments/success` و`/payments/cancel`.
+لا يجب على Flutter hardcode domains؛ استخدم config per environment. يمكن لفريق Flutter اختيار deep links أو backend callback URLs ثم polling/verify حسب تجربة المنتج.
+
+### One-time add-ons
+
+في flow الـ planner الحالي:
+
+```http
+POST /api/subscriptions/:id/days/:date/one-time-addons/payments
+```
+
+يدفع الـ pending one-time add-ons المحفوظة على اليوم. body اختياري للـ canonical planner flow، ويمكن تمرير `successUrl` و`backUrl`.
+
+الـ legacy direct add-on endpoint هو:
+
+```http
+POST /api/subscriptions/:id/addons/one-time
+```
+
+ويحتاج:
+
+```json
+{
+  "addonId": "addon_id",
+  "date": "2026-05-20",
+  "successUrl": "https://your-app.example/payment-success",
+  "backUrl": "https://your-app.example/payment-cancel"
+}
+```
+
+### Pickup location
+
+في quote/checkout لو `delivery.type = "pickup"`:
+
+- فرع pickup واحد active: يمكن حذف `pickupLocationId` والباك إند يختاره تلقائيًا.
+- أكثر من فرع active: يجب إرسال `pickupLocationId`.
+- لا يوجد فرع active: يرجع `VALIDATION_ERROR`.
+
 ## 1. الفكرة الأساسية
 
 النظام لم يعد يعتمد على `mealIds[]` كاختيار مباشر.

@@ -4,6 +4,7 @@ const { authMiddleware } = require("../middleware/auth");
 const { login, register, getProfile, updateProfile, getTodayPickup } = require("../controllers/appAuthController");
 const { verifyOtp } = require("../controllers/authController");
 const { listCurrentUserSubscriptions } = require("../controllers/subscriptionController");
+const { getAppConfig } = require("../controllers/settingsController");
 const asyncHandler = require("../middleware/asyncHandler");
 
 const router = Router();
@@ -11,6 +12,7 @@ const router = Router();
 router.post("/login", otpLimiter, asyncHandler(login));
 router.post("/register", otpLimiter, asyncHandler(register));
 router.post("/verify", otpVerifyLimiter, asyncHandler(verifyOtp));
+router.get("/config", asyncHandler(getAppConfig));
 router.get("/profile", authMiddleware, asyncHandler(getProfile));
 router.put("/profile", authMiddleware, asyncHandler(updateProfile));
 router.get("/subscriptions", authMiddleware, asyncHandler(listCurrentUserSubscriptions));

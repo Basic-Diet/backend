@@ -1,6 +1,6 @@
 const { Router } = require("express");
 const { authMiddleware } = require("../middleware/auth");
-const { getClientProfile } = require("../controllers/clientProfileController");
+const { getClientProfile, updateClientProfile } = require("../controllers/clientProfileController");
 const asyncHandler = require("../middleware/asyncHandler");
 
 const router = Router();
@@ -20,5 +20,6 @@ const router = Router();
  *         description: Unauthorized
  */
 router.get("/profile", authMiddleware, asyncHandler(getClientProfile));
+router.put("/profile", authMiddleware, asyncHandler(updateClientProfile));
 
 module.exports = router;

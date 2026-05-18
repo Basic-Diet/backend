@@ -43,6 +43,12 @@ function collectDefaultDashboardUsersFromEnv() {
       password: process.env.DASHBOARD_DEFAULT_COURIER_PASSWORD,
       isActive: parseBoolean(process.env.DASHBOARD_DEFAULT_COURIER_ACTIVE, true),
     },
+    {
+      role: "cashier",
+      email: process.env.DASHBOARD_DEFAULT_CASHIER_EMAIL,
+      password: process.env.DASHBOARD_DEFAULT_CASHIER_PASSWORD,
+      isActive: parseBoolean(process.env.DASHBOARD_DEFAULT_CASHIER_ACTIVE, true),
+    },
   ].filter((item) => item.email && item.password);
 }
 
