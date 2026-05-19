@@ -56,6 +56,7 @@ let legacyBeefSteak = null;
 let testPlan = null;
 let testZone = null;
 let addonPlanJuice = null;
+let addonPlanSnack = null;
 let addonItemJuice = null;
 
 const TEST_USER_PHONE = '+966501234999';
@@ -279,6 +280,22 @@ if (proteinsWithoutKey.length >= 2) {
     await addonPlanJuice.save();
   }
 
+  addonPlanSnack = await Addon.findOne({ kind: 'plan', category: 'snack', billingMode: 'per_day' });
+  if (!addonPlanSnack) {
+    addonPlanSnack = new Addon({
+      name: { ar: 'اشتراك السناك', en: 'Snack Subscription' },
+      description: { ar: 'اشتراك يومي للسناك', en: 'Daily snack subscription' },
+      kind: 'plan',
+      category: 'snack',
+      billingMode: 'per_day',
+      priceHalala: 500,
+      currency: 'SAR',
+      isActive: true,
+      sortOrder: 3,
+    });
+    await addonPlanSnack.save();
+  }
+
   addonItemJuice = await Addon.findOne({ kind: 'item', category: 'juice', billingMode: 'flat_once' });
   if (!addonItemJuice) {
     addonItemJuice = new Addon({
@@ -447,6 +464,49 @@ async function runTests() {
     assertEqual(res.body.status, true, 'status');
     const expectedAddonsTotal = Number(addonPlanJuice.priceHalala || 0) * Number(testPlan.daysCount || 0);
     assertEqual(Number(res.body.data?.breakdown?.addonsTotalHalala || 0), expectedAddonsTotal, 'plan add-on total uses per-day pricing');
+    const summaryAddon = res.body.data?.summary?.addons?.[0];
+    assertNotNull(summaryAddon, 'summary addon exists');
+    assertEqual(summaryAddon.qty, 1, 'summary addon qty reflects selected addon');
+    assertEqual(summaryAddon.durationDays, Number(testPlan.daysCount || 0), 'summary addon duration reflects plan days');
+    assertEqual(summaryAddon.unitPriceSar, Number(addonPlanJuice.priceHalala || 0) / 100, 'summary addon unit price reflects catalog price');
+    assertEqual(summaryAddon.totalSar, expectedAddonsTotal / 100, 'summary addon total uses unit price times duration');
+    assertEqual(summaryAddon.totalLabel, `${expectedAddonsTotal / 100} SAR`, 'summary addon total label matches total');
+  });
+
+  await test('POST /api/subscriptions/quote sums multiple selected add-ons in summary and line items', async () => {
+    const quotePayload = {
+      planId: String(testPlan._id),
+      grams: 300,
+      mealsPerDay: 2,
+      startDate,
+      delivery: {
+        type: 'delivery',
+        address: { street: 'Test Street', city: 'Riyadh' },
+        zoneId: String(testZone._id),
+        slot: { slotId: TEST_DELIVERY_SLOT_ID },
+      },
+      addons: [String(addonPlanJuice._id), String(addonPlanSnack._id)],
+    };
+
+    const res = await makeRequest('POST', '/api/subscriptions/quote', quotePayload);
+    assertEqual(res.status, 200, 'quote status');
+    assertEqual(res.body.status, true, 'status');
+
+    const summaryAddons = res.body.data?.summary?.addons || [];
+    assertEqual(summaryAddons.length, 2, 'summary contains one row per selected addon');
+    const summaryTotalSar = summaryAddons.reduce((sum, addon) => sum + Number(addon.totalSar || 0), 0);
+    const lineItemAddons = (res.body.data?.summary?.lineItems || []).find((item) => item.kind === 'addons');
+    assertNotNull(lineItemAddons, 'addons line item exists');
+    assertEqual(summaryTotalSar, lineItemAddons.amountSar, 'summary addon totals equal addons line item');
+    assertEqual(Number(res.body.data?.breakdown?.addonsTotalHalala || 0), summaryTotalSar * 100, 'breakdown addons total equals summary addon total');
+  });
+
+  await test('POST /api/subscriptions/quote returns empty addon summary and zero addon total when no add-ons are selected', async () => {
+    const res = await makeRequest('POST', '/api/subscriptions/quote', buildBaseSubscriptionPayload());
+    assertEqual(res.status, 200, 'quote status');
+    assertEqual(res.body.status, true, 'status');
+    assertEqual((res.body.data?.summary?.addons || []).length, 0, 'summary addons is empty');
+    assertEqual(Number(res.body.data?.breakdown?.addonsTotalHalala || 0), 0, 'addons total is zero');
   });
 
   await test('POST /api/subscriptions/quote with valid delivery slot returns summary delivery slot label/window', async () => {

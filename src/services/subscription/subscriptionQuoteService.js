@@ -579,6 +579,9 @@ async function resolveCheckoutQuoteOrThrow(
     resolvedAddonItems.push({
       addon: doc,
       category: doc.category,
+      qty: 1,
+      billingMode: resolveSubscriptionAddonBillingMode(doc, { defaultMode: "per_day" }),
+      durationDays: Number(plan.daysCount || 0),
       unitPriceHalala: unit,
       totalHalala: lineTotal,
       currency: SYSTEM_CURRENCY,

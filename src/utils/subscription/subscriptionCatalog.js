@@ -665,16 +665,23 @@ function resolveQuoteSummary(quote, lang) {
   const addonItems = (quote.addonItems || []).map((item) => {
     const unit = toMoneyParts(item.unitPriceHalala);
     const addon = item.addon || {};
-    const billingMode = resolveSubscriptionAddonBillingMode(addon, { defaultMode: "per_day" });
+    const billingMode = item.billingMode || resolveSubscriptionAddonBillingMode(addon, { defaultMode: "per_day" });
     const addonType = billingMode === "flat_once" ? "one_time" : "subscription";
+    const parsedQty = Number(item.qty);
+    const qty = Number.isFinite(parsedQty) ? Math.max(0, Math.round(parsedQty)) : 1;
+    const durationDays = item.durationDays !== undefined
+      ? Number(item.durationDays || 0)
+      : resolveAddonDurationDays(billingMode, planDaysCount);
 
-    const total = toMoneyParts(resolveAddonChargeTotalHalala({
-      unitPriceHalala: unit.halala,
-      qty: item.qty,
-      daysCount: planDaysCount,
-      mealsPerDay: quote.mealsPerDay,
-      addon,
-    }));
+    const total = Number.isFinite(Number(item.totalHalala))
+      ? toMoneyParts(item.totalHalala)
+      : toMoneyParts(resolveAddonChargeTotalHalala({
+        unitPriceHalala: unit.halala,
+        qty,
+        daysCount: planDaysCount,
+        mealsPerDay: quote.mealsPerDay,
+        addon,
+      }));
 
     const pricingModelMap = {
       flat_once: "one_time",
@@ -691,19 +698,19 @@ function resolveQuoteSummary(quote, lang) {
     return {
       id: String(addon._id || ""),
       name: pickLang(addon.name, lang),
-      qty: Number(item.qty || 0),
+      qty,
       type: addonType,
       billingMode,
       pricingModel: pricingModelMap[billingMode] || "one_time",
       billingUnit: billingUnitMap[billingMode] || "item",
-      durationDays: resolveAddonDurationDays(billingMode, planDaysCount),
+      durationDays,
       unitPriceHalala: unit.halala,
       unitPriceSar: unit.sar,
       unitPriceLabel: formatAddonUnitLabel(unit.halala, item.currency || SYSTEM_CURRENCY, addon, lang),
       formulaLabel: formatAddonFormulaLabel({
         unitPriceHalala: unit.halala,
         currency: item.currency || SYSTEM_CURRENCY,
-        qty: item.qty,
+        qty,
         daysCount: planDaysCount,
         mealsPerDay: quote.mealsPerDay,
         addon,
