@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>basicdite Privacy Policy</title>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; color: #18212f; background: #f7f8fa; }
+    main { max-width: 820px; min-height: 100vh; margin: 0 auto; padding: 40px 20px 64px; background: #fff; }
+    h1, h2 { line-height: 1.25; color: #111827; }
+    h1 { margin-top: 0; font-size: 2rem; }
+    h2 { margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 24px; font-size: 1.35rem; }
+    p { margin: 12px 0; }
+    ul { padding-left: 22px; }
+    li { margin: 8px 0; }
+    a { color: #1f6feb; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Privacy Policy for basicdite</h1>
+    <p>Effective date: May 20, 2026</p>
+    <p>basicdite ("we", "us", or "our") operates basicdite. This Privacy Policy explains what data the backend is designed to collect, use, store, and delete.</p>
+
+    <h2>Data We Collect</h2>
+    <p>Based on the backend code, basicdite may collect:</p>
+    <ul>
+      <li>Account and authentication data: phone number, phone verification status, optional full name, optional email address, password hash for password-based app login, OTP verification metadata, refresh-session metadata, device ID/name, IP address, and user agent.</li>
+      <li>Order and subscription data: meal selections, custom meal/salad selections, plans, subscription days, pickup/delivery status, delivery zones/addresses where used, promo code usage, and operational history.</li>
+      <li>Payment data: payment provider identifiers, invoice/payment status, payment amounts, redirect/callback metadata, and provider webhook data from Moyasar. basicdite does not store full payment card details on its own servers.</li>
+      <li>Push notification data: Firebase Cloud Messaging tokens when a user registers a device token.</li>
+      <li>Logs and security data: server logs, request metadata, webhook processing data, rate-limit events, and audit/activity logs. The backend includes log redaction helpers for sensitive fields.</li>
+    </ul>
+    <p>basicdite does not use advertising, ads, analytics SDKs, crash reporting SDKs, advertising IDs, precise location, contacts, photos/media access, camera access, or microphone access.</p>
+
+    <h2>Why We Collect Data</h2>
+    <p>We use this data to:</p>
+    <ul>
+      <li>Create, authenticate, and secure user accounts.</li>
+      <li>Verify phone numbers and support login, password reset, and session refresh.</li>
+      <li>Process orders, subscriptions, pickup, delivery, and customer support workflows.</li>
+      <li>Process and reconcile payments through Moyasar.</li>
+      <li>Send or verify login codes/messages through Twilio and send push notifications through Firebase when configured.</li>
+      <li>Maintain fraud prevention, abuse prevention, system integrity, accounting, audit, and legal records.</li>
+      <li>Operate admin, dashboard, kitchen, courier, and reporting workflows.</li>
+    </ul>
+
+    <h2>How Data Is Stored</h2>
+    <p>Data is stored in MongoDB. Passwords are stored as hashes, and refresh tokens are stored as HMAC hashes rather than raw tokens. Secrets are expected to be loaded from environment variables. Production deployments should use HTTPS/TLS in transit and encrypted managed database/storage services.</p>
+    <p>TODO: Confirm production database encryption-at-rest, backup retention, and hosting region before publishing.</p>
+
+    <h2>Third Parties</h2>
+    <p>Based on the backend integrations, data may be processed by:</p>
+    <ul>
+      <li>Twilio Verify/WhatsApp for OTP delivery.</li>
+      <li>Moyasar for payment invoice/payment processing.</li>
+      <li>Firebase Cloud Messaging for push notifications.</li>
+      <li>Hosting, database, logging, and infrastructure providers used by basicdite.</li>
+    </ul>
+    <p>We do not sell personal data. basicdite does not share data for advertising or analytics.</p>
+    <p>TODO: Confirm exact production hosting, database, logging, Twilio, Moyasar, and Firebase provider settings before publishing.</p>
+
+    <h2>Authentication and Account Data</h2>
+    <p>Users authenticate with phone OTP and/or password-based login depending on the app flow. Twilio may be used to send or verify login codes/messages. The backend stores phone numbers, optional names/emails, password hashes, refresh-session records, and device/push tokens. Inactive or deleted users are blocked from login and protected API access.</p>
+
+    <h2>Analytics and Crash Logs</h2>
+    <p>basicdite does not use analytics SDKs or crash reporting SDKs. Server logs may still collect operational and error metadata needed to run, debug, secure, and protect the service.</p>
+
+    <h2>Push Notifications</h2>
+    <p>The backend supports Firebase Cloud Messaging tokens. These tokens are used to send app notifications if push notifications are enabled.</p>
+
+    <h2>Payments</h2>
+    <p>Payments are processed through Moyasar. The backend stores payment identifiers, status, amounts, and webhook/reconciliation metadata. basicdite does not store full payment card details on its own servers. Payment and order records may be retained where required for accounting, tax, fraud prevention, refunds, dispute handling, and legal obligations.</p>
+
+    <h2>Data Retention</h2>
+    <p>Account profile data is retained while the account is active. When an authenticated user requests deletion, the backend soft-deletes the account, revokes sessions, removes password hash and push tokens, and prevents login. Deleted account personal profile data is deleted or anonymized where technically and legally possible after account deletion is processed.</p>
+    <p>Retention periods:</p>
+    <ul>
+      <li>Account deletion requests are retained for up to 90 days after completion for security, fraud prevention, and compliance records.</li>
+      <li>Server logs are retained for up to 30 days unless needed for security investigation or legal compliance.</li>
+      <li>Backups may retain deleted data for up to 30 days before being overwritten.</li>
+      <li>Support records are retained for up to 180 days after the last interaction.</li>
+      <li>Orders and payment records are retained as required for accounting, tax, fraud prevention, refunds, dispute handling, and legal obligations.</li>
+    </ul>
+
+    <h2>User Rights and Account Deletion</h2>
+    <p>Users may request deletion from inside the app or through the public account deletion page at:</p>
+    <p><a href="https://basicdiet145.onrender.com/account-deletion">https://basicdiet145.onrender.com/account-deletion</a></p>
+    <p>The public page collects email address, optional reason, and confirmation. Public requests require manual verification before account data is changed. Authenticated in-app requests are processed by soft deletion immediately.</p>
+    <p>Users may contact us to request access, correction, deletion, or other privacy support:</p>
+    <p><a href="mailto:basicdite@gmail.com">basicdite@gmail.com</a></p>
+
+    <h2>Children's Privacy</h2>
+    <p>basicdite is not intended for children under the age of 13. We do not knowingly collect personal data from children under 13. If we become aware that a child under 13 has provided personal data, we will take reasonable steps to delete it.</p>
+
+    <h2>Security Measures</h2>
+    <p>The backend uses authentication middleware, password hashing, refresh-token hashing, rate limiting on sensitive endpoints, CORS allowlists, security headers, webhook validation, structured error responses, and log redaction helpers. Production deployments must configure strong secrets, HTTPS, restricted CORS origins, secure database access, and safe logging.</p>
+
+    <h2>Contact</h2>
+    <p>For privacy questions, contact:</p>
+    <p><a href="mailto:basicdite@gmail.com">basicdite@gmail.com</a></p>
+  </main>
+</body>
+</html>
