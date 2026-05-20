@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>basicdite Account Deletion</title>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.5; margin: 0; color: #18212f; background: #f7f8fa; }
+    main { max-width: 720px; margin: 0 auto; padding: 40px 20px; }
+    form { background: #fff; border: 1px solid #dde3eb; border-radius: 8px; padding: 24px; }
+    label { display: block; font-weight: 700; margin-top: 16px; }
+    input[type="email"], textarea { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px; border: 1px solid #b8c2ce; border-radius: 6px; font: inherit; }
+    textarea { min-height: 120px; }
+    .check { display: flex; gap: 10px; align-items: flex-start; margin: 18px 0; }
+    .check label { margin: 0; font-weight: 400; }
+    button { background: #1f6feb; color: #fff; border: 0; border-radius: 6px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .note { color: #465568; }
+    .result { margin-top: 16px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>basicdite Account Deletion</h1>
+    <p class="note">Use this page to request deletion of your basicdite account. You can also request deletion from inside the app when signed in.</p>
+    <p class="note">Authenticated in-app deletion disables the account, revokes active sessions, removes push notification tokens, and prevents login. Deleted account personal profile data is deleted or anonymized where technically and legally possible. Account deletion requests may be retained for up to 90 days, server logs for up to 30 days, backups for up to 30 days before overwrite, and support records for up to 180 days after the last interaction. Order and payment records may be retained where required for accounting, tax, fraud prevention, refunds, dispute handling, and legal obligations.</p>
+    <form id="deletion-form" method="post" action="/api/account-deletion/request">
+      <label for="email">Email address</label>
+      <input id="email" name="email" type="email" autocomplete="email" required>
+
+      <label for="reason">Reason (optional)</label>
+      <textarea id="reason" name="reason" maxlength="1000"></textarea>
+
+      <div class="check">
+        <input id="confirmation" name="confirmation" type="checkbox" value="true" required>
+        <label for="confirmation">I confirm that I want to request deletion of my account and understand that some records may be retained where legally or technically required.</label>
+      </div>
+
+      <button type="submit">Submit deletion request</button>
+      <p class="note"><a href="/PRIVACY_POLICY.md">Privacy Policy</a></p>
+      <p id="result" class="result" aria-live="polite"></p>
+    </form>
+  </main>
+  <script>
+    const form = document.getElementById("deletion-form");
+    const result = document.getElementById("result");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button");
+      button.disabled = true;
+      result.textContent = "";
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({
+            email: form.email.value,
+            reason: form.reason.value,
+            confirmation: form.confirmation.checked,
+          }),
+        });
+        const payload = await response.json();
+        result.textContent = response.ok
+          ? "Request received. Reference: " + payload.requestId
+          : (payload.error && payload.error.message) || "Unable to submit request.";
+      } catch {
+        result.textContent = "Unable to submit request.";
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

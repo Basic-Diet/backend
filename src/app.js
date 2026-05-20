@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const swaggerUi = require("swagger-ui-express");
 const routes = require("./routes");
 const paymentRoutes = require("./routes/payments");
+const { getAccountDeletionPage } = require("./controllers/accountDeletionController");
 const requestLanguageMiddleware = require("./middleware/requestLanguage");
 const errorResponse = require("./utils/errorResponse");
 const { logger } = require("./utils/logger");
@@ -18,7 +19,15 @@ function normalizeTopLevelStatusField(payload, responseStatusCode, reqPath = "")
   }
 
   const isHttpSuccess = Number(responseStatusCode) < 400;
-  if (isHttpSuccess && reqPath.startsWith("/api/auth") && payload.ok === true) {
+  if (
+    isHttpSuccess
+    && payload.ok === true
+    && (
+      reqPath.startsWith("/api/auth")
+      || reqPath.startsWith("/api/account-deletion")
+      || reqPath.startsWith("/api/app/account-deletion")
+    )
+  ) {
     return payload;
   }
   const isErrorPayload = payload.ok === false || Object.prototype.hasOwnProperty.call(payload, "error");
@@ -129,6 +138,7 @@ function createApp() {
     next();
   });
   app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "20kb" }));
 
   /**
    * @openapi
@@ -161,6 +171,10 @@ function createApp() {
   // Keep a simple root health endpoint for deployment smoke tests.
   app.get("/", (_req, res) => {
     res.status(200).json({ status: true, message: "basicdiet145 backend is running" });
+  });
+  app.get("/account-deletion", getAccountDeletionPage);
+  app.get("/PRIVACY_POLICY.md", (_req, res) => {
+    res.sendFile(path.join(__dirname, "../PRIVACY_POLICY.md"));
   });
 
   mountSwaggerUi(app, {

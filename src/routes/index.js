@@ -29,6 +29,7 @@ const dashboardMenuIdentityRoutes = require("./dashboardMenuIdentity");
 const paymentRoutes = require("./payments");
 const healthRoutes = require("./health");
 const clientRoutes = require("./client");
+const accountDeletionRoutes = require("./accountDeletion");
 
 const { getSettings } = require("../controllers/settingsController");
 const { listCategoriesWithMeals } = require("../controllers/mealController");
@@ -40,6 +41,7 @@ const router = Router();
 
 router.use("/webhooks", webhookRoutes);
 router.use("/payments", paymentRoutes.apiRouter);
+router.use("/account-deletion", accountDeletionRoutes);
 router.use("/auth", authRoutes);
 router.use("/dashboard/auth", dashboardAuthRoutes);
 router.use("/app", appAuthRoutes);

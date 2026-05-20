@@ -61,4 +61,18 @@ const mobileLoginLimiter = buildLimiter({
   message: "errors.rateLimit.login",
 });
 
-module.exports = { otpLimiter, otpVerifyLimiter, checkoutLimiter, dashboardLoginLimiter, mobileLoginLimiter, buildRateLimitPayload };
+const accountDeletionLimiter = buildLimiter({
+  windowMs: Number(process.env.RATE_LIMIT_ACCOUNT_DELETION_WINDOW_MS) || 15 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_ACCOUNT_DELETION_MAX) || 5,
+  message: "errors.rateLimit.accountDeletion",
+});
+
+module.exports = {
+  otpLimiter,
+  otpVerifyLimiter,
+  checkoutLimiter,
+  dashboardLoginLimiter,
+  mobileLoginLimiter,
+  accountDeletionLimiter,
+  buildRateLimitPayload,
+};

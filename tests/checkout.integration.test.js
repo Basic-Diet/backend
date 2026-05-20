@@ -856,6 +856,7 @@ async function runTests() {
   
   await test('Subscription.premiumBalance has premiumKey set', async () => {
     const subscription = await Subscription.findOne({ userId: testUser._id, status: 'active' })
+      .sort({ createdAt: -1 })
       .lean();
     
     assertTrue(!!subscription, 'subscription exists');
@@ -876,6 +877,7 @@ async function runTests() {
   
   await test('Subscription.premiumBalance uses canonical proteinId', async () => {
     const subscription = await Subscription.findOne({ userId: testUser._id, status: 'active' })
+      .sort({ createdAt: -1 })
       .lean();
     
     const shrimpBalance = subscription.premiumBalance.find(p => p.premiumKey === 'shrimp');

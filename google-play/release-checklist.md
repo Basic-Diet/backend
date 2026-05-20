@@ -1,0 +1,27 @@
+# Backend Release Checklist
+
+- Privacy Policy URL is live and public.
+- Account Deletion URL is live and public.
+- Google Play Data Safety section is completed from verified production behavior.
+- HTTPS is enabled for all backend and app traffic.
+- Confirm production HTTPS is live.
+- Confirm Privacy Policy URL is public.
+- Confirm Account Deletion URL is public.
+- Confirm Twilio production configuration.
+- Confirm Moyasar production configuration.
+- Confirm Google Play Data Safety answers match the final mobile app permissions and SDKs.
+- Confirm no analytics, crash reporting, ads, advertising ID, location, contacts, media, camera, or microphone permissions exist in the final mobile app build.
+- Production environment variables are set with strong secret values.
+- Debug/test auth flags are disabled in production.
+- Secrets are not committed.
+- Database backups are configured.
+- Database access is restricted.
+- Rate limiting is enabled.
+- Auth endpoints are tested.
+- Account deletion flow is tested.
+- Error responses are sanitized.
+- CORS is restricted to production origins.
+- Helmet security headers are enabled.
+- Payment webhook secret is configured.
+- Dependency audit is completed.
+- Logs do not expose passwords, OTPs, tokens, API keys, or payment secrets.

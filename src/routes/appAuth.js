@@ -5,6 +5,8 @@ const { login, register, getProfile, updateProfile, getTodayPickup } = require("
 const { verifyOtp } = require("../controllers/authController");
 const { listCurrentUserSubscriptions } = require("../controllers/subscriptionController");
 const { getAppConfig } = require("../controllers/settingsController");
+const { accountDeletionLimiter } = require("../middleware/rateLimit");
+const { requestAccountDeletion } = require("../controllers/accountDeletionController");
 const asyncHandler = require("../middleware/asyncHandler");
 
 const router = Router();
@@ -17,5 +19,6 @@ router.get("/profile", authMiddleware, asyncHandler(getProfile));
 router.put("/profile", authMiddleware, asyncHandler(updateProfile));
 router.get("/subscriptions", authMiddleware, asyncHandler(listCurrentUserSubscriptions));
 router.get("/today-pickup", authMiddleware, asyncHandler(getTodayPickup));
+router.post("/account-deletion/request", accountDeletionLimiter, authMiddleware, asyncHandler(requestAccountDeletion));
 
 module.exports = router;

@@ -133,6 +133,14 @@ function validateEnv() {
   if (!Number.isFinite(dashboardLoginMax) || dashboardLoginMax <= 0) {
     invalid.push("RATE_LIMIT_DASHBOARD_LOGIN_MAX");
   }
+  const accountDeletionWindowMs = Number(process.env.RATE_LIMIT_ACCOUNT_DELETION_WINDOW_MS || 15 * 60 * 1000);
+  if (!Number.isFinite(accountDeletionWindowMs) || accountDeletionWindowMs <= 0) {
+    invalid.push("RATE_LIMIT_ACCOUNT_DELETION_WINDOW_MS");
+  }
+  const accountDeletionMax = Number(process.env.RATE_LIMIT_ACCOUNT_DELETION_MAX || 5);
+  if (!Number.isFinite(accountDeletionMax) || accountDeletionMax <= 0) {
+    invalid.push("RATE_LIMIT_ACCOUNT_DELETION_MAX");
+  }
 
   if (invalid.length) {
     logger.error("Invalid environment variable values", { invalid });
