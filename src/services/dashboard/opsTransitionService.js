@@ -47,6 +47,9 @@ async function executeAction(actionId, { entityId, entityType, userId, role, pay
     }
     let result;
     switch (normalizedActionId) {
+      case "lock":
+        result = await handleLock({ entityId, entityType: normalizedEntityType, userId, role, payload, session });
+        break;
       case "prepare":
         result = await handlePrepare({ entityId, entityType: normalizedEntityType, userId, role, payload, session });
         break;
@@ -128,6 +131,39 @@ async function writeSubscriptionDayAudit({ day, action, fromStatus, toStatus, us
       notes: payload && (payload.notes || payload.note) ? String(payload.notes || payload.note) : null,
     },
   }], { session });
+}
+
+async function handleLock({ entityId, entityType, userId, role, payload, session }) {
+  if (entityType !== "subscription") {
+    throw new Error("INVALID_STATE_TRANSITION");
+  }
+
+  const doc = await SubscriptionDay.findById(entityId).session(session);
+  if (!doc) throw new Error("Entity not found");
+
+  if (doc.status === "locked") {
+    return { data: doc, idempotent: true };
+  }
+
+  const fromStatus = doc.status;
+  const toStatus = "locked";
+  validateTransition(entityType, fromStatus, toStatus);
+
+  doc.status = toStatus;
+  doc.lockedAt = doc.lockedAt || new Date();
+  appendOperationAudit(doc, "lock", userId, role);
+  await doc.save({ session });
+  await writeSubscriptionDayAudit({ day: doc, action: "lock", fromStatus, toStatus, userId, role, payload, session });
+
+  return {
+    data: doc,
+    sideEffects: {
+      action: "lock",
+      entityType,
+      entityId,
+      toStatus,
+    },
+  };
 }
 
 async function handlePrepare({ entityId, entityType, userId, role, payload, session }) {

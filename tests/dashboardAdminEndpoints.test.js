@@ -33,10 +33,11 @@ const { DASHBOARD_JWT_SECRET } = require("../src/services/dashboardTokenService"
 const TEST_TAG = `dashboard-admin-${Date.now()}`;
 const ORIGINAL_ONE_TIME_ORDER_DELIVERY_ENABLED = process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
 let originalPremiumPriceSetting;
+const dashboardAuthUserIds = {};
 
 function dashboardToken(role = "admin") {
   return jwt.sign(
-    { userId: new mongoose.Types.ObjectId().toString(), role, tokenType: "dashboard_access" },
+    { userId: String(dashboardAuthUserIds[role] || new mongoose.Types.ObjectId()), role, tokenType: "dashboard_access" },
     DASHBOARD_JWT_SECRET,
     { expiresIn: "1h" }
   );
@@ -171,6 +172,19 @@ async function seedBaseData() {
   return { user, plan, zone, addonPlan, addonItem, subscription };
 }
 
+async function seedDashboardAuthUsers() {
+  const roles = ["superadmin", "admin", "kitchen", "courier", "cashier"];
+  const users = await DashboardUser.insertMany(roles.map((role) => ({
+    email: `${TEST_TAG}-${role}@example.com`,
+    passwordHash: "not-used-in-this-test",
+    role,
+    isActive: true,
+  })));
+  for (const user of users) {
+    dashboardAuthUserIds[user.role] = user._id;
+  }
+}
+
 async function main() {
   await connect();
   await cleanup();
@@ -178,6 +192,7 @@ async function main() {
   const app = createApp();
   const api = request(app);
   const ctx = await seedBaseData();
+  await seedDashboardAuthUsers();
 
   try {
     let res = await api.post("/api/dashboard/addons").set(auth()).send({
@@ -605,7 +620,21 @@ async function main() {
 
     res = await api.get("/api/dashboard/kitchen/queue?date=2026-05-10&method=delivery").set(auth("kitchen"));
     expectStatus(res, 200, "kitchen queue");
-    assert(res.body.data.items.some((item) => item.subscriptionDayId === String(deliveryDay._id)));
+    const openDeliveryQueueItem = res.body.data.items.find((item) => item.subscriptionDayId === String(deliveryDay._id));
+    assert(openDeliveryQueueItem);
+    assert.deepStrictEqual(
+      openDeliveryQueueItem.allowedActions.map((action) => action.id),
+      ["prepare", "lock", "cancel"]
+    );
+    assert(openDeliveryQueueItem.allowedActions.every((action) => action.endpoint && action.method === "POST"));
+
+    res = await api.post("/api/dashboard/kitchen/actions/lock").set(auth("kitchen")).send({
+      entityId: String(deliveryDay._id),
+      entityType: "subscription_day",
+      payload: { reason: "lock before kitchen prep" },
+    });
+    expectStatus(res, 200, "kitchen lock delivery day");
+    assert.strictEqual(res.body.data.status, "locked");
 
     res = await api.post("/api/dashboard/kitchen/actions/prepare").set(auth("kitchen")).send({
       entityId: String(deliveryDay._id),
@@ -614,6 +643,11 @@ async function main() {
     });
     expectStatus(res, 200, "kitchen prepare delivery day");
     assert.strictEqual(res.body.data.status, "in_preparation");
+    assert.deepStrictEqual(
+      res.body.data.allowedActions.map((action) => action.id),
+      ["dispatch", "cancel"]
+    );
+    assert(!res.body.data.allowedActions.some((action) => action.id === "set_ready"));
 
     res = await api.post("/api/dashboard/courier/actions/dispatch").set(auth("courier")).send({
       entityId: String(deliveryDay._id),

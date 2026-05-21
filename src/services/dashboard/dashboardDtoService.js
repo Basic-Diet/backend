@@ -121,10 +121,12 @@ function mapOrderToDTO(order, delivery, user, role, lang) {
       const config = opsActionPolicy.ACTION_REGISTRY[actionId];
       if (!config) return null;
       return {
-        id: actionId,
+        id: config.id || actionId,
         label: config.label[lang] || config.label.en,
         color: config.color,
         icon: config.icon,
+        endpoint: config.endpoint,
+        method: config.method || "POST",
         requiresReason: !!config.requiresReason,
       };
     })
