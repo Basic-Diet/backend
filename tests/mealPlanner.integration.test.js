@@ -1304,7 +1304,7 @@ async function runTests() {
     const hasShrimp = keys.includes('shrimp');
     const hasBeefSteak = keys.includes('beef_steak');
     const hasSalmon = keys.includes('salmon');
-    const hasCustomSalad = keys.includes('custom_premium_salad');
+    const hasCustomSalad = keys.includes(CUSTOM_PREMIUM_SALAD_KEY);
     
     assertTrue(hasShrimp, 'shrimp present (has balance)');
     assertTrue(hasBeefSteak, 'beef_steak present (has balance)');

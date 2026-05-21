@@ -517,8 +517,8 @@ function setMoyasarInvoice(invoiceId, updates = {}) {
       assert(Array.isArray(res.body.data.salad.ingredients));
       assert(Array.isArray(res.body.data.salad.groups));
       assert(Array.isArray(res.body.data.addons.items));
-      assert(Array.isArray(res.body.data.delivery.windows));
-      assert(Array.isArray(res.body.data.delivery.zones));
+      assert.strictEqual(res.body.data.fulfillmentMethod, "pickup");
+      assert.strictEqual(res.body.data.delivery, undefined);
       assert(res.body.data.sandwiches.some((item) => item.id === String(ctx.sandwich._id)));
       assert(!res.body.data.sandwiches.some((item) => item.id === String(ctx.inactiveSandwich._id)));
     });
@@ -715,7 +715,7 @@ function setMoyasarInvoice(invoiceId, updates = {}) {
         expectStatus(res, 409, "restaurant closed order");
         assert.strictEqual(res.body.error.code, "RESTAURANT_CLOSED");
         assert.strictEqual(res.body.error.message, "Restaurant is currently closed");
-        assert.strictEqual(res.body.error.details.messageAr, "المطعم مغلق حاليًا. يمكنك الطلب خلال ساعات العمل.");
+        assert.strictEqual(res.body.error.details.messageAr, "المطعم مغلق حاليا. يمكنك الطلب خلال ساعات العمل.");
         assert.strictEqual(res.body.error.details.messageEn, "Restaurant is currently closed. Please order during working hours.");
         assert.strictEqual(await Order.countDocuments({ userId: ctx.user._id }), 0);
         assert.strictEqual(await Payment.countDocuments({ userId: ctx.user._id }), 0);

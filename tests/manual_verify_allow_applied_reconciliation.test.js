@@ -83,15 +83,15 @@ async function run() {
 
     assert.strictEqual(result.ok, true);
     assert.strictEqual(applyPaymentSideEffectsFn.firstCall.args[0].source, "client_manual_verify");
-    assert.strictEqual(applyPaymentSideEffectsFn.firstCall.args[0].allowAppliedReconciliation, true);
-    console.log("✅ manual_verify_should_pass_allow_applied_reconciliation passed");
+    assert.strictEqual(applyPaymentSideEffectsFn.firstCall.args[0].allowAppliedReconciliation, false);
+    console.log("✅ manual_verify_rejects_initial_revision_reconciliation passed");
   } finally {
     sandbox.restore();
   }
 }
 
 run().catch((err) => {
-  console.error("❌ manual verify allowAppliedReconciliation test failed");
+  console.error("❌ manual verify initial revision reconciliation test failed");
   console.error(err);
   process.exit(1);
 });

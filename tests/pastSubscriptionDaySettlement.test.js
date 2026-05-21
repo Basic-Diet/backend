@@ -1,6 +1,7 @@
 "use strict";
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "supersecret";
+process.env.SUBSCRIPTION_AUTO_SETTLEMENT_ENABLED = "true";
 
 require("dotenv").config();
 

@@ -454,13 +454,13 @@ async function runTests() {
         salad: { groups: { protein: ['premium1'], sauce: ['s1'] } },
         status: 'complete',
         isPremium: true,
-        premiumKey: 'custom_premium_salad',
+        premiumKey: 'premium_large_salad',
         premiumSource: 'balance',
       },
     ];
     const result = projectMaterializedAndLegacyFromSlots({ processedSlots: slots, now: new Date() });
     expectEqual(result.premiumSelections.length, 1, 'premium selection count');
-    expectEqual(result.premiumSelections[0].premiumKey, 'custom_premium_salad', 'canonical premium key');
+    expectEqual(result.premiumSelections[0].premiumKey, 'premium_large_salad', 'canonical premium key');
     expectEqual(result.premiumSelections[0].baseSlotKey, 'slot_1', 'base slot key');
     expectEqual(result.premiumSelections[0].proteinId, 'premium1', 'selected protein carried through');
   });
@@ -738,7 +738,7 @@ async function runTests() {
       });
       expectTrue(result.valid, 'draft valid');
       expectEqual(result.processedSlots[0].proteinId, IDS.regularProtein, 'selected protein persisted');
-      expectEqual(result.processedSlots[0].premiumKey, 'custom_premium_salad', 'salad premium key');
+      expectEqual(result.processedSlots[0].premiumKey, 'premium_large_salad', 'salad premium key');
     });
   });
 
