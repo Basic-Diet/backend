@@ -125,6 +125,7 @@ function buildPhase1SubscriptionContract({ payload = {}, resolvedQuote, actorCon
       qty: Number(item.qty || 0),
       unitExtraFeeHalala: Number(item.unitExtraFeeHalala || 0),
       currency: String(item.currency || "SAR"),
+      priceSource: item.priceSource || null,
     };
   });
   const promo = resolvedQuote.promoCode && typeof resolvedQuote.promoCode === "object"

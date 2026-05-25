@@ -15,16 +15,33 @@ const {
 } = require('../src/services/subscription/mealSlotPlannerService');
 const BuilderProtein = require('../src/models/BuilderProtein');
 const BuilderCarb = require('../src/models/BuilderCarb');
+const MenuOption = require('../src/models/MenuOption');
+const MenuOptionGroup = require('../src/models/MenuOptionGroup');
+const MenuProduct = require('../src/models/MenuProduct');
+const ProductGroupOption = require('../src/models/ProductGroupOption');
+const ProductOptionGroup = require('../src/models/ProductOptionGroup');
 const MealCategory = require('../src/models/MealCategory');
 const Meal = require('../src/models/Meal');
 const SaladIngredient = require('../src/models/SaladIngredient');
 const Sandwich = require('../src/models/Sandwich');
+const CatalogService = require('../src/services/catalog/CatalogService');
+const { resolveCanonicalPremiumIdentity } = require('../src/utils/subscription/premiumIdentity');
+const {
+  resolvePremiumLargeSaladPricing,
+  LEGACY_FALLBACK_PRICE_SOURCE,
+} = require('../src/services/catalog/premiumLargeSaladPricingService');
 
 const assert = require('assert');
 
 function mockQuery(result) {
   return {
     session() {
+      return this;
+    },
+    sort() {
+      return this;
+    },
+    select() {
       return this;
     },
     lean() {
@@ -97,12 +114,50 @@ function buildMockPlannerCatalog() {
     sandwiches: [
       { _id: IDS.sandwichMeal, isActive: true, availableForSubscription: true },
     ],
+    menuGroups: {
+      proteins: null,
+      carbs: null,
+    },
+    menuOptions: [],
+    menuProducts: {
+      premium_large_salad: {
+        _id: "507f191e810c19729de860f1",
+        key: "premium_large_salad",
+        name: { en: "Premium Large Salad", ar: "سلطة كبيرة مميزة" },
+        priceHalala: 3100,
+        currency: "SAR",
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: new Date(),
+        availableFor: ["subscription"],
+      },
+      basic_salad: {
+        _id: "507f191e810c19729de860f2",
+        key: "basic_salad",
+        name: { en: "Basic Salad", ar: "سلطة بيسك" },
+        priceHalala: 2700,
+        currency: "SAR",
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: new Date(),
+        availableFor: ["subscription"],
+      },
+    },
   };
 }
 
 async function withMockedPlannerCatalog(overrides, fn) {
   const originalProteinFind = BuilderProtein.find;
   const originalCarbFind = BuilderCarb.find;
+  const originalMenuOptionFind = MenuOption.find;
+  const originalMenuOptionGroupFind = MenuOptionGroup.find;
+  const originalMenuOptionGroupFindOne = MenuOptionGroup.findOne;
+  const originalMenuProductFind = MenuProduct.find;
+  const originalMenuProductFindOne = MenuProduct.findOne;
+  const originalProductGroupOptionFind = ProductGroupOption.find;
+  const originalProductOptionGroupFind = ProductOptionGroup.find;
   const originalMealCategoryFindOne = MealCategory.findOne;
   const originalMealFind = Meal.find;
   const originalSaladIngredientFind = SaladIngredient.find;
@@ -115,6 +170,23 @@ async function withMockedPlannerCatalog(overrides, fn) {
 
   BuilderProtein.find = () => mockQuery(catalog.proteins || []);
   BuilderCarb.find = () => mockQuery(catalog.carbs || []);
+  MenuOption.find = () => mockQuery(catalog.menuOptions || []);
+  MenuOptionGroup.find = () => mockQuery(Object.values(catalog.menuGroups || {}).filter(Boolean));
+  MenuOptionGroup.findOne = (query = {}) => mockQuery((catalog.menuGroups || {})[query.key] || null);
+  MenuProduct.find = () => ({
+    sort() {
+      return this;
+    },
+    lean() {
+      return Promise.resolve(catalog.sandwichProducts || []);
+    },
+  });
+  MenuProduct.findOne = (query = {}) => {
+    const key = query && query.key;
+    return mockQuery((catalog.menuProducts || {})[key] || null);
+  };
+  ProductOptionGroup.find = () => mockQuery(catalog.productOptionGroups || []);
+  ProductGroupOption.find = () => mockQuery(catalog.productGroupOptions || []);
   MealCategory.findOne = () => mockQuery(catalog.sandwichCategory || null);
   Meal.find = () => mockQuery(catalog.sandwiches || []);
   SaladIngredient.find = () => mockQuery(catalog.saladIngredients || []);
@@ -125,6 +197,13 @@ async function withMockedPlannerCatalog(overrides, fn) {
   } finally {
     BuilderProtein.find = originalProteinFind;
     BuilderCarb.find = originalCarbFind;
+    MenuOption.find = originalMenuOptionFind;
+    MenuOptionGroup.find = originalMenuOptionGroupFind;
+    MenuOptionGroup.findOne = originalMenuOptionGroupFindOne;
+    MenuProduct.find = originalMenuProductFind;
+    MenuProduct.findOne = originalMenuProductFindOne;
+    ProductGroupOption.find = originalProductGroupOptionFind;
+    ProductOptionGroup.find = originalProductOptionGroupFind;
     MealCategory.findOne = originalMealCategoryFindOne;
     Meal.find = originalMealFind;
     SaladIngredient.find = originalSaladIngredientFind;
@@ -171,7 +250,74 @@ async function runTests() {
     expectEqual(CUSTOM_PREMIUM_SALAD_TYPE, 'custom_premium_salad', 'CUSTOM_PREMIUM_SALAD_TYPE');
     expectEqual(SANDWICH_TYPE, 'sandwich', 'SANDWICH_TYPE');
     expectEqual(STANDARD_COMBO_TYPE, 'standard_combo', 'STANDARD_COMBO_TYPE');
-    expectEqual(CUSTOM_PREMIUM_SALAD_FIXED_PRICE_HALALA, 3000, 'CUSTOM_PREMIUM_SALAD_FIXED_PRICE_HALALA');
+    expectEqual(CUSTOM_PREMIUM_SALAD_FIXED_PRICE_HALALA, 2900, 'legacy fallback price');
+  });
+
+  await test('premium large salad runtime price uses dashboard MenuProduct', async () => {
+    await withMockedPlannerCatalog({}, async () => {
+      const pricing = await resolvePremiumLargeSaladPricing();
+      expectEqual(pricing.extraFeeHalala, 3100, 'catalog product price');
+      expectEqual(pricing.source, 'menu_product_premium_large_salad', 'price source');
+
+      const identity = await resolveCanonicalPremiumIdentity({ premiumKey: 'premium_large_salad' });
+      expectEqual(identity.unitExtraFeeHalala, 3100, 'quote identity price');
+      expectEqual(identity.resolutionSource, 'menu_product_premium_large_salad', 'quote price source');
+    });
+  });
+
+  await test('changing premium large salad product price changes catalog and quote price', async () => {
+    await withMockedPlannerCatalog({
+      menuGroups: {
+        proteins: { _id: '507f191e810c19729de861001', key: 'proteins', name: { en: 'Proteins' } },
+        carbs: { _id: '507f191e810c19729de861002', key: 'carbs', name: { en: 'Carbs' } },
+      },
+      menuProducts: {
+        premium_large_salad: {
+          _id: '507f191e810c19729de861003',
+          key: 'premium_large_salad',
+          name: { en: 'Dashboard Premium Salad' },
+          priceHalala: 4200,
+          currency: 'SAR',
+          publishedAt: new Date(),
+        },
+      },
+    }, async () => {
+      const catalog = await CatalogService.getSubscriptionBuilderCatalog({ lang: 'en' });
+      expectEqual(catalog.premiumLargeSalad.extraFeeHalala, 4200, 'catalog price follows product');
+      expectEqual(catalog.premiumLargeSalad.priceSource, 'menu_product_premium_large_salad', 'catalog price source');
+
+      const identity = await resolveCanonicalPremiumIdentity({ premiumKey: 'premium_large_salad' });
+      expectEqual(identity.unitExtraFeeHalala, 4200, 'quote identity follows changed product price');
+    });
+  });
+
+  await test('premium large salad legacy config fallback is used only when catalog products are missing', async () => {
+    await withMockedPlannerCatalog({
+      menuProducts: {},
+    }, async () => {
+      const pricing = await resolvePremiumLargeSaladPricing();
+      expectEqual(pricing.extraFeeHalala, CUSTOM_PREMIUM_SALAD_FIXED_PRICE_HALALA, 'legacy fallback amount');
+      expectEqual(pricing.source, LEGACY_FALLBACK_PRICE_SOURCE, 'legacy fallback source');
+    });
+  });
+
+  await test('premium large salad basic_salad fallback still uses dashboard product price', async () => {
+    await withMockedPlannerCatalog({
+      menuProducts: {
+        basic_salad: {
+          _id: '507f191e810c19729de861004',
+          key: 'basic_salad',
+          name: { en: 'Fallback Basic Salad' },
+          priceHalala: 3600,
+          currency: 'SAR',
+          publishedAt: new Date(),
+        },
+      },
+    }, async () => {
+      const pricing = await resolvePremiumLargeSaladPricing();
+      expectEqual(pricing.extraFeeHalala, 3600, 'basic_salad fallback product price');
+      expectEqual(pricing.source, 'menu_product_basic_salad_fallback', 'fallback product source');
+    });
   });
 
   await test('normalizeMealSlotsInput handles standard_meal', () => {
@@ -392,8 +538,8 @@ async function runTests() {
     expectEqual(subscription.premiumBalance[0].remainingQty, 2, 'remaining qty');
   });
 
-  await test('custom_premium_salad entitlement fixed price remains 3000', () => {
-    expectEqual(CUSTOM_PREMIUM_SALAD_FIXED_PRICE_HALALA, 3000, 'fixed price');
+  await test('custom_premium_salad legacy fallback price remains isolated from runtime product pricing', () => {
+    expectEqual(CUSTOM_PREMIUM_SALAD_FIXED_PRICE_HALALA, 2900, 'legacy fallback price');
   });
 
   console.log(`\n=== Meal Planner Commercial State Tests ===\n`);
@@ -739,6 +885,7 @@ async function runTests() {
       expectTrue(result.valid, 'draft valid');
       expectEqual(result.processedSlots[0].proteinId, IDS.regularProtein, 'selected protein persisted');
       expectEqual(result.processedSlots[0].premiumKey, 'premium_large_salad', 'salad premium key');
+      expectEqual(result.processedSlots[0].premiumExtraFeeHalala, 3100, 'salad pending payment uses dashboard product price');
     });
   });
 
@@ -966,12 +1113,16 @@ async function runTests() {
   await test('buildMealSlotDraft rejects inactive or unavailable items', async () => {
     const originalProteinFind = BuilderProtein.find;
     const originalCarbFind = BuilderCarb.find;
+    const originalMenuOptionFind = MenuOption.find;
+    const originalMenuOptionGroupFindOne = MenuOptionGroup.findOne;
     const originalMealCategoryFindOne = MealCategory.findOne;
     const originalMealFind = Meal.find;
     const originalSaladIngredientFind = SaladIngredient.find;
 
     BuilderProtein.find = () => mockQuery([]);
     BuilderCarb.find = () => mockQuery([]);
+    MenuOption.find = () => mockQuery([]);
+    MenuOptionGroup.findOne = () => mockQuery(null);
     MealCategory.findOne = () => mockQuery(null);
     Meal.find = () => mockQuery([]);
     SaladIngredient.find = () => mockQuery([]);
@@ -995,6 +1146,8 @@ async function runTests() {
     } finally {
       BuilderProtein.find = originalProteinFind;
       BuilderCarb.find = originalCarbFind;
+      MenuOption.find = originalMenuOptionFind;
+      MenuOptionGroup.findOne = originalMenuOptionGroupFindOne;
       MealCategory.findOne = originalMealCategoryFindOne;
       Meal.find = originalMealFind;
       SaladIngredient.find = originalSaladIngredientFind;

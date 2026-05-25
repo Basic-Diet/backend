@@ -26,6 +26,9 @@ const {
   buildPaymentRequirement,
   buildPlannerRevisionHash,
 } = require("./subscriptionDayCommercialStateService");
+const {
+  resolvePremiumLargeSaladPricing,
+} = require("../catalog/premiumLargeSaladPricingService");
 const { 
   NEW_TYPES, 
   mapLegacySelectionType, 
@@ -698,9 +701,15 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
   const validCarbIds = carbIds.filter(id => isValidObjectId(id));
   const validSandwichIds = sandwichIds.filter(id => isValidObjectId(id));
   const shouldLoadSandwiches = validSandwichIds.length > 0;
-  const [menuProteinGroupId, menuCarbGroupId] = await Promise.all([
+  const shouldLoadPremiumLargeSaladPricing = normalizedMealSlots.some(
+    (slot) => slot && slot.selectionType === NEW_TYPES.PREMIUM_LARGE_SALAD
+  );
+  const [menuProteinGroupId, menuCarbGroupId, premiumLargeSaladPricing] = await Promise.all([
     getMenuGroupId(MENU_PROTEIN_GROUP_KEY, session),
     getMenuGroupId(MENU_CARB_GROUP_KEY, session),
+    shouldLoadPremiumLargeSaladPricing
+      ? resolvePremiumLargeSaladPricing({ session })
+      : Promise.resolve({ extraFeeHalala: 0 }),
   ]);
 
   const [menuProteins, menuCarbs, legacyProteins, legacyCarbs, sandwichCategory, saladIngredients, catalogSandwiches] = await Promise.all([
@@ -891,7 +900,7 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
       if (persistedPremiumSource === "paid_extra" || persistedPremiumSource === "paid") {
         processedSlot.premiumSource = persistedPremiumSource === "paid" ? "paid" : "paid_extra";
         const fee = isPremiumSalad
-          ? PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA
+          ? premiumLargeSaladPricing.extraFeeHalala
           : (proteinMap.get(String(processedSlot.proteinId))?.extraFeeHalala || 0);
         processedSlot.premiumExtraFeeHalala = Number(processedSlot.premiumExtraFeeHalala || fee || 0);
         plannerMeta.premiumPaidExtraCount += 1;
@@ -902,7 +911,7 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
       } else {
         processedSlot.premiumSource = "pending_payment";
         const fee = isPremiumSalad
-          ? PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA
+          ? premiumLargeSaladPricing.extraFeeHalala
           : (proteinMap.get(String(processedSlot.proteinId))?.extraFeeHalala || 0);
         processedSlot.premiumExtraFeeHalala = Number(fee);
         plannerMeta.premiumPendingPaymentCount += 1;

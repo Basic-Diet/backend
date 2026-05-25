@@ -75,11 +75,14 @@ async function quoteOrder(req, res) {
       lang: getRequestLang(req),
       requestBody: body,
     });
+    const fulfillmentDate = normalizeFulfillmentDate(body);
 
     return res.status(200).json({
       status: true,
       data: {
         currency: quote.currency,
+        fulfillmentDate,
+        requestedFulfillmentDate: fulfillmentDate,
         items: quote.items,
         pricing: quote.pricing,
         appliedPromo: quote.appliedPromo,
@@ -135,6 +138,8 @@ function buildFinalOrderCheckoutPayload(order, payment, { reused = false } = {})
     invoiceId: order.providerInvoiceId || (payment && payment.providerInvoiceId) || null,
     status: order.status,
     paymentStatus: payment && payment.status ? payment.status : order.paymentStatus,
+    fulfillmentDate: order.fulfillmentDate || order.requestedFulfillmentDate || order.deliveryDate || null,
+    requestedFulfillmentDate: order.requestedFulfillmentDate || order.fulfillmentDate || order.deliveryDate || null,
     expiresAt: order.expiresAt || null,
     pricing: order.pricing || {},
     items: order.items || [],
@@ -204,6 +209,14 @@ async function createOrder(req, res) {
       || req.get("X-Idempotency-Key")
       || body.idempotencyKey
     );
+    if (!idempotencyKey) {
+      return errorResponse(
+        res,
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "idempotencyKey is required (Idempotency-Key header, X-Idempotency-Key header, or body.idempotencyKey)"
+      );
+    }
 
     const quote = await priceOrderCart({
       userId: req.userId,
@@ -756,6 +769,8 @@ function buildOrderCheckoutPayload(order, payment, { reused = false } = {}) {
     paymentId: payment ? String(payment._id) : (order.paymentId ? String(order.paymentId) : null),
     requestedDeliveryDate: order.requestedDeliveryDate,
     deliveryDate: order.deliveryDate,
+    fulfillmentDate: order.fulfillmentDate || order.deliveryDate || order.requestedDeliveryDate || null,
+    requestedFulfillmentDate: order.requestedFulfillmentDate || order.fulfillmentDate || order.requestedDeliveryDate || null,
     dateAdjusted: Boolean(order.deliveryDateAdjusted),
     payment_url: resolveOrderPaymentUrl(order, payment),
     invoice_id:
@@ -923,6 +938,14 @@ async function checkoutOrder(req, res) {
       || req.get("X-Idempotency-Key")
       || body.idempotencyKey
     );
+    if (!idempotencyKey) {
+      return errorResponse(
+        res,
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "idempotencyKey is required (Idempotency-Key header, X-Idempotency-Key header, or body.idempotencyKey)"
+      );
+    }
 
     if (promoCode !== undefined && promoCode !== null && String(promoCode).trim() !== "") {
       return errorResponse(

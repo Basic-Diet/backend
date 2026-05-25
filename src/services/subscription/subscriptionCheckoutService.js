@@ -80,6 +80,7 @@ function normalizePremiumItem(item) {
     premiumKey,
     name,
     originalProteinId: normalizeOptionalObjectId(proteinId),
+    priceSource: item.priceSource || item.resolutionSource || null,
   };
 }
 
@@ -340,6 +341,7 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
                 qty: item.qty,
                 unitExtraFeeHalala: item.unitExtraFeeHalala,
                 currency: item.currency,
+                priceSource: item.priceSource || null,
               })),
             },
             pricing: {
@@ -554,6 +556,13 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
           userId: String(userId),
           grams: quote.grams,
           mealsPerDay: quote.mealsPerDay,
+          premiumAmountHalala: breakdown.premiumTotalHalala,
+          premiumItems: normalizedPremiumItems.map((item) => ({
+            premiumKey: item.premiumKey,
+            qty: item.qty,
+            unitExtraFeeHalala: item.unitExtraFeeHalala,
+            priceSource: item.priceSource || null,
+          })),
           redirectToken: redirectContext.token,
         },
       });

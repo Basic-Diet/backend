@@ -22,7 +22,6 @@ const {
   normalizePremiumItemKey,
   PREMIUM_LARGE_SALAD_KEY,
 } = require("../../utils/subscription/premiumIdentity");
-const { PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA } = require("../../config/mealPlannerContract");
 
 const ACTIVE_PICKUP_REQUEST_STATUSES = ["locked", "in_preparation", "ready_for_pickup"];
 
@@ -99,20 +98,6 @@ async function buildSubscriptionOverviewSkipUsageSafe(subscription, runtime) {
 }
 
 const CUSTOM_PREMIUM_SALAD_KEY = PREMIUM_LARGE_SALAD_KEY;
-
-function buildCustomPremiumSaladItem(lang) {
-  const name = getPremiumDisplayName({ premiumKey: CUSTOM_PREMIUM_SALAD_KEY, lang });
-  return {
-    premiumMealId: CUSTOM_PREMIUM_SALAD_KEY,
-    premiumKey: CUSTOM_PREMIUM_SALAD_KEY,
-    name,
-    type: CUSTOM_PREMIUM_SALAD_KEY,
-    extraFeeHalala: PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
-    purchasedQtyTotal: 0,
-    remainingQtyTotal: 0,
-    consumedQtyTotal: 0,
-  };
-}
 
 const PREMIUM_CATALOG_CACHE_TTL = 300000; // 5 minutes
 let premiumCatalogCache = { data: null, lastFetch: 0 };
@@ -303,7 +288,6 @@ function buildSubscriptionPremiumBalanceSummary(subscription, premiumCatalog, la
     existingKeys.add(key);
   }
 
-  const customSaladItem = buildCustomPremiumSaladItem(lang);
   if (!existingKeys.has(CUSTOM_PREMIUM_SALAD_KEY)) {
     // Only add if it has non-zero quantities (handled by the balance processing above)
     // Actually, for custom_premium_salad, if it's not in existingKeys, it means 0 balance.

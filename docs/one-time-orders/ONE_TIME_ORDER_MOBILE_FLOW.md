@@ -390,6 +390,7 @@ Request:
 Create behavior:
 
 - Re-prices the cart on the backend.
+- If `fulfillmentDate`, `requestedFulfillmentDate`, and `deliveryDate` are omitted, the backend treats the order as today-only and returns the effective KSA `fulfillmentDate` in quote and checkout responses.
 - Creates an `Order` with `status = "pending_payment"` and `paymentStatus = "initiated"`.
 - Creates a `Payment` with `type = "one_time_order"`.
 - Creates a Moyasar invoice and returns `paymentUrl`.
@@ -411,6 +412,8 @@ Response:
     "invoiceId": "inv_123",
     "status": "pending_payment",
     "paymentStatus": "initiated",
+    "fulfillmentDate": "2026-05-06",
+    "requestedFulfillmentDate": "2026-05-06",
     "expiresAt": "2026-05-06T18:30:00.000Z",
     "pricing": {},
     "items": []

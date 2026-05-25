@@ -4,6 +4,7 @@ const Subscription = require("../models/Subscription");
 const Order = require("../models/Order");
 const { resolveReadLabel } = require("../utils/subscription/subscriptionReadLocalization");
 const errorResponse = require("../utils/errorResponse");
+const { logger } = require("../utils/logger");
 
 function serializeProfileUser(coreUser, appUser = null) {
   return {
@@ -101,7 +102,7 @@ async function getClientProfile(req, res) {
     ]);
 
     if (!coreUser) {
-      return res.status(401).json({ status: false, message: "User not found" });
+      return errorResponse(res, 401, "USER_NOT_FOUND", "User not found");
     }
 
     const userData = serializeProfileUser(coreUser, appUser);
@@ -200,8 +201,12 @@ async function getClientProfile(req, res) {
       },
     });
   } catch (error) {
-    console.error("getClientProfile error:", error);
-    return res.status(500).json({ status: false, message: "Internal server error" });
+    logger.error("clientProfileController.getClientProfile failed", {
+      userId: req.userId ? String(req.userId) : null,
+      error: error.message,
+      stack: error.stack,
+    });
+    return errorResponse(res, 500, "INTERNAL", "Internal server error");
   }
 }
 
@@ -246,7 +251,11 @@ async function updateClientProfile(req, res) {
     if (error && error.status && error.code) {
       return errorResponse(res, error.status, error.code, error.message, error.details);
     }
-    console.error("updateClientProfile error:", error);
+    logger.error("clientProfileController.updateClientProfile failed", {
+      userId: req.userId ? String(req.userId) : null,
+      error: error.message,
+      stack: error.stack,
+    });
     return errorResponse(res, 500, "INTERNAL", "Internal server error");
   }
 }

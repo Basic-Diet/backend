@@ -219,6 +219,15 @@ function buildSubscriptionCheckoutPaymentMetadata({
     paymentUrl: paymentUrl || "",
     initiationResponseShape: resolveSubscriptionCheckoutResponseShape(paymentType),
     totalHalala: Number(totalHalala || 0),
+    premiumAmountHalala: Number(draft && draft.breakdown ? draft.breakdown.premiumTotalHalala : 0),
+    premiumItems: Array.isArray(draft && draft.premiumItems)
+      ? draft.premiumItems.map((item) => ({
+        premiumKey: item.premiumKey,
+        qty: Number(item.qty || 0),
+        unitExtraFeeHalala: Number(item.unitExtraFeeHalala || 0),
+        priceSource: item.priceSource || null,
+      }))
+      : [],
   };
 
   if (providerInvoiceId) {

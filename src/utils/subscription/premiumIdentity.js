@@ -2,6 +2,9 @@ const BuilderProtein = require("../../models/BuilderProtein");
 const {
   PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
 } = require("../../config/mealPlannerContract");
+const {
+  resolvePremiumLargeSaladPricing,
+} = require("../../services/catalog/premiumLargeSaladPricingService");
 
 const PREMIUM_LARGE_SALAD_KEY = "premium_large_salad";
 const LEGACY_CUSTOM_PREMIUM_SALAD_KEY = "custom_premium_salad";
@@ -35,6 +38,24 @@ function isStaticPremiumItem(premiumKey) {
 
 function getStaticPremiumItem(premiumKey) {
   return STATIC_PREMIUM_ITEMS[normalizePremiumItemKey(premiumKey)] || null;
+}
+
+async function resolveStaticPremiumItem(premiumKey) {
+  const normalizedKey = normalizePremiumItemKey(premiumKey);
+  if (normalizedKey !== PREMIUM_LARGE_SALAD_KEY) {
+    return getStaticPremiumItem(normalizedKey);
+  }
+  const pricing = await resolvePremiumLargeSaladPricing();
+  return {
+    premiumKey: PREMIUM_LARGE_SALAD_KEY,
+    name: { en: "Premium Large Salad", ar: "سلطة كبيرة مميزة" },
+    type: PREMIUM_LARGE_SALAD_KEY,
+    extraFeeHalala: pricing.extraFeeHalala,
+    currency: pricing.currency || "SAR",
+    priceSource: pricing.source,
+    productId: pricing.productId ? String(pricing.productId) : null,
+    productKey: pricing.productKey || null,
+  };
 }
 
 const PREMIUM_KEY_NAME_MAP = {
@@ -180,11 +201,11 @@ async function resolveCanonicalPremiumIdentity(input) {
 
   if (resolvedPremiumKey) {
     if (isStaticPremiumItem(resolvedPremiumKey)) {
-      const staticItem = getStaticPremiumItem(resolvedPremiumKey);
+      const staticItem = await resolveStaticPremiumItem(resolvedPremiumKey);
       if (staticItem) {
         resolvedName = staticItem.name.en || staticItem.name.ar || null;
         resolvedUnitExtraFeeHalala = staticItem.extraFeeHalala || 0;
-        resolutionSource = "staticPremiumItem";
+        resolutionSource = staticItem.priceSource || "staticPremiumItem";
         log(resolutionSource, {
           resolvedPremiumKey,
           resolvedName,
@@ -279,6 +300,7 @@ module.exports = {
   normalizePremiumItemKey,
   isStaticPremiumItem,
   getStaticPremiumItem,
+  resolveStaticPremiumItem,
   STATIC_PREMIUM_ITEMS,
   getPremiumDisplayName,
 };

@@ -8,7 +8,6 @@ const { sanitizeObject } = require("../../utils/encoding");
 const {
   MEAL_PLANNER_CATEGORY_DEFINITIONS,
   MEAL_SELECTION_TYPES,
-  PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
   PREMIUM_LARGE_SALAD_PREMIUM_KEY,
   PREMIUM_LARGE_SALAD_PRESET_KEY,
   PROTEIN_DISPLAY_GROUPS,
@@ -20,10 +19,12 @@ const {
   normalizeProteinFamilyKey,
   normalizeSaladIngredientGroupKey,
 } = require("../../config/mealPlannerContract");
+const {
+  resolvePremiumLargeSaladPricing,
+} = require("./premiumLargeSaladPricingService");
 
 const MENU_PROTEIN_GROUP_KEY = "proteins";
 const MENU_CARB_GROUP_KEY = "carbs";
-const PREMIUM_LARGE_SALAD_PRODUCT_KEY = "basic_salad";
 const SANDWICH_ITEM_TYPES = ["cold_sandwich", "sourdough"];
 
 const MENU_SALAD_GROUP_ALIASES = Object.freeze({
@@ -231,7 +232,7 @@ async function getPremiumLargeSaladIngredients({ product, normalizedProteins, la
 }
 
 async function getSubscriptionBuilderCatalog({ lang = "en" } = {}) {
-  const [proteinOptions, carbOptions, sandwiches, premiumLargeSaladProductPrimary] = await Promise.all([
+  const [proteinOptions, carbOptions, sandwiches, premiumLargeSaladPricing] = await Promise.all([
     getGroupOptions(MENU_PROTEIN_GROUP_KEY),
     getGroupOptions(MENU_CARB_GROUP_KEY),
     MenuProduct.find(activeCatalogQuery({
@@ -240,19 +241,12 @@ async function getSubscriptionBuilderCatalog({ lang = "en" } = {}) {
     }))
       .sort({ sortOrder: 1, createdAt: -1 })
       .lean(),
-    MenuProduct.findOne(activeCatalogQuery({
-      key: "premium_large_salad",
-      ...availableForChannelQuery("subscription"),
-    })).lean(),
+    resolvePremiumLargeSaladPricing(),
   ]);
 
-  let premiumLargeSaladProduct = premiumLargeSaladProductPrimary;
-  if (!premiumLargeSaladProduct) {
+  const premiumLargeSaladProduct = premiumLargeSaladPricing.product;
+  if (premiumLargeSaladPricing.source === "menu_product_basic_salad_fallback") {
     console.warn("[CatalogService] premium_large_salad not found, falling back to basic_salad");
-    premiumLargeSaladProduct = await MenuProduct.findOne(activeCatalogQuery({
-      key: "basic_salad",
-      ...availableForChannelQuery("subscription"),
-    })).lean();
   }
 
   const normalizedProteins = proteinOptions
@@ -290,14 +284,17 @@ async function getSubscriptionBuilderCatalog({ lang = "en" } = {}) {
     selectionType: MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD,
     presetKey: PREMIUM_LARGE_SALAD_PRESET_KEY,
     name: saladName,
-    extraFeeHalala: PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
-    currency: SYSTEM_CURRENCY,
+    extraFeeHalala: premiumLargeSaladPricing.extraFeeHalala,
+    priceHalala: premiumLargeSaladPricing.priceHalala,
+    priceSource: premiumLargeSaladPricing.source,
+    currency: premiumLargeSaladPricing.currency || SYSTEM_CURRENCY,
     preset: {
       key: PREMIUM_LARGE_SALAD_PRESET_KEY,
       name: saladName,
       selectionType: MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD,
-      fixedPriceHalala: PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
-      currency: SYSTEM_CURRENCY,
+      fixedPriceHalala: premiumLargeSaladPricing.priceHalala,
+      priceSource: premiumLargeSaladPricing.source,
+      currency: premiumLargeSaladPricing.currency || SYSTEM_CURRENCY,
       groups: saladGroups,
     },
     groups: saladGroups,

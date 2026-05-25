@@ -11,6 +11,7 @@ const DraftPremiumItemSchema = new mongoose.Schema(
     qty: { type: Number, min: 1, required: true },
     unitExtraFeeHalala: { type: Number, min: 0, required: true },
     currency: { type: String, default: "SAR" },
+    priceSource: { type: String, trim: true, default: "" },
   },
   { _id: false }
 );

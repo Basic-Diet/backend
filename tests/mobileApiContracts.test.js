@@ -297,6 +297,24 @@ async function cleanupCatalog() {
       assertHalalaInteger(res.body.data.pricing.vatHalala, "data.pricing.vatHalala");
     });
 
+    await test("POST /api/orders requires an idempotency key", async () => {
+      const res = await api.post("/api/orders").set(clientHeaders).send(orderBody);
+      expectStatus(res, 400, "missing idempotency key");
+      assert.strictEqual(res.body.ok, false);
+      assert.strictEqual(res.body.error.code, "IDEMPOTENCY_KEY_REQUIRED");
+    });
+
+    await test("POST /api/orders accepts body idempotencyKey compatibility", async () => {
+      const res = await api
+        .post("/api/orders")
+        .set(clientHeaders)
+        .send({ ...orderBody, fulfillmentDate: "2026-05-11", idempotencyKey: `${TEST_TAG}-body-checkout` });
+      expectStatus(res, 201, "body idempotency checkout");
+      assert.strictEqual(res.body.status, true);
+      assert(res.body.data.orderId, "data.orderId exists");
+      assert(res.body.data.paymentId, "data.paymentId exists");
+    });
+
     await test("POST /api/orders preserves mobile checkout contract", async () => {
       const res = await api
         .post("/api/orders")

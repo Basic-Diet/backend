@@ -543,6 +543,7 @@ async function resolveCheckoutQuoteOrThrow(
         premiumKey: resolved.premiumKey,
         canonicalProteinId: resolved.canonicalProteinId,
         name: resolved.name,
+        priceSource: resolved.resolutionSource || null,
       });
     } else {
       const doc = premiumById.get(item.id);
@@ -591,6 +592,7 @@ async function resolveCheckoutQuoteOrThrow(
         premiumKey: resolved.premiumKey,
         canonicalProteinId: resolved.canonicalProteinId,
         name: resolved.name,
+        priceSource: resolved.resolutionSource || null,
       });
     }
   }
