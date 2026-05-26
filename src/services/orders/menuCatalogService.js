@@ -10,6 +10,14 @@ const ProductGroupOption = require("../../models/ProductGroupOption");
 const ProductOptionGroup = require("../../models/ProductOptionGroup");
 const Setting = require("../../models/Setting");
 const { pickLang } = require("../../utils/i18n");
+const {
+  generateUniqueKey,
+  isAllowedCardVariant,
+  isAllowedGroupDisplayStyle,
+  normalizeGroupUiMetadata,
+  normalizeProductUiMetadata,
+  normalizeUiMetadata,
+} = require("../catalog/catalogKeyUiHelpers");
 
 const SYSTEM_CURRENCY = "SAR";
 const SNAKE_CASE_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
@@ -65,6 +73,19 @@ function normalizeKey(value, fieldName = "key") {
     throw new MenuValidationError(`${fieldName} must be snake_case`);
   }
   return key;
+}
+
+function normalizeOptionalKey(value, fieldName = "key") {
+  if (value === undefined || value === null || String(value).trim() === "") return undefined;
+  return normalizeKey(value, fieldName);
+}
+
+function assertImmutableKey(body, existing, fieldName = "key") {
+  if (!existing || body[fieldName] === undefined) return;
+  const nextKey = normalizeKey(body[fieldName], fieldName);
+  if (nextKey !== existing[fieldName]) {
+    throw new MenuValidationError(`${fieldName} is immutable`, "IMMUTABLE_KEY", 400, { fieldName });
+  }
 }
 
 function localizedString(value, fieldName, { required = false } = {}) {
@@ -218,6 +239,7 @@ function serializePublicCategory(category, lang, products) {
     descriptionI18n: localizedPair(category.description),
     imageUrl: category.imageUrl || "",
     sortOrder: Number(category.sortOrder || 0),
+    ui: normalizeUiMetadata(category.ui),
     products,
   };
 }
@@ -244,6 +266,7 @@ function serializePublicProduct(product, lang, optionGroups) {
     maxWeightGrams: Number(product.maxWeightGrams || 0),
     weightStepGrams: Number(product.weightStepGrams || 50),
     sortOrder: Number(product.sortOrder || 0),
+    ui: normalizeProductUiMetadata(product.ui),
     requiresBuilder,
     canAddDirectly: product.pricingModel === "fixed" && !hasOptionGroups,
     optionGroups,
@@ -263,6 +286,7 @@ function serializePublicGroup(relation, group, options, lang) {
       : Number(relation.maxSelections),
     isRequired: Boolean(relation.isRequired),
     sortOrder: Number(relation.sortOrder || group.sortOrder || 0),
+    ui: normalizeGroupUiMetadata(group.ui),
     options,
   };
 }
@@ -465,8 +489,19 @@ async function getModel(Model, id, extraQuery = {}) {
 
 function normalizeCategoryPayload(body = {}, existing = null) {
   if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
+  assertImmutableKey(body, existing, "key");
+  const hasUi = body.ui !== undefined;
+  if (
+    hasUi
+    && (
+      !isPlainObject(body.ui)
+      || (body.ui.cardVariant !== undefined && !isAllowedCardVariant(body.ui.cardVariant))
+    )
+  ) {
+    throw new MenuValidationError("ui.cardVariant must be one of: standard, premium, large_salad, addon", "INVALID_CARD_VARIANT");
+  }
   return {
-    key: body.key === undefined && existing ? existing.key : normalizeKey(body.key),
+    key: body.key === undefined && existing ? existing.key : normalizeOptionalKey(body.key),
     name: body.name === undefined && existing ? existing.name : localizedString(body.name, "name", { required: true }),
     description: optionalLocalizedString(body.description, "description") || (existing ? existing.description : { ar: "", en: "" }),
     imageUrl: body.imageUrl === undefined && existing ? existing.imageUrl : String(body.imageUrl || "").trim(),
@@ -474,6 +509,7 @@ function normalizeCategoryPayload(body = {}, existing = null) {
     isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
     isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
+    ui: hasUi ? normalizeUiMetadata(body.ui) : normalizeUiMetadata(existing && existing.ui),
     availability: {
       branchIds: (body.branchIds === undefined && (!body.availability || body.availability.branchIds === undefined) && existing)
         ? ((existing.availability && existing.availability.branchIds) || [])
@@ -487,6 +523,17 @@ function normalizeCategoryPayload(body = {}, existing = null) {
 
 function normalizeProductPayload(body = {}, existing = null) {
   if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
+  assertImmutableKey(body, existing, "key");
+  const hasUi = body.ui !== undefined;
+  if (
+    hasUi
+    && (
+      !isPlainObject(body.ui)
+      || (body.ui.cardVariant !== undefined && !isAllowedCardVariant(body.ui.cardVariant))
+    )
+  ) {
+    throw new MenuValidationError("ui.cardVariant must be one of: standard, premium, large_salad, addon", "INVALID_CARD_VARIANT");
+  }
   const pricingModel = String(body.pricingModel || (existing && existing.pricingModel) || "fixed").trim();
   if (!["fixed", "per_100g"].includes(pricingModel)) {
     throw new MenuValidationError("pricingModel must be fixed or per_100g");
@@ -497,7 +544,7 @@ function normalizeProductPayload(body = {}, existing = null) {
   }
   return {
     categoryId: body.categoryId === undefined && existing ? existing.categoryId : assertObjectId(body.categoryId, "categoryId"),
-    key: body.key === undefined && existing ? existing.key : normalizeKey(body.key),
+    key: body.key === undefined && existing ? existing.key : normalizeOptionalKey(body.key),
     name: body.name === undefined && existing ? existing.name : localizedString(body.name, "name", { required: true }),
     description: optionalLocalizedString(body.description, "description") || (existing ? existing.description : { ar: "", en: "" }),
     imageUrl: body.imageUrl === undefined && existing ? existing.imageUrl : String(body.imageUrl || "").trim(),
@@ -515,6 +562,7 @@ function normalizeProductPayload(body = {}, existing = null) {
     isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
     isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
+    ui: hasUi ? normalizeProductUiMetadata(body.ui) : normalizeProductUiMetadata(existing && existing.ui),
     branchAvailability: (body.branchAvailability === undefined && body.branchIds === undefined && existing)
       ? (existing.branchAvailability || [])
       : normalizeStringArray(body.branchAvailability !== undefined ? body.branchAvailability : body.branchIds, "branchAvailability"),
@@ -523,19 +571,32 @@ function normalizeProductPayload(body = {}, existing = null) {
 
 function normalizeGroupPayload(body = {}, existing = null) {
   if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
+  assertImmutableKey(body, existing, "key");
+  const hasUi = body.ui !== undefined;
+  if (
+    hasUi
+    && (
+      !isPlainObject(body.ui)
+      || (body.ui.displayStyle !== undefined && !isAllowedGroupDisplayStyle(body.ui.displayStyle))
+    )
+  ) {
+    throw new MenuValidationError("ui.displayStyle must be one of: chips, radio_cards, checkbox_grid, dropdown, stepper", "INVALID_DISPLAY_STYLE");
+  }
   return {
-    key: body.key === undefined && existing ? existing.key : normalizeKey(body.key),
+    key: body.key === undefined && existing ? existing.key : normalizeOptionalKey(body.key),
     name: body.name === undefined && existing ? existing.name : localizedString(body.name, "name", { required: true }),
     description: optionalLocalizedString(body.description, "description") || (existing ? existing.description : { ar: "", en: "" }),
     isActive: normalizeBoolean(body.isActive, "isActive", existing ? existing.isActive : true),
     isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
     isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
+    ui: hasUi ? normalizeGroupUiMetadata(body.ui) : normalizeGroupUiMetadata(existing && existing.ui),
   };
 }
 
 function normalizeOptionPayload(body = {}, existing = null) {
   if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
+  assertImmutableKey(body, existing, "key");
 
   let extraPriceHalala = normalizeNonNegativeInteger(body.extraPriceHalala, "extraPriceHalala", existing ? existing.extraPriceHalala : 0);
   let extraFeeHalala = normalizeNonNegativeInteger(body.extraFeeHalala, "extraFeeHalala", existing ? (existing.extraFeeHalala || 0) : 0);
@@ -548,7 +609,7 @@ function normalizeOptionPayload(body = {}, existing = null) {
 
   return {
     groupId: body.groupId === undefined && existing ? existing.groupId : assertObjectId(body.groupId, "groupId"),
-    key: body.key === undefined && existing ? existing.key : normalizeKey(body.key),
+    key: body.key === undefined && existing ? existing.key : normalizeOptionalKey(body.key),
     name: body.name === undefined && existing ? existing.name : localizedString(body.name, "name", { required: true }),
     description: optionalLocalizedString(body.description, "description") || (existing ? existing.description : { ar: "", en: "" }),
     imageUrl: body.imageUrl === undefined && existing ? existing.imageUrl : String(body.imageUrl || "").trim(),
@@ -735,8 +796,11 @@ async function duplicateProduct(productId, actor = {}) {
     ProductGroupOption.find({ productId }).lean(),
   ]);
 
-  // Robust key generation to prevent collisions
-  const newKey = `${product.key}_copy_${Date.now()}_$${Math.random().toString(36).slice(2, 6)}`;
+  const newKey = await generateUniqueKey({
+    name: `${product.key || localizeName(product.name, "en") || "item"}_copy`,
+    fallbackPrefix: "item",
+    exists: (key) => MenuProduct.exists({ key }),
+  });
 
   try {
     const newProductDoc = await MenuProduct.create({
@@ -1482,15 +1546,52 @@ module.exports = {
   getProduct: (id) => getModel(MenuProduct, id),
   getOptionGroup: (id) => getModel(MenuOptionGroup, id),
   getOption: (id) => getModel(MenuOption, id),
-  createCategory: (body, actor) => createEntity(MenuCategory, normalizeCategoryPayload(body), { entityType: "menu_category", actor }),
+  createCategory: async (body, actor) => {
+    const payload = normalizeCategoryPayload(body);
+    if (!payload.key) {
+      payload.key = await generateUniqueKey({
+        name: payload.name,
+        fallbackPrefix: "category",
+        exists: (key) => MenuCategory.exists({ key }),
+      });
+    }
+    return createEntity(MenuCategory, payload, { entityType: "menu_category", actor });
+  },
   createProduct: async (body, actor) => {
     const payload = normalizeProductPayload(body);
+    if (!payload.key) {
+      payload.key = await generateUniqueKey({
+        name: payload.name,
+        fallbackPrefix: "item",
+        exists: (key) => MenuProduct.exists({ key }),
+      });
+    }
     const category = await MenuCategory.findOne({ _id: payload.categoryId, isActive: true }).lean();
     if (!category) throw new MenuValidationError("categoryId does not reference an active category", "CATEGORY_NOT_FOUND", 404);
     return createEntity(MenuProduct, payload, { entityType: "menu_product", actor });
   },
-  createOptionGroup: (body, actor) => createEntity(MenuOptionGroup, normalizeGroupPayload(body), { entityType: "menu_option_group", actor }),
-  createOption: (body, actor) => createEntity(MenuOption, normalizeOptionPayload(body), { entityType: "menu_option", actor }),
+  createOptionGroup: async (body, actor) => {
+    const payload = normalizeGroupPayload(body);
+    if (!payload.key) {
+      payload.key = await generateUniqueKey({
+        name: payload.name,
+        fallbackPrefix: "group",
+        exists: (key) => MenuOptionGroup.exists({ key }),
+      });
+    }
+    return createEntity(MenuOptionGroup, payload, { entityType: "menu_option_group", actor });
+  },
+  createOption: async (body, actor) => {
+    const payload = normalizeOptionPayload(body);
+    if (!payload.key) {
+      payload.key = await generateUniqueKey({
+        name: payload.name,
+        fallbackPrefix: "option",
+        exists: (key) => MenuOption.exists({ groupId: payload.groupId, key }),
+      });
+    }
+    return createEntity(MenuOption, payload, { entityType: "menu_option", actor });
+  },
   updateCategory: async (id, body, actor) => {
     const existing = await MenuCategory.findById(assertObjectId(id)).lean();
     if (!existing) throw new MenuNotFoundError();

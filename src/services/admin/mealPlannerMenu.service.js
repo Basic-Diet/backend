@@ -16,6 +16,12 @@ const {
 const {
   invalidateMealPlannerCatalogCache,
 } = require("../subscription/mealPlannerCatalogService");
+const {
+  generateUniqueKey,
+  inferCardVariantFromKey,
+  isAllowedCardVariant,
+  normalizeUiMetadata,
+} = require("../catalog/catalogKeyUiHelpers");
 
 const ADDON_CATEGORIES = Object.freeze(["juice", "snack", "small_salad"]);
 const PROTEIN_DISPLAY_CATEGORY_KEYS = Object.freeze(["chicken", "beef", "fish", "eggs", "other", "premium"]);
@@ -111,6 +117,24 @@ function normalizeKey(value) {
   return trimmed || undefined;
 }
 
+function normalizeSnakeKey(value, fieldName = "key") {
+  const key = normalizeKey(value);
+  if (!key) return undefined;
+  if (!SNAKE_CASE_PATTERN.test(key)) {
+    throw new ValidationError(`${fieldName} must be a snake_case string`);
+  }
+  return key;
+}
+
+function assertImmutableKey(body, existing, fieldName = "key") {
+  if (!existing || body[fieldName] === undefined) return;
+  const nextKey = normalizeSnakeKey(body[fieldName], fieldName) || "";
+  const currentKey = String(existing[fieldName] || "").trim().toLowerCase();
+  if (nextKey !== currentKey) {
+    throw new ValidationError(`${fieldName} is immutable`);
+  }
+}
+
 function normalizeRuleTags(value, defaultValue = []) {
   if (value === undefined || value === null) return defaultValue;
   if (!Array.isArray(value)) {
@@ -158,12 +182,17 @@ function normalizeCategoryPayload(body, { existing = null } = {}) {
   if (!isPlainObject(body)) {
     throw new ValidationError("Request body must be an object");
   }
-  const key = normalizeKey(body.key) || existing?.key;
-  if (!key) {
-    throw new ValidationError("key is required");
-  }
-  if (!SNAKE_CASE_PATTERN.test(key)) {
-    throw new ValidationError("key must be a snake_case string");
+  assertImmutableKey(body, existing, "key");
+  const key = body.key === undefined && existing ? existing.key : normalizeSnakeKey(body.key, "key");
+  const hasUi = body.ui !== undefined;
+  if (
+    hasUi
+    && (
+      !isPlainObject(body.ui)
+      || (body.ui.cardVariant !== undefined && !isAllowedCardVariant(body.ui.cardVariant))
+    )
+  ) {
+    throw new ValidationError("ui.cardVariant must be one of: standard, premium, large_salad, addon");
   }
   const dimension = String(body.dimension || existing?.dimension || "").trim();
   validateEnum(dimension, ["protein", "carb"], "dimension");
@@ -173,6 +202,9 @@ function normalizeCategoryPayload(body, { existing = null } = {}) {
     name: validateName(body.name),
     description: optionalLocalizedString(body.description, "description"),
     rules: normalizeCategoryRules(body.rules),
+    ui: hasUi
+      ? normalizeUiMetadata(body.ui)
+      : (existing ? normalizeUiMetadata(existing.ui) : { cardVariant: inferCardVariantFromKey(key) }),
     isActive: normalizeBoolean(body.isActive, "isActive", true),
     sortOrder: body.sortOrder === undefined && existing
       ? existing.sortOrder
@@ -204,6 +236,7 @@ async function ensureBuilderCategory({ key, dimension }) {
         name: definition.name,
         description: definition.description || { ar: "", en: "" },
         rules: definition.rules || {},
+        ui: definition.ui || { cardVariant: inferCardVariantFromKey(definition.key) },
         sortOrder: definition.sortOrder,
         isActive: true,
       },
@@ -226,6 +259,10 @@ async function assertUniquePremiumKey(premiumKey, excludeId) {
 function normalizeProteinPayload(body, { premium, existing = null } = {}) {
   if (!isPlainObject(body)) {
     throw new ValidationError("Request body must be an object");
+  }
+  assertImmutableKey(body, existing, "key");
+  if (premium) {
+    assertImmutableKey(body, existing, "premiumKey");
   }
 
   const name = validateName(body.name);
@@ -251,19 +288,15 @@ function normalizeProteinPayload(body, { premium, existing = null } = {}) {
 
   let premiumKey = undefined;
   if (premium) {
-    premiumKey = normalizeKey(body.premiumKey);
-    if (!premiumKey) {
-      throw new ValidationError("premiumKey is required if isPremium is true");
-    }
-    if (!SNAKE_CASE_PATTERN.test(premiumKey)) {
-      throw new ValidationError("premiumKey must be a unique snake_case string");
-    }
+    premiumKey = body.premiumKey === undefined && existing
+      ? existing.premiumKey
+      : normalizeSnakeKey(body.premiumKey, "premiumKey");
   } else if (body.premiumKey !== undefined && body.premiumKey !== null && String(body.premiumKey).trim()) {
     throw new ValidationError("premiumKey is only allowed for premium proteins");
   }
 
   return {
-    key: normalizeKey(body.key) || existing?.key,
+    key: body.key === undefined && existing ? existing.key : normalizeSnakeKey(body.key, "key"),
     name,
     description,
     displayCategoryKey,
@@ -284,8 +317,9 @@ function normalizeCarbPayload(body, { existing = null } = {}) {
   if (!isPlainObject(body)) {
     throw new ValidationError("Request body must be an object");
   }
+  assertImmutableKey(body, existing, "key");
   return {
-    key: normalizeKey(body.key) || existing?.key,
+    key: body.key === undefined && existing ? existing.key : normalizeSnakeKey(body.key, "key"),
     name: validateName(body.name),
     description: optionalLocalizedString(body.description, "description"),
     displayCategoryKey: STANDARD_CARB_CATEGORY_KEY,
@@ -463,7 +497,18 @@ async function listCategories(options = {}) {
 }
 
 async function createCategory(body) {
-  return create(BuilderCategory, normalizeCategoryPayload(body));
+  const payload = normalizeCategoryPayload(body);
+  if (!payload.key) {
+    payload.key = await generateUniqueKey({
+      name: payload.name,
+      fallbackPrefix: "category",
+      exists: (key) => BuilderCategory.exists({ dimension: payload.dimension, key }),
+    });
+    if (!body.ui) {
+      payload.ui = { cardVariant: inferCardVariantFromKey(payload.key) };
+    }
+  }
+  return create(BuilderCategory, payload);
 }
 
 async function getCategory(id) {
@@ -485,6 +530,13 @@ async function listStandardProteins(options = {}) {
 
 async function createStandardProtein(body) {
   const payload = normalizeProteinPayload(body, { premium: false });
+  if (!payload.key) {
+    payload.key = await generateUniqueKey({
+      name: payload.name,
+      fallbackPrefix: "item",
+      exists: (key) => BuilderProtein.exists({ key }),
+    });
+  }
   const category = await ensureBuilderCategory({ key: payload.displayCategoryKey, dimension: "protein" });
   return create(BuilderProtein, { ...payload, displayCategoryId: category._id });
 }
@@ -506,6 +558,20 @@ async function listPremiumProteins(options = {}) {
 
 async function createPremiumProtein(body) {
   const payload = normalizeProteinPayload(body, { premium: true });
+  if (!payload.key) {
+    payload.key = await generateUniqueKey({
+      name: payload.name,
+      fallbackPrefix: "item",
+      exists: (key) => BuilderProtein.exists({ key }),
+    });
+  }
+  if (!payload.premiumKey) {
+    payload.premiumKey = await generateUniqueKey({
+      name: payload.name,
+      fallbackPrefix: "premium",
+      exists: (premiumKey) => BuilderProtein.exists({ premiumKey }),
+    });
+  }
   await assertUniquePremiumKey(payload.premiumKey);
   const category = await ensureBuilderCategory({ key: "premium", dimension: "protein" });
   return create(BuilderProtein, { ...payload, displayCategoryId: category._id });
@@ -529,6 +595,13 @@ async function listCarbs(options = {}) {
 
 async function createCarb(body) {
   const payload = normalizeCarbPayload(body);
+  if (!payload.key) {
+    payload.key = await generateUniqueKey({
+      name: payload.name,
+      fallbackPrefix: "item",
+      exists: (key) => BuilderCarb.exists({ key }),
+    });
+  }
   const category = await ensureBuilderCategory({ key: STANDARD_CARB_CATEGORY_KEY, dimension: "carb" });
   return create(BuilderCarb, { ...payload, displayCategoryId: category._id });
 }

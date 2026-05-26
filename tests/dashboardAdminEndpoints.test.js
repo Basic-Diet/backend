@@ -335,6 +335,47 @@ async function main() {
     expectStatus(res, 200, "get meal planner category");
     assert.strictEqual(res.body.data.key, categoryKey);
 
+    res = await api.post("/api/dashboard/meal-planner/categories").set(adminHeaders).send({
+      dimension: "protein",
+      name: { en: `${TEST_TAG} Generated Category` },
+      ui: { cardVariant: "premium" },
+      isActive: true,
+      sortOrder: 98,
+    });
+    expectStatus(res, 201, "create generated-key meal planner category");
+    const generatedCategoryId = res.body.data.id;
+    assert.strictEqual(res.body.data.key, `${TEST_TAG.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}_generated_category`);
+    assert.strictEqual(res.body.data.ui.cardVariant, "premium");
+
+    res = await api.put(`/api/dashboard/meal-planner/categories/${generatedCategoryId}`).set(adminHeaders).send({
+      dimension: "protein",
+      name: { en: `${TEST_TAG} Generated Category Renamed` },
+      ui: { cardVariant: "large_salad" },
+      isActive: true,
+      sortOrder: 98,
+    });
+    expectStatus(res, 200, "rename generated-key meal planner category");
+    assert.strictEqual(res.body.data.key, `${TEST_TAG.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}_generated_category`);
+    assert.strictEqual(res.body.data.ui.cardVariant, "large_salad");
+
+    res = await api.put(`/api/dashboard/meal-planner/categories/${generatedCategoryId}`).set(adminHeaders).send({
+      key: "changed_builder_category",
+      dimension: "protein",
+      name: { en: `${TEST_TAG} Generated Category Renamed` },
+      isActive: true,
+      sortOrder: 98,
+    });
+    expectStatus(res, 400, "changed builder category key rejected");
+
+    res = await api.post("/api/dashboard/meal-planner/categories").set(adminHeaders).send({
+      dimension: "carb",
+      name: { ar: "تصنيف عربي فقط" },
+      isActive: true,
+      sortOrder: 97,
+    });
+    expectStatus(res, 201, "create arabic fallback builder category");
+    assert(/^category_[a-f0-9]{6}$/.test(res.body.data.key), `unexpected fallback key ${res.body.data.key}`);
+
     res = await api.patch(`/api/dashboard/meal-planner/categories/${categoryId}/toggle`).set(adminHeaders).send({});
     expectStatus(res, 200, "toggle meal planner category");
     assert.strictEqual(res.body.data.isActive, false);
@@ -344,7 +385,6 @@ async function main() {
     assert.strictEqual(res.body.data.isActive, false);
 
     res = await api.post("/api/dashboard/meal-planner/proteins").set(adminHeaders).send({
-      key: `test_protein_${Date.now()}`,
       name: { en: `${TEST_TAG} Protein` },
       proteinFamilyKey: "chicken",
       displayCategoryKey: "chicken",
@@ -358,14 +398,24 @@ async function main() {
     res = await api.get(`/api/dashboard/meal-planner/proteins/${proteinId}`).set(adminHeaders);
     expectStatus(res, 200, "get dashboard meal planner protein");
     assert.strictEqual(res.body.data.isPremium, false);
+    assert(res.body.data.key && res.body.data.key.includes("protein"), "standard protein generated a key");
+
+    res = await api.put(`/api/dashboard/meal-planner/proteins/${proteinId}`).set(adminHeaders).send({
+      key: "changed_builder_protein",
+      name: { en: `${TEST_TAG} Protein` },
+      proteinFamilyKey: "chicken",
+      displayCategoryKey: "chicken",
+      extraFeeHalala: 0,
+      isActive: true,
+      sortOrder: 10,
+    });
+    expectStatus(res, 400, "changed builder protein key rejected");
 
     res = await api.patch(`/api/dashboard/meal-planner/proteins/${proteinId}/toggle`).set(adminHeaders).send({});
     expectStatus(res, 200, "toggle dashboard meal planner protein");
     assert.strictEqual(res.body.data.isActive, false);
 
     res = await api.post("/api/dashboard/meal-planner/premium-proteins").set(adminHeaders).send({
-      key: `test_premium_protein_${Date.now()}`,
-      premiumKey: `test_premium_${Date.now()}`,
       name: { en: `${TEST_TAG} Premium Protein` },
       proteinFamilyKey: "fish",
       extraFeeHalala: 2500,
@@ -378,13 +428,24 @@ async function main() {
     res = await api.get(`/api/dashboard/meal-planner/premium-proteins/${premiumProteinId}`).set(adminHeaders);
     expectStatus(res, 200, "get dashboard premium protein");
     assert.strictEqual(res.body.data.isPremium, true);
+    assert(res.body.data.key && res.body.data.key.includes("premium_protein"), "premium protein generated a key");
+    assert(res.body.data.premiumKey && res.body.data.premiumKey.includes("premium_protein"), "premium protein generated premiumKey");
+
+    res = await api.put(`/api/dashboard/meal-planner/premium-proteins/${premiumProteinId}`).set(adminHeaders).send({
+      premiumKey: "changed_premium_key",
+      name: { en: `${TEST_TAG} Premium Protein` },
+      proteinFamilyKey: "fish",
+      extraFeeHalala: 2500,
+      isActive: true,
+      sortOrder: 10,
+    });
+    expectStatus(res, 400, "changed premiumKey rejected");
 
     res = await api.patch(`/api/dashboard/meal-planner/premium-proteins/${premiumProteinId}/toggle`).set(adminHeaders).send({});
     expectStatus(res, 200, "toggle dashboard premium protein");
     assert.strictEqual(res.body.data.isActive, false);
 
     res = await api.post("/api/dashboard/meal-planner/carbs").set(adminHeaders).send({
-      key: `test_carb_${Date.now()}`,
       name: { en: `${TEST_TAG} Carb` },
       isActive: true,
       sortOrder: 10,
@@ -395,6 +456,7 @@ async function main() {
     res = await api.get(`/api/dashboard/meal-planner/carbs/${carbId}`).set(adminHeaders);
     expectStatus(res, 200, "get dashboard carb");
     assert.strictEqual(res.body.data.displayCategoryKey, "standard_carbs");
+    assert(res.body.data.key && res.body.data.key.includes("carb"), "carb generated a key");
 
     res = await api.patch(`/api/dashboard/meal-planner/carbs/${carbId}/toggle`).set(adminHeaders).send({});
     expectStatus(res, 200, "toggle dashboard carb");

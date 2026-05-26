@@ -176,8 +176,9 @@ async function runTests() {
     assert.strictEqual(dup2Res.status, 201);
     
     assert.notStrictEqual(dup1Res.body.data.key, dup2Res.body.data.key, "Duplicate keys must be unique");
-    assert(dup1Res.body.data.key.includes("_copy_"), "Key should include _copy_");
-    assert(dup1Res.body.data.key.includes("$"), "Key should include $ separator");
+    assert(dup1Res.body.data.key.includes("_copy"), "Key should include _copy");
+    assert(!dup1Res.body.data.key.includes("$"), "Key should not include invalid $ separator");
+    assert(/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(dup1Res.body.data.key), "Duplicate key should be valid snake_case");
     assert.strictEqual(dup1Res.body.data.isActive, false, "Duplicate should be inactive");
 
     // 2. Test 409 on forced collision (if we could easily)

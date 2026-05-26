@@ -112,6 +112,22 @@ All `/api/dashboard/menu/*` endpoints require dashboard auth and `admin` or `sup
 | `branchAvailability` | Optional branch allow-list. |
 | `publishedAt`, `versionId` | Publish/version state. |
 
+### MenuCategory UI Metadata
+
+Dashboard should not require admins to type technical keys for new categories or products. The backend accepts legacy `key` fields for compatibility, but generates stable snake_case keys on create when omitted. Keys are immutable after creation; updating a display name does not change the key.
+
+Customer category responses always include:
+
+```json
+{
+  "ui": {
+    "cardVariant": "standard"
+  }
+}
+```
+
+Allowed `ui.cardVariant` values are `standard`, `premium`, `large_salad`, and `addon`. Flutter should choose card components from `category.ui.cardVariant`, fall back to `standard` when missing or unknown, and keep old key-based rendering only as a temporary fallback.
+
 ### MenuOptionGroup
 
 | Field | Meaning |

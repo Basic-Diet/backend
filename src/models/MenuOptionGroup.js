@@ -8,6 +8,17 @@ const LocalizedStringSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const OptionGroupUiSchema = new mongoose.Schema(
+  {
+    displayStyle: {
+      type: String,
+      enum: ["chips", "radio_cards", "checkbox_grid", "dropdown", "stepper"],
+      default: "chips",
+    },
+  },
+  { _id: false }
+);
+
 const MenuOptionGroupSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, trim: true, lowercase: true },
@@ -17,6 +28,7 @@ const MenuOptionGroupSchema = new mongoose.Schema(
     isVisible: { type: Boolean, default: true, index: true },
     isAvailable: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
+    ui: { type: OptionGroupUiSchema, default: () => ({}) },
     publishedAt: { type: Date, default: null, index: true },
   },
   { timestamps: true }

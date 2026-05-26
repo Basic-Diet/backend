@@ -593,6 +593,201 @@ async function seedViaDashboard(api) {
     });
     const ctx = await seedViaDashboard(api);
 
+    await test("Dashboard menu generates immutable catalog keys and exposes ui metadata", async () => {
+      let res = await api.post("/api/dashboard/menu/categories").set(adminHeaders).send({
+        name: { en: "Spicy Bowls", ar: "أطباق حارة" },
+        ui: { cardVariant: "addon" },
+        sortOrder: 7,
+      });
+      expectStatus(res, 201, "create generated-key category");
+      const generatedCategory = res.body.data;
+      assert.strictEqual(generatedCategory.key, "spicy_bowls");
+      assert.strictEqual(generatedCategory.ui.cardVariant, "addon");
+
+      res = await api.post("/api/dashboard/menu/products").set(adminHeaders).send({
+        categoryId: generatedCategory.id,
+        name: { en: "Spicy Chicken", ar: "دجاج حار" },
+        itemType: "product",
+        pricingModel: "fixed",
+        priceHalala: 1800,
+        ui: { cardVariant: "premium", badge: "New", ctaLabel: "Customize", imageRatio: "wide" },
+      });
+      expectStatus(res, 201, "create generated-key product");
+      const generatedProduct = res.body.data;
+      assert.strictEqual(generatedProduct.key, "spicy_chicken");
+      assert.deepStrictEqual(generatedProduct.ui, {
+        cardVariant: "premium",
+        badge: "New",
+        ctaLabel: "Customize",
+        imageRatio: "wide",
+      });
+
+      res = await api.post("/api/dashboard/menu/option-groups").set(adminHeaders).send({
+        name: { en: "Sauce Flight", ar: "رحلة صوص" },
+        ui: { displayStyle: "radio_cards" },
+      });
+      expectStatus(res, 201, "create generated-key option group");
+      const generatedGroup = res.body.data;
+      assert.strictEqual(generatedGroup.key, "sauce_flight");
+      assert.deepStrictEqual(generatedGroup.ui, { displayStyle: "radio_cards" });
+
+      res = await api.post(`/api/dashboard/menu/option-groups/${generatedGroup.id}/options`).set(adminHeaders).send({
+        name: { en: "Lemon Sauce", ar: "صوص ليمون" },
+        extraPriceHalala: 100,
+      });
+      expectStatus(res, 201, "create generated-key option");
+      const generatedOption = res.body.data;
+      assert.strictEqual(generatedOption.key, "lemon_sauce");
+
+      res = await api.post(`/api/dashboard/menu/option-groups/${generatedGroup.id}/options`).set(adminHeaders).send({
+        name: { en: "Lemon Sauce", ar: "صوص ليمون آخر" },
+        extraPriceHalala: 150,
+      });
+      expectStatus(res, 201, "create duplicate-name generated option");
+      assert(/^lemon_sauce(_2|_[a-f0-9]{4})$/.test(res.body.data.key), `unexpected duplicate option key ${res.body.data.key}`);
+
+      res = await api.post("/api/dashboard/menu/option-groups").set(adminHeaders).send({
+        name: { ar: "مجموعة عربية فقط" },
+      });
+      expectStatus(res, 201, "create arabic fallback option group key");
+      assert(/^group_[a-f0-9]{6}$/.test(res.body.data.key), `unexpected fallback group key ${res.body.data.key}`);
+
+      res = await api.post(`/api/dashboard/menu/option-groups/${generatedGroup.id}/options`).set(adminHeaders).send({
+        name: { ar: "خيار عربي فقط" },
+        extraPriceHalala: 0,
+      });
+      expectStatus(res, 201, "create arabic fallback option key");
+      assert(/^option_[a-f0-9]{6}$/.test(res.body.data.key), `unexpected fallback option key ${res.body.data.key}`);
+
+      res = await api.patch(`/api/dashboard/menu/option-groups/${generatedGroup.id}`).set(adminHeaders).send({
+        name: { en: "Renamed Sauce Flight", ar: "رحلة صوص جديدة" },
+      });
+      expectStatus(res, 200, "rename generated option group");
+      assert.strictEqual(res.body.data.key, "sauce_flight");
+
+      res = await api.patch(`/api/dashboard/menu/options/${generatedOption.id}`).set(adminHeaders).send({
+        name: { en: "Renamed Lemon Sauce", ar: "صوص ليمون جديد" },
+      });
+      expectStatus(res, 200, "rename generated option");
+      assert.strictEqual(res.body.data.key, "lemon_sauce");
+
+      res = await api.patch(`/api/dashboard/menu/option-groups/${generatedGroup.id}`).set(adminHeaders).send({
+        key: "changed_group_key",
+        name: { en: "Renamed Sauce Flight", ar: "رحلة صوص جديدة" },
+      });
+      expectStatus(res, 400, "changed option group key rejected");
+      assert.strictEqual(res.body.error.code, "IMMUTABLE_KEY");
+
+      res = await api.patch(`/api/dashboard/menu/options/${generatedOption.id}`).set(adminHeaders).send({
+        key: "changed_option_key",
+        name: { en: "Renamed Lemon Sauce", ar: "صوص ليمون جديد" },
+      });
+      expectStatus(res, 400, "changed option key rejected");
+      assert.strictEqual(res.body.error.code, "IMMUTABLE_KEY");
+
+      res = await api.patch(`/api/dashboard/menu/option-groups/${generatedGroup.id}`).set(adminHeaders).send({
+        ui: { displayStyle: "spinner" },
+      });
+      expectStatus(res, 400, "invalid display style rejected");
+
+      res = await api.patch(`/api/dashboard/menu/products/${generatedProduct.id}`).set(adminHeaders).send({
+        ui: { cardVariant: "unknown" },
+      });
+      expectStatus(res, 400, "invalid product card variant rejected");
+
+      res = await api.post(`/api/dashboard/menu/products/${generatedProduct.id}/option-groups`).set(adminHeaders).send({
+        groupId: generatedGroup.id,
+        minSelections: 0,
+        maxSelections: 1,
+        sortOrder: 1,
+      });
+      expectStatus(res, 201, "link generated group to generated product");
+
+      res = await api.post("/api/dashboard/menu/categories").set(adminHeaders).send({
+        name: { en: "Spicy Bowls", ar: "أطباق حارة" },
+      });
+      expectStatus(res, 201, "create duplicate-name generated category");
+      assert(/^spicy_bowls(_2|_[a-f0-9]{4})$/.test(res.body.data.key), `unexpected duplicate key ${res.body.data.key}`);
+      assert.strictEqual(res.body.data.ui.cardVariant, "standard");
+
+      res = await api.post("/api/dashboard/menu/categories").set(adminHeaders).send({
+        name: { ar: "تصنيف عربي فقط" },
+      });
+      expectStatus(res, 201, "create arabic fallback category key");
+      assert(/^category_[a-f0-9]{6}$/.test(res.body.data.key), `unexpected fallback key ${res.body.data.key}`);
+
+      res = await api.patch(`/api/dashboard/menu/categories/${generatedCategory.id}`).set(adminHeaders).send({
+        name: { en: "Renamed Bowls", ar: "أطباق جديدة" },
+      });
+      expectStatus(res, 200, "rename generated category");
+      assert.strictEqual(res.body.data.key, "spicy_bowls");
+
+      res = await api.patch(`/api/dashboard/menu/categories/${generatedCategory.id}`).set(adminHeaders).send({
+        key: "changed_key",
+        name: { en: "Renamed Bowls", ar: "أطباق جديدة" },
+      });
+      expectStatus(res, 400, "changed category key rejected");
+
+      res = await api.patch(`/api/dashboard/menu/categories/${generatedCategory.id}`).set(adminHeaders).send({
+        name: { en: "Renamed Bowls", ar: "أطباق جديدة" },
+        ui: { cardVariant: "unknown" },
+      });
+      expectStatus(res, 400, "invalid card variant rejected");
+
+      res = await api.patch(`/api/dashboard/menu/products/${generatedProduct.id}`).set(adminHeaders).send({
+        name: { en: "Renamed Spicy Chicken", ar: "دجاج حار جديد" },
+      });
+      expectStatus(res, 200, "rename generated product");
+      assert.strictEqual(res.body.data.key, "spicy_chicken");
+
+      res = await api.patch(`/api/dashboard/menu/products/${generatedProduct.id}`).set(adminHeaders).send({
+        key: "changed_product_key",
+        name: { en: "Renamed Spicy Chicken", ar: "دجاج حار جديد" },
+      });
+      expectStatus(res, 400, "changed product key rejected");
+
+      await api.post("/api/dashboard/menu/publish").set(adminHeaders).send({ notes: `${TEST_TAG} generated keys` });
+      res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "public menu after generated keys");
+      const publicCategory = (res.body.data.categories || []).find((category) => category.id === generatedCategory.id);
+      assert(publicCategory, "generated category appears in public menu");
+      assert.strictEqual(publicCategory.ui.cardVariant, "addon");
+      const publicProduct = publicCategory.products.find((product) => product.key === "spicy_chicken");
+      assert(publicProduct, "generated product appears in public menu");
+      assert.deepStrictEqual(publicProduct.ui, {
+        cardVariant: "premium",
+        badge: "New",
+        ctaLabel: "Customize",
+        imageRatio: "wide",
+      });
+      const publicGroup = publicProduct.optionGroups.find((group) => group.key === "sauce_flight");
+      assert(publicGroup, "generated option group appears in public menu");
+      assert.deepStrictEqual(publicGroup.ui, { displayStyle: "radio_cards" });
+
+      await Promise.all([
+        MenuCategory.updateOne({ _id: ctx.category.id }, { $unset: { ui: 1 } }),
+        MenuProduct.updateOne({ _id: ctx.fixedProduct.id }, { $unset: { ui: 1 } }),
+        MenuOptionGroup.updateOne({ _id: ctx.group.id }, { $unset: { ui: 1 } }),
+      ]);
+      await api.post("/api/dashboard/menu/publish").set(adminHeaders).send({ notes: `${TEST_TAG} missing ui fallback` });
+      res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "public menu after missing ui");
+      const fallbackCategory = (res.body.data.categories || []).find((category) => category.id === ctx.category.id);
+      assert(fallbackCategory, "seed category appears");
+      assert.deepStrictEqual(fallbackCategory.ui, { cardVariant: "standard" });
+      const fallbackProduct = fallbackCategory.products.find((product) => product.id === ctx.fixedProduct.id);
+      assert(fallbackProduct, "seed product appears");
+      assert.deepStrictEqual(fallbackProduct.ui, {
+        cardVariant: "standard",
+        badge: "",
+        ctaLabel: "",
+        imageRatio: "square",
+      });
+      const fallbackGroup = fallbackProduct.optionGroups.find((group) => group.id === ctx.group.id);
+      assert(fallbackGroup, "seed option group appears");
+      assert.deepStrictEqual(fallbackGroup.ui, { displayStyle: "chips" });
+    });
+
     await test("GET /api/orders/menu exposes published pickup-only catalog without delivery", async () => {
       const res = await api.get("/api/orders/menu?lang=en");
       expectStatus(res, 200, "menu");

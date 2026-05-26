@@ -8,6 +8,17 @@ const LocalizedStringSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const CategoryUiSchema = new mongoose.Schema(
+  {
+    cardVariant: {
+      type: String,
+      enum: ["standard", "premium", "large_salad", "addon"],
+      default: "standard",
+    },
+  },
+  { _id: false }
+);
+
 const MenuCategorySchema = new mongoose.Schema(
   {
     key: { type: String, required: true, trim: true, lowercase: true },
@@ -18,6 +29,7 @@ const MenuCategorySchema = new mongoose.Schema(
     isVisible: { type: Boolean, default: true, index: true },
     isAvailable: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
+    ui: { type: CategoryUiSchema, default: () => ({}) },
     availability: {
       branchIds: { type: [String], default: [] },
     },

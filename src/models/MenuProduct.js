@@ -14,6 +14,20 @@ const LocalizedStringSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const ProductUiSchema = new mongoose.Schema(
+  {
+    cardVariant: {
+      type: String,
+      enum: ["standard", "premium", "large_salad", "addon"],
+      default: "standard",
+    },
+    badge: { type: String, default: "" },
+    ctaLabel: { type: String, default: "" },
+    imageRatio: { type: String, default: "square" },
+  },
+  { _id: false }
+);
+
 const MenuProductSchema = new mongoose.Schema(
   {
     categoryId: { type: mongoose.Schema.Types.ObjectId, ref: "MenuCategory", required: true, index: true },
@@ -57,6 +71,7 @@ const MenuProductSchema = new mongoose.Schema(
     isVisible: { type: Boolean, default: true, index: true },
     isAvailable: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
+    ui: { type: ProductUiSchema, default: () => ({}) },
     branchAvailability: { type: [String], default: [] },
     versionId: { type: mongoose.Schema.Types.ObjectId, ref: "MenuVersion", default: null },
     publishedAt: { type: Date, default: null, index: true },

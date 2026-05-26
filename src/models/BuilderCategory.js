@@ -1,5 +1,16 @@
 const mongoose = require("mongoose");
 
+const CategoryUiSchema = new mongoose.Schema(
+  {
+    cardVariant: {
+      type: String,
+      enum: ["standard", "premium", "large_salad", "addon"],
+      default: "standard",
+    },
+  },
+  { _id: false }
+);
+
 const BuilderCategorySchema = new mongoose.Schema(
   {
     key: { type: String, required: true, trim: true },
@@ -12,6 +23,7 @@ const BuilderCategorySchema = new mongoose.Schema(
       ar: { type: String, default: "" },
       en: { type: String, default: "" },
     },
+    ui: { type: CategoryUiSchema, default: () => ({}) },
     isActive: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
     rules: {

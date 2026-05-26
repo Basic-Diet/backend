@@ -22,6 +22,10 @@ const {
 const {
   resolvePremiumLargeSaladPricing,
 } = require("./premiumLargeSaladPricingService");
+const {
+  inferCardVariantFromKey,
+  normalizeUiMetadata,
+} = require("./catalogKeyUiHelpers");
 
 const MENU_PROTEIN_GROUP_KEY = "proteins";
 const MENU_CARB_GROUP_KEY = "carbs";
@@ -80,6 +84,11 @@ function buildCategoryPayload(definition, lang) {
     description: localized(definition.description || canonical.description, lang),
     sortOrder: Number(definition.sortOrder ?? canonical.sortOrder ?? 0),
     rules: canonical ? { ...(canonical.rules || {}) } : {},
+    ui: normalizeUiMetadata(
+      definition.ui
+      || canonical.ui
+      || { cardVariant: inferCardVariantFromKey(definition.key) }
+    ),
   };
 }
 
