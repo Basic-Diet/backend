@@ -685,13 +685,13 @@ async function seedViaDashboard(api) {
     await test("Dashboard menu generates immutable catalog keys and exposes ui metadata", async () => {
       let res = await api.post("/api/dashboard/menu/categories").set(adminHeaders).send({
         name: { en: "Spicy Bowls", ar: "أطباق حارة" },
-        ui: { cardVariant: "addon" },
+        ui: { cardVariant: "addon_collection" },
         sortOrder: 7,
       });
       expectStatus(res, 201, "create generated-key category");
       const generatedCategory = res.body.data;
       assert.strictEqual(generatedCategory.key, "spicy_bowls");
-      assert.strictEqual(generatedCategory.ui.cardVariant, "addon");
+      assert.strictEqual(generatedCategory.ui.cardVariant, "addon_collection");
 
       res = await api.post("/api/dashboard/menu/products").set(adminHeaders).send({
         categoryId: generatedCategory.id,
@@ -797,7 +797,7 @@ async function seedViaDashboard(api) {
       });
       expectStatus(res, 201, "create duplicate-name generated category");
       assert(/^spicy_bowls(_2|_[a-f0-9]{4})$/.test(res.body.data.key), `unexpected duplicate key ${res.body.data.key}`);
-      assert.strictEqual(res.body.data.ui.cardVariant, "standard");
+      assert.strictEqual(res.body.data.ui.cardVariant, "addon_collection");
 
       res = await api.post("/api/dashboard/menu/categories").set(adminHeaders).send({
         name: { ar: "تصنيف عربي فقط" },
@@ -840,7 +840,7 @@ async function seedViaDashboard(api) {
       expectStatus(res, 200, "public menu after generated keys");
       const publicCategory = (res.body.data.categories || []).find((category) => category.id === generatedCategory.id);
       assert(publicCategory, "generated category appears in public menu");
-      assert.strictEqual(publicCategory.ui.cardVariant, "addon");
+      assert.strictEqual(publicCategory.ui.cardVariant, "addon_collection");
       const publicProduct = publicCategory.products.find((product) => product.key === "spicy_chicken");
       assert(publicProduct, "generated product appears in public menu");
       assert.deepStrictEqual(publicProduct.ui, {
@@ -863,7 +863,7 @@ async function seedViaDashboard(api) {
       expectStatus(res, 200, "public menu after missing ui");
       const fallbackCategory = (res.body.data.categories || []).find((category) => category.id === ctx.category.id);
       assert(fallbackCategory, "seed category appears");
-      assert.deepStrictEqual(fallbackCategory.ui, { cardVariant: "standard" });
+      assert.deepStrictEqual(fallbackCategory.ui, { cardVariant: "addon_collection" });
       const fallbackProduct = fallbackCategory.products.find((product) => product.id === ctx.fixedProduct.id);
       assert(fallbackProduct, "seed product appears");
       assert.deepStrictEqual(fallbackProduct.ui, {

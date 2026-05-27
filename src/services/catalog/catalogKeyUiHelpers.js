@@ -2,6 +2,8 @@ const crypto = require("crypto");
 
 const CARD_VARIANTS = Object.freeze(["standard", "premium", "large_salad", "addon"]);
 const DEFAULT_CARD_VARIANT = "standard";
+const CATEGORY_CARD_VARIANTS = Object.freeze(["meal_builder", "light_collection", "sandwich_collection", "addon_collection"]);
+const DEFAULT_CATEGORY_CARD_VARIANT = "addon_collection";
 const GROUP_DISPLAY_STYLES = Object.freeze(["chips", "radio_cards", "checkbox_grid", "dropdown", "stepper"]);
 const DEFAULT_GROUP_DISPLAY_STYLE = "chips";
 const SNAKE_CASE_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
@@ -13,6 +15,15 @@ function isAllowedCardVariant(value) {
 function sanitizeCardVariant(value) {
   const normalized = String(value || "").trim();
   return isAllowedCardVariant(normalized) ? normalized : DEFAULT_CARD_VARIANT;
+}
+
+function isAllowedCategoryCardVariant(value) {
+  return CATEGORY_CARD_VARIANTS.includes(String(value || "").trim());
+}
+
+function sanitizeCategoryCardVariant(value) {
+  const normalized = String(value || "").trim();
+  return isAllowedCategoryCardVariant(normalized) ? normalized : DEFAULT_CATEGORY_CARD_VARIANT;
 }
 
 function isAllowedGroupDisplayStyle(value) {
@@ -32,6 +43,13 @@ function normalizeUiMetadata(value = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     cardVariant: sanitizeCardVariant(source.cardVariant),
+  };
+}
+
+function normalizeCategoryUiMetadata(value = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    cardVariant: sanitizeCategoryCardVariant(source.cardVariant),
   };
 }
 
@@ -58,6 +76,14 @@ function inferCardVariantFromKey(key) {
   if (normalized === "large_salad") return "large_salad";
   if (["addon", "addons", "snack", "juice", "small_salad"].includes(normalized)) return "addon";
   return DEFAULT_CARD_VARIANT;
+}
+
+function inferCategoryCardVariantFromKey(key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (normalized.includes("custom") || normalized.includes("builder")) return "meal_builder";
+  if (normalized.includes("light") || normalized.includes("salad")) return "light_collection";
+  if (normalized.includes("sandwich") || normalized.includes("sourdough")) return "sandwich_collection";
+  return DEFAULT_CATEGORY_CARD_VARIANT;
 }
 
 function randomSuffix(length = 6) {
@@ -115,17 +141,23 @@ async function generateUniqueKey({
 module.exports = {
   CARD_VARIANTS,
   DEFAULT_CARD_VARIANT,
+  CATEGORY_CARD_VARIANTS,
+  DEFAULT_CATEGORY_CARD_VARIANT,
   DEFAULT_GROUP_DISPLAY_STYLE,
   GROUP_DISPLAY_STYLES,
   SNAKE_CASE_PATTERN,
   generateUniqueKey,
   inferCardVariantFromKey,
+  inferCategoryCardVariantFromKey,
   isAllowedCardVariant,
+  isAllowedCategoryCardVariant,
   isAllowedGroupDisplayStyle,
+  normalizeCategoryUiMetadata,
   normalizeGroupUiMetadata,
   normalizeProductUiMetadata,
   normalizeUiMetadata,
   sanitizeCardVariant,
+  sanitizeCategoryCardVariant,
   sanitizeGroupDisplayStyle,
   slugifyKeySource,
 };

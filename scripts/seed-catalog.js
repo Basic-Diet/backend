@@ -49,14 +49,14 @@ function activePublishedFields(sortOrder = 0) {
 }
 
 const categoryRows = [
-  { key: "custom_order", name: name("اطلب على مزاجك", "Custom Order"), ui: { cardVariant: "standard" } },
-  { key: "light_options", name: name("اختيارات خفيفة", "Light Options"), ui: { cardVariant: "standard" } },
-  { key: "cold_sandwiches", name: name("الساندويتش البارد", "Cold Sandwiches"), ui: { cardVariant: "standard" } },
-  { key: "sourdough", name: name("الساندويشات", "Sourdough Sandwiches"), ui: { cardVariant: "standard" } },
-  { key: "desserts", name: name("الحلويات", "Desserts"), ui: { cardVariant: "addon" } },
-  { key: "juices", name: name("العصائر", "Juices"), ui: { cardVariant: "addon" } },
-  { key: "drinks", name: name("المشروبات", "Drinks"), ui: { cardVariant: "addon" } },
-  { key: "ice_cream", name: name("الايس كريم", "Ice Cream"), ui: { cardVariant: "addon" } },
+  { key: "custom_order", name: name("اطلب على مزاجك", "Custom Order"), ui: { cardVariant: "meal_builder" } },
+  { key: "light_options", name: name("اختيارات خفيفة", "Light Options"), ui: { cardVariant: "light_collection" } },
+  { key: "cold_sandwiches", name: name("الساندويتش البارد", "Cold Sandwiches"), ui: { cardVariant: "sandwich_collection" } },
+  { key: "sourdough", name: name("الساندويشات", "Sourdough Sandwiches"), ui: { cardVariant: "sandwich_collection" } },
+  { key: "desserts", name: name("الحلويات", "Desserts"), ui: { cardVariant: "addon_collection" } },
+  { key: "juices", name: name("العصائر", "Juices"), ui: { cardVariant: "addon_collection" } },
+  { key: "drinks", name: name("المشروبات", "Drinks"), ui: { cardVariant: "addon_collection" } },
+  { key: "ice_cream", name: name("الايس كريم", "Ice Cream"), ui: { cardVariant: "addon_collection" } },
 ];
 
 const groupDefinitions = [

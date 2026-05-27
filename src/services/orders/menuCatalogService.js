@@ -12,8 +12,10 @@ const Setting = require("../../models/Setting");
 const { pickLang } = require("../../utils/i18n");
 const {
   generateUniqueKey,
+  isAllowedCategoryCardVariant,
   isAllowedCardVariant,
   isAllowedGroupDisplayStyle,
+  normalizeCategoryUiMetadata,
   normalizeGroupUiMetadata,
   normalizeProductUiMetadata,
   normalizeUiMetadata,
@@ -239,7 +241,7 @@ function serializePublicCategory(category, lang, products) {
     descriptionI18n: localizedPair(category.description),
     imageUrl: category.imageUrl || "",
     sortOrder: Number(category.sortOrder || 0),
-    ui: normalizeUiMetadata(category.ui),
+    ui: normalizeCategoryUiMetadata(category.ui),
     products,
   };
 }
@@ -495,10 +497,10 @@ function normalizeCategoryPayload(body = {}, existing = null) {
     hasUi
     && (
       !isPlainObject(body.ui)
-      || (body.ui.cardVariant !== undefined && !isAllowedCardVariant(body.ui.cardVariant))
+      || (body.ui.cardVariant !== undefined && !isAllowedCategoryCardVariant(body.ui.cardVariant))
     )
   ) {
-    throw new MenuValidationError("ui.cardVariant must be one of: standard, premium, large_salad, addon", "INVALID_CARD_VARIANT");
+    throw new MenuValidationError("ui.cardVariant must be one of: meal_builder, light_collection, sandwich_collection, addon_collection", "INVALID_CARD_VARIANT");
   }
   return {
     key: body.key === undefined && existing ? existing.key : normalizeOptionalKey(body.key),
@@ -509,7 +511,7 @@ function normalizeCategoryPayload(body = {}, existing = null) {
     isVisible: normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true),
     isAvailable: normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true),
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
-    ui: hasUi ? normalizeUiMetadata(body.ui) : normalizeUiMetadata(existing && existing.ui),
+    ui: hasUi ? normalizeCategoryUiMetadata(body.ui) : normalizeCategoryUiMetadata(existing && existing.ui),
     availability: {
       branchIds: (body.branchIds === undefined && (!body.availability || body.availability.branchIds === undefined) && existing)
         ? ((existing.availability && existing.availability.branchIds) || [])

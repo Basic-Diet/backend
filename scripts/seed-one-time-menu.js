@@ -81,14 +81,14 @@ async function hasExistingCatalogData() {
 }
 
 const categoryRows = [
-  ["custom_order", "اطلب على مزاجك", "Custom Order"],
-  ["light_options", "اختيارات خفيفة", "Light Options"],
-  ["cold_sandwiches", "الساندويتش البارد", "Cold Sandwiches"],
-  ["sourdough", "الساندويشات", "Sourdough Sandwiches"],
-  ["desserts", "الحلويات", "Desserts"],
-  ["juices", "العصائر", "Juices"],
-  ["drinks", "المشروبات", "Drinks"],
-  ["ice_cream", "الايس كريم", "Ice Cream"],
+  ["custom_order", "اطلب على مزاجك", "Custom Order", "meal_builder"],
+  ["light_options", "اختيارات خفيفة", "Light Options", "light_collection"],
+  ["cold_sandwiches", "الساندويتش البارد", "Cold Sandwiches", "sandwich_collection"],
+  ["sourdough", "الساندويشات", "Sourdough Sandwiches", "sandwich_collection"],
+  ["desserts", "الحلويات", "Desserts", "addon_collection"],
+  ["juices", "العصائر", "Juices", "addon_collection"],
+  ["drinks", "المشروبات", "Drinks", "addon_collection"],
+  ["ice_cream", "الايس كريم", "Ice Cream", "addon_collection"],
 ];
 
 const optionNameMap = {
@@ -310,7 +310,7 @@ function proteinPricing(optionName, productKey) {
 async function upsertCategory(row, sortOrder) {
   return MenuCategory.findOneAndUpdate(
     { key: row[0] },
-    { $set: { key: row[0], name: name(row[1], row[2]), isActive: true, isVisible: true, isAvailable: true, sortOrder, publishedAt: now } },
+    { $set: { key: row[0], name: name(row[1], row[2]), isActive: true, isVisible: true, isAvailable: true, sortOrder, publishedAt: now, "ui.cardVariant": row[3] || "addon_collection" } },
     { upsert: true, new: true }
   );
 }

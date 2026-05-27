@@ -12,8 +12,8 @@ const CategoryUiSchema = new mongoose.Schema(
   {
     cardVariant: {
       type: String,
-      enum: ["standard", "premium", "large_salad", "addon"],
-      default: "standard",
+      enum: ["meal_builder", "light_collection", "sandwich_collection", "addon_collection"],
+      default: "addon_collection",
     },
   },
   { _id: false }
