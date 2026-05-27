@@ -603,6 +603,31 @@ function setMoyasarInvoice(invoiceId, updates = {}) {
       assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_BRANCH");
     });
 
+    await test("POST /api/orders/quote treats missing pickupWindow as ASAP", async () => {
+      await upsertSetting("pickup_locations", [{
+        id: "main",
+        key: "main",
+        code: "main",
+        slug: "main",
+        name: { en: "Main Branch", ar: "الفرع الرئيسي" },
+        isActive: true,
+        pickupEnabled: true,
+      }]);
+
+      let res = await api.post("/api/orders/quote").set(auth(ctx.token)).send(sandwichQuotePayload(ctx, {
+        pickup: { branchId: "main" },
+      }));
+      expectStatus(res, 200, "missing pickupWindow quote");
+      assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_DELIVERY_WINDOW");
+
+      res = await api.post("/api/orders/quote").set(auth(ctx.token)).send(sandwichQuotePayload(ctx, {
+        pickup: {},
+      }));
+      expectStatus(res, 200, "empty pickup ASAP quote");
+      assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_BRANCH");
+      assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_DELIVERY_WINDOW");
+    });
+
     await test("POST /api/orders/quote uses canonical main branch when pickup_locations is missing", async () => {
       await Setting.deleteOne({ key: "pickup_locations" });
 
@@ -695,6 +720,26 @@ function setMoyasarInvoice(invoiceId, updates = {}) {
       }));
       expectStatus(res, 400, "invalid pickup window quote");
       assert.strictEqual(res.body.error.code, "INVALID_DELIVERY_WINDOW");
+    });
+
+    await test("POST /api/orders/quote while restaurant is closed still returns RESTAURANT_CLOSED for ASAP pickup", async () => {
+      await upsertSetting("pickup_locations", [{
+        id: "main",
+        key: "main",
+        name: { en: "Main Branch", ar: "الفرع الرئيسي" },
+        isActive: true,
+        pickupEnabled: true,
+      }]);
+      await upsertSetting("restaurant_is_open", false);
+      try {
+        const res = await api.post("/api/orders/quote").set(auth(ctx.token)).send(sandwichQuotePayload(ctx, {
+          pickup: {},
+        }));
+        expectStatus(res, 409, "closed restaurant ASAP quote");
+        assert.strictEqual(res.body.error.code, "RESTAURANT_CLOSED");
+      } finally {
+        await upsertSetting("restaurant_is_open", true);
+      }
     });
 
     await test("POST /api/orders/quote prices delivery using zone fee if active zone exists", async () => {
@@ -861,6 +906,20 @@ function setMoyasarInvoice(invoiceId, updates = {}) {
       assert.strictEqual(order.status, "pending_payment");
       assert.strictEqual(order.paymentStatus, "initiated");
       assert.strictEqual(order.fulfillmentMethod, "pickup");
+    });
+
+    await test("POST /api/orders creates pending_payment ASAP order without pickupWindow", async () => {
+      await Order.deleteMany({ userId: ctx.user._id });
+      await Payment.deleteMany({ userId: ctx.user._id });
+      const res = await api.post("/api/orders").set(auth(ctx.token)).send(sandwichQuotePayload(ctx, {
+        pickup: {},
+      }));
+      expectStatus(res, 201, "create ASAP pickup order");
+      const order = await Order.findById(res.body.data.orderId).lean();
+      assert(order);
+      assert.strictEqual(order.fulfillmentMethod, "pickup");
+      assert.strictEqual(order.pickup.branchId, "main");
+      assert.strictEqual(order.pickup.pickupWindow, "");
     });
 
     await test("POST /api/orders is blocked when restaurant is closed without creating order or payment", async () => {

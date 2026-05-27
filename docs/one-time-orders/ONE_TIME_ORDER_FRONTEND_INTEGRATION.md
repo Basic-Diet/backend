@@ -40,13 +40,47 @@ This document defines the backend contract and correct behavior for Flutter/Mobi
   - Value may be a Mongo ObjectId from the `pickup_locations` list.
   - Value may also be a stable branch key/code/slug such as `"main"` when the backend branch setting exposes that stable identifier.
   - **DO NOT** send `"openTime"` or other field names as `branchId`.
-- **`pickupWindow`**: Format `HH:mm-HH:mm`. Values should come from `restaurantHours.pickupWindows`.
+- **`pickupWindow`**: Optional for pickup.
+  - If omitted, `null`, or an empty string, the order is treated as ASAP / prepare immediately.
+  - If provided, it must use format `HH:mm-HH:mm` and match a backend pickup window from `restaurantHours.pickupWindows`.
 
 Default pickup branch:
 - `branchId`: `"main"`
 - Address: `H4GX+JF7، السلامة، جدة 23436، المملكة العربية السعودية`
 
-Flutter may send `pickup.branchId = "main"` or omit `branchId` for pickup orders. Long-term, Flutter can still fetch branch/config data if needed, but it is not required while there is only one branch.
+Flutter may send `pickup.branchId = "main"` or omit `branchId` for pickup orders. Flutter may also omit `pickup.pickupWindow` for ASAP pickup. Long-term, Flutter can still fetch branch/config data if needed, but it is not required while there is only one branch.
+
+ASAP pickup examples:
+
+```json
+{
+  "fulfillmentMethod": "pickup",
+  "pickup": {},
+  "items": [
+    {
+      "productId": "6a124af46864369ee09bbe4b",
+      "qty": 1,
+      "selectedOptions": []
+    }
+  ]
+}
+```
+
+```json
+{
+  "fulfillmentMethod": "pickup",
+  "pickup": {
+    "branchId": "main"
+  },
+  "items": [
+    {
+      "productId": "6a124af46864369ee09bbe4b",
+      "qty": 1,
+      "selectedOptions": []
+    }
+  ]
+}
+```
 
 ## 2. Restaurant Hours & Closed Behavior
 
@@ -109,6 +143,7 @@ If the restaurant is closed (manually, via weekly schedule, or outside working h
 - [ ] Quote one item while restaurant is closed (409 RESTAURANT_CLOSED)
 - [ ] Pass valid `branchId: "main"` (Success)
 - [ ] Omit `pickup.branchId` for pickup and verify backend defaults to `main` (Success)
+- [ ] Omit `pickup.pickupWindow` for pickup and verify backend treats it as ASAP (Success)
 - [ ] Pass invalid `branchId: "something-else"` (400 INVALID_BRANCH)
 - [ ] Display Arabic error message for restaurant closed
-- [ ] Verify `pickupWindow` format matches `HH:mm-HH:mm`
+- [ ] If sending `pickupWindow`, verify the format matches `HH:mm-HH:mm`

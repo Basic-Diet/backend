@@ -260,8 +260,12 @@ function resolvePlanCatalogEntry(plan, lang) {
 
   return {
     id: String(plan._id),
+    key: plan.key || null,
     name: pickLang(plan.name, lang),
     daysCount: Number(plan.daysCount || 0),
+    durationDays: Number(plan.durationDays || plan.daysCount || 0),
+    mealSizeGrams: Number(plan.mealSizeGrams || 0) || null,
+    mealsPerDay: Number(plan.mealsPerDay || 0) || null,
     daysLabel: formatDaysLabel(plan.daysCount, lang),
     currency: plan.currency || SYSTEM_CURRENCY,
     isActive: Boolean(plan.isActive),

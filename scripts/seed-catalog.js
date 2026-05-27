@@ -19,6 +19,7 @@ const SaladIngredient = require("../src/models/SaladIngredient");
 const Sandwich = require("../src/models/Sandwich");
 const { publishMenu } = require("../src/services/orders/menuCatalogService");
 const { pickupLocations, settings } = require("./fixtures/subscription-demo-data");
+const { seedSubscriptionPlans } = require("./seed-subscription-plans");
 
 const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
 const now = new Date();
@@ -35,6 +36,7 @@ function isTruthy(value) {
 function parseArgs(argv = process.argv.slice(2)) {
   return {
     reset: argv.includes("--reset") || isTruthy(process.env.ALLOW_CATALOG_RESET),
+    onlySubscriptionPlans: argv.includes("--only-subscription-plans"),
   };
 }
 
@@ -755,6 +757,14 @@ async function seed() {
   await mongoose.connect(uri);
   console.log("Connected to MongoDB for canonical catalog seeding.");
 
+  if (args.onlySubscriptionPlans) {
+    console.log("Only subscription plans flag detected. Menu/catalog seed will be skipped.");
+    await seedSubscriptionPlans();
+    console.log("Subscription plans-only seed complete.");
+    await mongoose.disconnect();
+    return;
+  }
+
   if (args.reset) {
     console.warn("Resetting catalog-owned collections because --reset or ALLOW_CATALOG_RESET=true was provided.");
     await resetCatalogData();
@@ -768,6 +778,7 @@ async function seed() {
   await seedBuilderCompatibilityMirrors({ optionMap, builderCategoryMap });
   const productMap = await seedProducts({ categoryMap, groupMap, optionMap });
   await seedSandwichCompatibility(productMap);
+  await seedSubscriptionPlans();
   await seedSubscriptionAddons();
   await seedSettings();
 

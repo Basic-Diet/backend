@@ -1077,6 +1077,23 @@ async function seedViaDashboard(api) {
 
       res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
         fulfillmentMethod: "pickup",
+        pickup: { branchId: "main" },
+        items: [{ productId: ctx.directProduct.id, qty: 1, selectedOptions: [] }],
+      });
+      expectStatus(res, 200, "missing pickupWindow is ASAP");
+      assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_DELIVERY_WINDOW");
+
+      res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
+        pickup: {},
+        items: [{ productId: ctx.directProduct.id, qty: 1, selectedOptions: [] }],
+      });
+      expectStatus(res, 200, "empty pickup defaults to main ASAP");
+      assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_DELIVERY_WINDOW");
+      assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_BRANCH");
+
+      res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
         pickup: { pickupWindow: "18:00-20:00" },
         items: [{ productId: ctx.directProduct.id, qty: 1, selectedOptions: [] }],
       });
@@ -1156,6 +1173,24 @@ async function seedViaDashboard(api) {
       });
       expectStatus(res, 400, "invalid pickup window after branch resolution");
       assert.strictEqual(res.body.error.code, "INVALID_DELIVERY_WINDOW");
+
+      await Setting.updateOne(
+        { key: "restaurant_is_open" },
+        { $set: { key: "restaurant_is_open", value: false } },
+        { upsert: true }
+      );
+      res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
+        fulfillmentMethod: "pickup",
+        pickup: {},
+        items: [{ productId: ctx.directProduct.id, qty: 1, selectedOptions: [] }],
+      });
+      expectStatus(res, 409, "closed restaurant still blocks ASAP pickup");
+      assert.strictEqual(res.body.error.code, "RESTAURANT_CLOSED");
+      await Setting.updateOne(
+        { key: "restaurant_is_open" },
+        { $set: { key: "restaurant_is_open", value: true } },
+        { upsert: true }
+      );
     });
 
     await test("POST /api/orders/quote validates maxSelections and option-product relation", async () => {
@@ -1265,6 +1300,25 @@ async function seedViaDashboard(api) {
       assert(payment, "one-time order payment was persisted");
       assert.strictEqual(payment.type, "one_time_order");
       assert.strictEqual(payment.status, "initiated");
+    });
+
+    await test("POST /api/orders creates ASAP pickup order when pickupWindow is omitted", async () => {
+      const createRes = await api.post("/api/orders")
+        .set({ ...appAuth(user._id), "Idempotency-Key": `${TEST_TAG}-asap-order` })
+        .send({
+        fulfillmentMethod: "pickup",
+        pickup: {},
+        items: [{
+          productId: ctx.directProduct.id,
+          qty: 1,
+          selectedOptions: [],
+        }],
+      });
+      expectStatus(createRes, 201, "create ASAP pickup order");
+      const order = await Order.findById(createRes.body.data.orderId).lean();
+      assert(order, "ASAP pickup order was persisted");
+      assert.strictEqual(order.pickup.branchId, "main");
+      assert.strictEqual(order.pickup.pickupWindow, "");
     });
 
     await test("POST /api/orders normalizes Flutter deep link redirects for Moyasar", async () => {

@@ -23,6 +23,7 @@ const GramsOptionSchema = new mongoose.Schema(
 
 const PlanSchema = new mongoose.Schema(
   {
+    key: { type: String, trim: true, unique: true, sparse: true },
     name: {
       ar: { type: String, default: "" },
       en: { type: String, default: "" },
@@ -32,6 +33,9 @@ const PlanSchema = new mongoose.Schema(
       en: { type: String, default: "" },
     },
     daysCount: { type: Number, required: true },
+    durationDays: { type: Number, min: 1 },
+    mealSizeGrams: { type: Number, min: 1 },
+    mealsPerDay: { type: Number, min: 1 },
     currency: { type: String, default: "SAR" },
     gramsOptions: { type: [GramsOptionSchema], default: [] },
     skipPolicy: {
