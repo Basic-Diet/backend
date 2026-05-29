@@ -137,6 +137,8 @@ Sections currently include:
 Each premium option includes:
 - `key`, `premiumKey`, `extraFeeHalala`, `isPremium: true`
 
+Selection validation accepts premium protein identity through `premiumKey`, `proteinKey`, or `proteinId` for backward-compatible V2/MenuOption payloads. Flutter should still send consistent values from the selected catalog option.
+
 **Frontend should display premium fee from `extraFeeHalala` where needed.**
 Backend remains authoritative for validation and payment.
 

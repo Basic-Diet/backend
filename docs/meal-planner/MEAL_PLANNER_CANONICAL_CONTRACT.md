@@ -68,10 +68,12 @@ Legacy write aliases still normalized on input:
 
 ### `premium_meal`
 
-- Requires exactly one premium `proteinId`
+- Requires exactly one premium protein identity
+- Validation accepts `premiumKey`, `proteinKey`, or `proteinId`; keys are preferred when a submitted id comes from a V2/MenuOption catalog row
 - Uses the same carb rules as `standard_meal`
 - `sandwichId` and `salad` are rejected
 - Premium balance / pending payment behavior is unchanged
+- Clients should still send consistent catalog values from the same selected option
 
 ### `sandwich`
 

@@ -54,6 +54,7 @@ const IDS = {
   regularProtein: "507f191e810c19729de860a1",
   premiumProtein: "507f191e810c19729de860a2",
   secondPremiumProtein: "507f191e810c19729de860a3",
+  v2ShrimpProtein: "507f191e810c19729de860a4",
   carbOne: "507f191e810c19729de860b1",
   carbTwo: "507f191e810c19729de860b2",
   sandwichMeal: "507f191e810c19729de860c1",
@@ -71,6 +72,7 @@ function buildMockPlannerCatalog() {
     proteins: [
       {
         _id: IDS.regularProtein,
+        key: "chicken",
         isPremium: false,
         premiumKey: null,
         displayCategoryKey: "chicken",
@@ -792,6 +794,48 @@ async function runTests() {
     });
   });
 
+  await test('premium plate accepts canonical key when proteinId is V2 menu option id', async () => {
+    await withMockedPlannerCatalog({
+      menuGroups: {
+        proteins: { _id: '507f191e810c19729de861011', key: 'proteins', name: { en: 'Proteins' } },
+        carbs: null,
+      },
+      menuOptions: [
+        {
+          _id: IDS.v2ShrimpProtein,
+          key: 'shrimp',
+          premiumKey: 'shrimp',
+          extraPriceHalala: 0,
+          proteinFamilyKey: 'fish',
+          displayCategoryKey: 'premium',
+          isActive: true,
+          isVisible: true,
+          isAvailable: true,
+          availableForSubscription: true,
+          availableFor: ['subscription'],
+        },
+      ],
+    }, async () => {
+      const result = await buildMealSlotDraft({
+        mealSlots: [
+          {
+            slotIndex: 1,
+            selectionType: 'premium_meal',
+            proteinId: IDS.v2ShrimpProtein,
+            proteinKey: 'shrimp',
+            premiumKey: 'shrimp',
+            carbs: [{ carbId: IDS.carbOne, grams: 150 }],
+          },
+        ],
+        mealsPerDayLimit: 1,
+        subscription: { premiumBalance: [] },
+      });
+      expectTrue(result.valid, 'draft valid');
+      expectEqual(result.processedSlots[0].proteinId, IDS.premiumProtein, 'canonical legacy protein id selected');
+      expectEqual(result.processedSlots[0].premiumKey, 'shrimp', 'canonical premium key');
+    });
+  });
+
   await test('premium plate rejects regular protein', async () => {
     await withMockedPlannerCatalog({}, async () => {
       const result = await buildMealSlotDraft({
@@ -800,6 +844,47 @@ async function runTests() {
             slotIndex: 1,
             selectionType: 'premium_meal',
             proteinId: IDS.regularProtein,
+            carbs: [{ carbId: IDS.carbOne, grams: 150 }],
+          },
+        ],
+        mealsPerDayLimit: 1,
+        subscription: { premiumBalance: [] },
+      });
+      expectFalse(result.valid, 'draft invalid');
+      expectEqual(result.errorCode, 'INVALID_PROTEIN_TYPE', 'error code');
+    });
+  });
+
+  await test('premium plate rejects regular proteinKey chicken', async () => {
+    await withMockedPlannerCatalog({}, async () => {
+      const result = await buildMealSlotDraft({
+        mealSlots: [
+          {
+            slotIndex: 1,
+            selectionType: 'premium_meal',
+            proteinKey: 'chicken',
+            premiumKey: 'chicken',
+            carbs: [{ carbId: IDS.carbOne, grams: 150 }],
+          },
+        ],
+        mealsPerDayLimit: 1,
+        subscription: { premiumBalance: [] },
+      });
+      expectFalse(result.valid, 'draft invalid');
+      expectEqual(result.errorCode, 'INVALID_PROTEIN_TYPE', 'error code');
+      expectEqual(result.slotErrors[0].receivedProteinKey, 'chicken', 'debug proteinKey');
+      expectEqual(result.slotErrors[0].receivedPremiumKey, 'chicken', 'debug premiumKey');
+    });
+  });
+
+  await test('standard plate rejects premium protein', async () => {
+    await withMockedPlannerCatalog({}, async () => {
+      const result = await buildMealSlotDraft({
+        mealSlots: [
+          {
+            slotIndex: 1,
+            selectionType: 'standard_meal',
+            proteinId: IDS.premiumProtein,
             carbs: [{ carbId: IDS.carbOne, grams: 150 }],
           },
         ],

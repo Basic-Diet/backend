@@ -141,6 +141,51 @@ function hasSaladPayload(slot) {
   return Boolean(slot && slot.salad);
 }
 
+function normalizeProteinIdentityValue(value) {
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function collectPremiumMealProteinKeys(slots) {
+  const keys = new Set();
+  for (const slot of Array.isArray(slots) ? slots : []) {
+    if (!slot || slot.selectionType !== NEW_TYPES.PREMIUM_MEAL) continue;
+    for (const value of [slot.premiumKey, slot.proteinKey, slot.proteinId]) {
+      const normalized = normalizeProteinIdentityValue(value);
+      if (normalized && !isValidObjectId(normalized)) keys.add(normalized);
+    }
+  }
+  return [...keys];
+}
+
+function addProteinIdentity(proteinIdentityMap, protein) {
+  if (!protein) return;
+  for (const value of [protein._id, protein.id, protein.premiumKey, protein.key]) {
+    const normalized = normalizeProteinIdentityValue(value);
+    if (normalized && !proteinIdentityMap.has(normalized)) {
+      proteinIdentityMap.set(normalized, protein);
+    }
+  }
+}
+
+function buildProteinTypeErrorDetails(slot) {
+  return {
+    receivedProteinId: slot && slot.proteinId ? String(slot.proteinId) : null,
+    receivedProteinKey: slot && slot.proteinKey ? String(slot.proteinKey) : null,
+    receivedPremiumKey: slot && slot.premiumKey ? String(slot.premiumKey) : null,
+    selectionType: slot && slot.selectionType ? String(slot.selectionType) : null,
+  };
+}
+
+function resolvePremiumMealProtein(slot, proteins, proteinIdentityMap) {
+  for (const value of [slot && slot.premiumKey, slot && slot.proteinKey, slot && slot.proteinId]) {
+    const normalized = normalizeProteinIdentityValue(value);
+    if (!normalized) continue;
+    const protein = proteins.get(normalized) || proteinIdentityMap.get(normalized);
+    if (protein) return protein;
+  }
+  return null;
+}
+
 function validateStandardMeal(slot, proteins, carbsMap) {
   if (slot.sandwichId || hasSaladPayload(slot)) {
     return {
@@ -157,7 +202,7 @@ function validateStandardMeal(slot, proteins, carbsMap) {
   return validateCarbSplit(slot.carbs, carbsMap);
 }
 
-function validatePremiumMeal(slot, proteins, carbsMap) {
+function validatePremiumMeal(slot, proteins, proteinIdentityMap, carbsMap) {
   if (slot.sandwichId || hasSaladPayload(slot)) {
     return {
       valid: false,
@@ -166,11 +211,21 @@ function validatePremiumMeal(slot, proteins, carbsMap) {
     };
   }
 
-  const protein = proteins.get(String(slot.proteinId));
+  const protein = resolvePremiumMealProtein(slot, proteins, proteinIdentityMap);
   if (!protein) return { valid: false, code: "PROTEIN_REQUIRED", message: "Premium meal requires a valid protein" };
-  if (protein.isPremium !== true) return { valid: false, code: "INVALID_PROTEIN_TYPE", message: "Premium meal requires a premium protein" };
+  if (protein.isPremium !== true) {
+    return {
+      valid: false,
+      code: "INVALID_PROTEIN_TYPE",
+      message: "Premium meal requires a premium protein",
+      details: buildProteinTypeErrorDetails(slot),
+    };
+  }
   
-  return validateCarbSplit(slot.carbs, carbsMap);
+  const carbValidation = validateCarbSplit(slot.carbs, carbsMap);
+  if (!carbValidation.valid) return carbValidation;
+
+  return { valid: true, protein };
 }
 
 function validateCarbSplit(carbs, carbsMap) {
@@ -696,10 +751,21 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
   const proteinIds = [...proteinIdsSet];
   const carbIds = [...carbIdsSet];
   const sandwichIds = [...sandwichIdsSet];
+  const premiumMealProteinKeys = collectPremiumMealProteinKeys(normalizedMealSlots);
 
   const validProteinIds = proteinIds.filter(id => isValidObjectId(id));
   const validCarbIds = carbIds.filter(id => isValidObjectId(id));
   const validSandwichIds = sandwichIds.filter(id => isValidObjectId(id));
+  const legacyProteinLookupConditions = [];
+  if (validProteinIds.length) {
+    legacyProteinLookupConditions.push({ _id: { $in: validProteinIds } });
+  }
+  if (premiumMealProteinKeys.length) {
+    legacyProteinLookupConditions.push(
+      { premiumKey: { $in: premiumMealProteinKeys } },
+      { key: { $in: premiumMealProteinKeys } }
+    );
+  }
   const shouldLoadSandwiches = validSandwichIds.length > 0;
   const shouldLoadPremiumLargeSaladPricing = normalizedMealSlots.some(
     (slot) => slot && slot.selectionType === NEW_TYPES.PREMIUM_LARGE_SALAD
@@ -744,7 +810,9 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
       }).session(session).lean()
       : Promise.resolve([]),
     BuilderProtein.find({
-      _id: { $in: validProteinIds },
+      ...(legacyProteinLookupConditions.length
+        ? { $or: legacyProteinLookupConditions }
+        : { _id: { $in: [] } }),
       isActive: true,
       availableForSubscription: { $ne: false },
     }).session(session).lean(),
@@ -777,6 +845,13 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
       .map((p) => [String(p._id), p])
       .concat(menuProteins.map((p) => [String(p._id), mapMenuProteinOption(p)]))
   );
+  const proteinIdentityMap = new Map();
+  for (const protein of legacyProteins) {
+    addProteinIdentity(proteinIdentityMap, protein);
+  }
+  for (const protein of menuProteins.map((p) => mapMenuProteinOption(p))) {
+    addProteinIdentity(proteinIdentityMap, protein);
+  }
   const carbMap = new Map(
     legacyCarbs
       .map((c) => [String(c._id), c])
@@ -829,11 +904,12 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
       status: "empty",
       selectionType: slot.selectionType,
       proteinId: slot.proteinId || null,
+      proteinKey: slot.proteinKey || null,
       carbs: slot.carbs || [],
       sandwichId: slot.sandwichId || null,
       salad: slot.salad ? normalizeSaladPayload(slot.salad) : null,
       isPremium: false,
-      premiumKey: null,
+      premiumKey: slot.premiumKey || null,
       premiumSource: "none",
       premiumExtraFeeHalala: 0,
     };
@@ -846,7 +922,7 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
     } else if (processedSlot.selectionType === NEW_TYPES.STANDARD_MEAL) {
       validation = validateStandardMeal(processedSlot, proteinMap, carbMap);
     } else if (processedSlot.selectionType === NEW_TYPES.PREMIUM_MEAL) {
-      validation = validatePremiumMeal(processedSlot, proteinMap, carbMap);
+      validation = validatePremiumMeal(processedSlot, proteinMap, proteinIdentityMap, carbMap);
     } else if (processedSlot.selectionType === NEW_TYPES.PREMIUM_LARGE_SALAD) {
       validation = validatePremiumLargeSalad(processedSlot, proteinMap, saladIngredientMap);
     } else if (processedSlot.selectionType === NEW_TYPES.SANDWICH) {
@@ -854,6 +930,9 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
     }
 
     if (validation.valid) {
+      if (processedSlot.selectionType === NEW_TYPES.PREMIUM_MEAL && validation.protein) {
+        processedSlot.proteinId = String(validation.protein._id || validation.protein.id || processedSlot.proteinId || "");
+      }
       processedSlot.status = "complete";
       plannerMeta.completeSlotCount += 1;
     } else if (processedSlot.proteinId || processedSlot.sandwichId || (processedSlot.carbs.length > 0) || processedSlot.salad) {
@@ -861,6 +940,7 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
         slotIndex: processedSlot.slotIndex,
         code: validation.code || "INVALID_SLOT",
         message: validation.message || "Invalid slot configuration",
+        ...(validation.details ? validation.details : {}),
       });
       processedSlot.status = "partial";
       plannerMeta.partialSlotCount += 1;
