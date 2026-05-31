@@ -33,6 +33,7 @@
     "seed:subscription-addons": "node scripts/seed-subscription-addons.js",
     "seed:subscription-plans": "node scripts/seed-subscription-plans.js",
     "seed:one-time-menu": "node scripts/seed-one-time-menu.js",
+    "bootstrap:data": "node scripts/seed-catalog.js && ALLOW_ACCOUNT_BOOTSTRAP=true node scripts/create_default_accounts.js",
     "ensure:pickup-main": "node scripts/ensure-default-pickup-location.js",
     "audit:pickup-addresses": "node scripts/audit-pickup-address-serialization.js",
     "migrate:builder-to-menu": "node scripts/migrate-builder-to-menu.js",
