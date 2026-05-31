@@ -200,13 +200,38 @@ router.post("/:id/cancel", asyncHandler(controller.cancelSubscription));
  *                             type: integer
  *                           status:
  *                             type: string
-   *                             enum: [open, planned, locked, delivered, consumed_without_preparation, delivery_canceled, canceled_at_branch, no_show, frozen, skipped, extension]
+ *                             enum: [open, planned, locked, delivered, consumed_without_preparation, delivery_canceled, canceled_at_branch, no_show, frozen, skipped, extension]
  *                           statusLabel:
  *                             type: string
  *                           selectedMeals:
  *                             type: integer
  *                           requiredMeals:
  *                             type: integer
+ *                           hasSelection:
+ *                             type: boolean
+ *                           selectionStatus:
+ *                             type: string
+ *                             enum: [empty, draft, confirmed]
+ *                           paymentStatus:
+ *                             type: string
+ *                             enum: [not_required, required, pending, paid, failed, canceled, expired, refunded]
+ *                           orderStatus:
+ *                             type: string
+ *                             enum: [none]
+ *                           subscriptionStatus:
+ *                             type: string
+ *                           timelineStatus:
+ *                             type: string
+ *                             enum: [empty, draft, pending_payment, planned, failed]
+ *                           isPlanned:
+ *                             type: boolean
+ *                           canShowAsPlanned:
+ *                             type: boolean
+ *                           canEdit:
+ *                             type: boolean
+ *                           paymentStateReason:
+ *                             type: string
+ *                             nullable: true
  *                           commercialState:
  *                             type: string
  *                             enum: [draft, payment_required, ready_to_confirm, confirmed]

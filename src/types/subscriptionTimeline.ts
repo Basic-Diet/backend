@@ -12,6 +12,17 @@ export type TimelineDayStatus =
   | "extension";
 
 export type TimelineDaySource = "base" | "freeze_compensation" | "skip_compensation";
+export type TimelinePlanningStatus = "empty" | "draft" | "pending_payment" | "planned" | "failed";
+export type TimelineSelectionStatus = "empty" | "draft" | "confirmed";
+export type TimelinePaymentStatus =
+  | "not_required"
+  | "required"
+  | "pending"
+  | "paid"
+  | "failed"
+  | "canceled"
+  | "expired"
+  | "refunded";
 
 export type TimelineLocalizedText = {
   ar: string;
@@ -53,6 +64,16 @@ export type TimelineDay = {
   source: TimelineDaySource;
   locked: boolean;
   isExtension: boolean;
+  hasSelection: boolean;
+  selectionStatus: TimelineSelectionStatus;
+  paymentStatus: TimelinePaymentStatus;
+  orderStatus: "none";
+  subscriptionStatus: string;
+  timelineStatus: TimelinePlanningStatus;
+  isPlanned: boolean;
+  canShowAsPlanned: boolean;
+  canEdit: boolean;
+  paymentStateReason: string | null;
   commercialState?: "draft" | "payment_required" | "ready_to_confirm" | "confirmed";
   isFulfillable?: boolean;
   canBePrepared?: boolean;

@@ -75,6 +75,7 @@ PaymentSchema.index(
   }
 );
 PaymentSchema.index({ subscriptionId: 1, status: 1 });
+PaymentSchema.index({ subscriptionId: 1, type: 1, createdAt: -1 });
 
 PaymentSchema.index(
   { operationIdempotencyKey: 1 },

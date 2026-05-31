@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Subscription = require("../../models/Subscription");
 const SubscriptionDay = require("../../models/SubscriptionDay");
+const Payment = require("../../models/Payment");
 const BuilderProtein = require("../../models/BuilderProtein");
 const { resolvePremiumKeyFromName } = require("../../utils/subscription/premiumIdentity");
 const { toKSADateString, addDaysToKSADateString } = require("../../utils/date");
@@ -21,6 +22,10 @@ const {
 } = require("./subscriptionFulfillmentSummaryService");
 const { resolveReadLabel } = require("../../utils/subscription/subscriptionLocalizationCommon");
 const { buildMealBalance } = require("./subscriptionClientSupportService");
+const {
+  resolveSameDayFulfillmentMethod,
+  resolveScheduledDeliveryDateTime,
+} = require("./subscriptionDayModificationPolicyService");
 
 /**
  * @typedef {import("../../types/subscriptionTimeline").TimelineDay} TimelineDay
@@ -42,6 +47,12 @@ const MONTH_KEYS = [
   "november",
   "december",
 ];
+const DAY_PLANNING_PAYMENT_TYPES = [
+  "day_planning_payment",
+  "premium_extra_day",
+  "one_time_addon_day_planning",
+];
+const TERMINAL_FAILED_PAYMENT_STATUSES = new Set(["failed", "canceled", "expired", "refunded"]);
 
 const DATE_LABEL_FORMATTERS = {
   ar: {
@@ -285,6 +296,169 @@ function normalizeTimelineMealSlots(dbDay) {
     });
 }
 
+function getPaymentMetadata(payment) {
+  return payment && payment.metadata && typeof payment.metadata === "object"
+    ? payment.metadata
+    : {};
+}
+
+function buildDayPaymentLookup(payments = []) {
+  const lookup = new Map();
+
+  for (const payment of Array.isArray(payments) ? payments : []) {
+    const metadata = getPaymentMetadata(payment);
+    const keys = [
+      metadata.dayId ? `id:${String(metadata.dayId)}` : null,
+      metadata.date ? `date:${String(metadata.date)}` : null,
+    ].filter(Boolean);
+
+    for (const key of keys) {
+      const existing = lookup.get(key) || [];
+      existing.push(payment);
+      lookup.set(key, existing);
+    }
+  }
+
+  return lookup;
+}
+
+function resolveLatestApplicableDayPayment(day, commercialState, paymentLookup) {
+  if (!day || !paymentLookup) return null;
+
+  const keys = [
+    day._id ? `id:${String(day._id)}` : null,
+    day.date ? `date:${String(day.date)}` : null,
+  ].filter(Boolean);
+  const seen = new Set();
+  const candidates = [];
+
+  for (const key of keys) {
+    for (const payment of paymentLookup.get(key) || []) {
+      const paymentId = payment && payment._id ? String(payment._id) : "";
+      if (paymentId && seen.has(paymentId)) continue;
+      if (paymentId) seen.add(paymentId);
+      candidates.push(payment);
+    }
+  }
+
+  const currentRevisionHash = String(commercialState && commercialState.plannerRevisionHash || "");
+  return candidates.find((payment) => {
+    const metadata = getPaymentMetadata(payment);
+    return !metadata.revisionHash
+      || !currentRevisionHash
+      || String(metadata.revisionHash) === currentRevisionHash;
+  }) || null;
+}
+
+function normalizeTimelinePaymentStatus(payment, commercialState) {
+  const rawStatus = String(payment && payment.status || "").trim();
+  if (rawStatus === "initiated") return "pending";
+  if (rawStatus) return rawStatus;
+
+  const premiumStatus = String(
+    commercialState
+    && commercialState.premiumExtraPayment
+    && commercialState.premiumExtraPayment.status
+    || ""
+  ).trim();
+  if (["pending", "paid", "failed", "expired"].includes(premiumStatus)) {
+    return premiumStatus;
+  }
+  return commercialState
+    && commercialState.paymentRequirement
+    && commercialState.paymentRequirement.requiresPayment
+      ? "required"
+      : "not_required";
+}
+
+function deriveTimelineCanEdit({ subscription, day, businessDate, now = new Date() }) {
+  if (!day || String(subscription && subscription.status || "") !== "active") return false;
+  if (String(day.status || "open") !== "open") return false;
+  if (String(day.plannerState || day.planningState || "draft") === "confirmed") return false;
+  if (!day.date || day.date < businessDate) return false;
+  if (day.date > businessDate) return true;
+
+  const fulfillmentMethod = resolveSameDayFulfillmentMethod({ subscription, day });
+  if (fulfillmentMethod === "pickup") return true;
+  if (fulfillmentMethod !== "delivery") return false;
+
+  const schedule = resolveScheduledDeliveryDateTime({ subscription, day, date: day.date });
+  return Boolean(
+    schedule.lockDateTime instanceof Date
+      && !Number.isNaN(schedule.lockDateTime.getTime())
+      && now.getTime() < schedule.lockDateTime.getTime()
+  );
+}
+
+function deriveTimelinePlanningContract({
+  subscription,
+  day,
+  meals,
+  commercialState,
+  latestPayment = null,
+  businessDate,
+  now = new Date(),
+}) {
+  const hasSelection = Boolean(
+    day
+      && (
+        Number(meals && meals.selected || 0) > 0
+        || (Array.isArray(day.mealSlots) && day.mealSlots.length > 0)
+        || (Array.isArray(day.addonSelections) && day.addonSelections.length > 0)
+      )
+  );
+  const plannerState = String(day && (day.plannerState || day.planningState) || "draft");
+  const subscriptionStatus = String(subscription && subscription.status || "");
+  const paymentRequirement = commercialState && commercialState.paymentRequirement
+    ? commercialState.paymentRequirement
+    : {};
+  const paymentStatus = normalizeTimelinePaymentStatus(latestPayment, commercialState);
+  const paymentFailed = TERMINAL_FAILED_PAYMENT_STATUSES.has(paymentStatus);
+  const paymentPending = paymentStatus === "pending" || paymentStatus === "required";
+  const isPlanned = Boolean(
+    hasSelection
+      && plannerState === "confirmed"
+      && commercialState
+      && commercialState.commercialState === "confirmed"
+      && paymentRequirement.requiresPayment !== true
+      && subscriptionStatus === "active"
+  );
+
+  let timelineStatus = "draft";
+  if (!hasSelection) {
+    timelineStatus = "empty";
+  } else if (paymentFailed) {
+    timelineStatus = "failed";
+  } else if (paymentRequirement.requiresPayment === true || paymentPending) {
+    timelineStatus = "pending_payment";
+  } else if (isPlanned) {
+    timelineStatus = "planned";
+  }
+
+  return {
+    hasSelection,
+    selectionStatus: hasSelection ? (plannerState === "confirmed" ? "confirmed" : "draft") : "empty",
+    paymentStatus,
+    orderStatus: "none",
+    subscriptionStatus,
+    timelineStatus,
+    isPlanned,
+    canShowAsPlanned: isPlanned,
+    canEdit: deriveTimelineCanEdit({ subscription, day, businessDate, now }),
+    paymentStateReason: paymentRequirement.blockingReason || null,
+  };
+}
+
+function resolveTimelineLegacyStatus({ isExtension, day, isPlanned }) {
+  if (isExtension) return "extension";
+  if (!day) return "open";
+  if (day.canonicalDayActionType === "freeze") return "frozen";
+  if (day.canonicalDayActionType === "skip") return "skipped";
+
+  const normalizedStatus = normalizeTimelineStatus(day.status);
+  return normalizedStatus === "open" && isPlanned ? "planned" : normalizedStatus;
+}
+
 function normalizeLegacySelectionIds(dbDay) {
   if (!Array.isArray(dbDay?.selections)) return [];
   return dbDay.selections.filter(Boolean).map((mealId) => String(mealId));
@@ -322,6 +496,7 @@ function buildTimelineMonthSummary(days = []) {
 async function buildSubscriptionTimeline(subscriptionId, options = {}) {
   const lang = options && options.lang === "en" ? "en" : "ar";
   const businessDate = options.businessDate || await getRestaurantBusinessDate();
+  const now = options.now instanceof Date ? options.now : new Date();
   let subscription = await Subscription.findById(subscriptionId).lean();
   if (!subscription) {
     const err = new Error("Subscription not found");
@@ -349,12 +524,17 @@ async function buildSubscriptionTimeline(subscriptionId, options = {}) {
   const endDateStr = toKSADateString(subscription.endDate);
   const validityEndDateStr = toKSADateString(subscription.validityEndDate || subscription.endDate);
 
-  const [days, compensation, pickupLocations] = await Promise.all([
+  const [days, compensation, pickupLocations, dayPayments] = await Promise.all([
     SubscriptionDay.find({ subscriptionId }).lean(),
     getCompensationSnapshot(subscriptionId),
     getPickupLocationsSetting(),
+    Payment.find({
+      subscriptionId,
+      type: { $in: DAY_PLANNING_PAYMENT_TYPES },
+    }).sort({ createdAt: -1 }).lean(),
   ]);
   const dayMap = new Map(days.map((day) => [day.date, day]));
+  const dayPaymentLookup = buildDayPaymentLookup(dayPayments);
   const extensionSourceMap = buildExtensionSourceMap(compensation.tokens, endDateStr);
   const requiredMealsPerDay = resolveMealsPerDay(subscription);
 
@@ -370,20 +550,6 @@ async function buildSubscriptionTimeline(subscriptionId, options = {}) {
     const isPast = currentDate < businessDate;
     const meals = buildTimelineMeals(subscription, dbDay);
     const calendar = buildTimelineCalendar(currentDate);
-
-    let status;
-    if (isExtension) {
-      status = "extension";
-    } else if (!dbDay) {
-      status = "open";
-    } else if (dbDay.canonicalDayActionType === "freeze") {
-      status = "frozen";
-    } else if (dbDay.canonicalDayActionType === "skip") {
-      status = "skipped";
-    } else {
-      const normalizedStatus = normalizeTimelineStatus(dbDay.status);
-      status = normalizedStatus === "open" && meals.selected > 0 ? "planned" : normalizedStatus;
-    }
 
     const commercialState = dbDay
       ? buildDayCommercialState(dbDay)
@@ -403,13 +569,29 @@ async function buildSubscriptionTimeline(subscriptionId, options = {}) {
           premiumTotalHalala: 0,
         },
       });
+    const projectedDay = dbDay || { date: currentDate, status: "open" };
+    const latestPayment = resolveLatestApplicableDayPayment(dbDay, commercialState, dayPaymentLookup);
+    const planningContract = deriveTimelinePlanningContract({
+      subscription,
+      day: projectedDay,
+      meals,
+      commercialState,
+      latestPayment,
+      businessDate,
+      now,
+    });
+    const status = resolveTimelineLegacyStatus({
+      isExtension,
+      day: dbDay,
+      isPlanned: planningContract.isPlanned,
+    });
     const fulfillmentState = buildSubscriptionDayFulfillmentState({
       subscription,
       day: dbDay || { date: currentDate, status: "open" },
       derivedState: commercialState,
       today: businessDate,
     });
-    const dayForFulfillment = dbDay || { date: currentDate, status: "open" };
+    const dayForFulfillment = projectedDay;
     const statusLabel = resolveReadLabel("timelineStatuses", status, lang)
       || resolveReadLabel("dayStatuses", dayForFulfillment.status, lang);
     const fulfillmentReadFields = buildFulfillmentReadFields({
@@ -442,6 +624,7 @@ async function buildSubscriptionTimeline(subscriptionId, options = {}) {
       selectedMealIds: normalizeLegacySelectionIds(dbDay),
       mealSlots: normalizeTimelineMealSlots(dbDay),
       ...commercialState,
+      ...planningContract,
       ...fulfillmentState,
       ...fulfillmentReadFields,
     });
@@ -534,4 +717,6 @@ function buildExtensionSourceMap(tokens = [], endDateStr) {
 
 module.exports = {
   buildSubscriptionTimeline,
+  deriveTimelinePlanningContract,
+  resolveTimelineLegacyStatus,
 };
