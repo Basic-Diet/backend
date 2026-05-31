@@ -71,13 +71,13 @@ const DASHBOARD_ACCOUNTS = Object.freeze([
 const APP_ACCOUNTS = Object.freeze([
   {
     label: "Test Client 1",
-    phoneE164: "+201000000001",
+    phoneE164: "+966500000001",
     password: "Client@123456",
     fullName: "Test Client One",
   },
   {
     label: "Test Client 2",
-    phoneE164: "+201000000002",
+    phoneE164: "+966500000002",
     password: "Client@123456",
     fullName: "Test Client Two",
   },

@@ -422,6 +422,23 @@ function resolveDeliverySlots(windows, lang, type = "delivery") {
     : [];
 }
 
+function resolvePickupLocationText(value, lang) {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized === "[object Object]" ? "" : normalized;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+  const localized = pickLang(value, lang);
+  return typeof localized === "string" && localized.trim() !== "[object Object]"
+    ? localized.trim()
+    : "";
+}
+
 function resolvePickupLocationEntry(rawLocation, index, lang, fallbackSlots) {
   if (!rawLocation) return null;
 
@@ -444,61 +461,65 @@ function resolvePickupLocationEntry(rawLocation, index, lang, fallbackSlots) {
     return null;
   }
 
-  const localizedName = pickLang(rawLocation.name, lang);
-  const plainName = String(
-    rawLocation.label
-    || rawLocation.title
-    || localizedName
-    || rawLocation.line1
-    || (rawLocation.address && rawLocation.address.line1)
-    || ""
-  ).trim();
+  const rawAddress = rawLocation.address && typeof rawLocation.address === "object" && !Array.isArray(rawLocation.address)
+    ? rawLocation.address
+    : {};
+  const plainName = [
+    rawLocation.name,
+    rawLocation.label,
+    rawLocation.title,
+    rawLocation.line1,
+    rawAddress.line1,
+    rawLocation.address,
+  ].map((value) => resolvePickupLocationText(value, lang)).find(Boolean) || "";
   if (!plainName) return null;
 
   const address = rawLocation.address && typeof rawLocation.address === "object" && !Array.isArray(rawLocation.address)
     ? {
       line1:
-        pickLang(rawLocation.address.line1, lang)
-        || pickLang(rawLocation.line1, lang)
-        || pickLang({ ar: rawLocation.address.addressAr, en: rawLocation.address.addressEn }, lang)
-        || pickLang({ ar: rawLocation.address.labelAr, en: rawLocation.address.labelEn }, lang)
+        resolvePickupLocationText(rawLocation.address.line1, lang)
+        || resolvePickupLocationText(rawLocation.line1, lang)
+        || resolvePickupLocationText(rawLocation.address, lang)
+        || resolvePickupLocationText({ ar: rawLocation.address.addressAr, en: rawLocation.address.addressEn }, lang)
+        || resolvePickupLocationText({ ar: rawLocation.address.labelAr, en: rawLocation.address.labelEn }, lang)
         || plainName,
       line2:
-        pickLang(rawLocation.address.line2, lang)
-        || pickLang(rawLocation.line2, lang)
+        resolvePickupLocationText(rawLocation.address.line2, lang)
+        || resolvePickupLocationText(rawLocation.line2, lang)
         || "",
-      city: rawLocation.address.city || rawLocation.city || "",
+      city: resolvePickupLocationText(rawLocation.address.city, lang) || resolvePickupLocationText(rawLocation.city, lang),
       district:
-        pickLang(rawLocation.address.district, lang)
-        || pickLang(rawLocation.district, lang)
+        resolvePickupLocationText(rawLocation.address.district, lang)
+        || resolvePickupLocationText(rawLocation.district, lang)
         || "",
       street:
-        pickLang(rawLocation.address.street, lang)
-        || pickLang(rawLocation.street, lang)
+        resolvePickupLocationText(rawLocation.address.street, lang)
+        || resolvePickupLocationText(rawLocation.street, lang)
         || "",
-      building: rawLocation.address.building || rawLocation.building || "",
-      apartment: rawLocation.address.apartment || rawLocation.apartment || "",
+      building: resolvePickupLocationText(rawLocation.address.building, lang) || resolvePickupLocationText(rawLocation.building, lang),
+      apartment: resolvePickupLocationText(rawLocation.address.apartment, lang) || resolvePickupLocationText(rawLocation.apartment, lang),
       lat: rawLocation.address.lat !== undefined ? rawLocation.address.lat : rawLocation.lat,
       lng: rawLocation.address.lng !== undefined ? rawLocation.address.lng : rawLocation.lng,
       notes:
-        pickLang(rawLocation.address.notes, lang)
-        || pickLang(rawLocation.notes, lang)
+        resolvePickupLocationText(rawLocation.address.notes, lang)
+        || resolvePickupLocationText(rawLocation.notes, lang)
         || "",
     }
     : {
       line1:
-        pickLang(rawLocation.line1, lang)
-        || pickLang({ ar: rawLocation.addressAr, en: rawLocation.addressEn }, lang)
+        resolvePickupLocationText(rawLocation.line1, lang)
+        || resolvePickupLocationText(rawLocation.address, lang)
+        || resolvePickupLocationText({ ar: rawLocation.addressAr, en: rawLocation.addressEn }, lang)
         || plainName,
-      line2: pickLang(rawLocation.line2, lang) || "",
-      city: rawLocation.city || "",
-      district: pickLang(rawLocation.district, lang) || "",
-      street: pickLang(rawLocation.street, lang) || "",
-      building: rawLocation.building || "",
-      apartment: rawLocation.apartment || "",
+      line2: resolvePickupLocationText(rawLocation.line2, lang),
+      city: resolvePickupLocationText(rawLocation.city, lang),
+      district: resolvePickupLocationText(rawLocation.district, lang),
+      street: resolvePickupLocationText(rawLocation.street, lang),
+      building: resolvePickupLocationText(rawLocation.building, lang),
+      apartment: resolvePickupLocationText(rawLocation.apartment, lang),
       lat: rawLocation.lat,
       lng: rawLocation.lng,
-      notes: pickLang(rawLocation.notes, lang) || "",
+      notes: resolvePickupLocationText(rawLocation.notes, lang),
     };
 
   return {

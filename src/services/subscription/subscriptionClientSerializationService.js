@@ -22,6 +22,10 @@ const { getRestaurantBusinessDate } = require("../restaurantHoursService");
 const dateUtils = require("../../utils/date");
 const { SYSTEM_CURRENCY } = require("../../utils/currency");
 const { buildMealBalance } = require("./subscriptionClientSupportService");
+const {
+  getPickupLocationsSetting,
+  repairLegacyPickupSubscriptionReadView,
+} = require("./subscriptionFulfillmentSummaryService");
 
 const CATALOG_CACHE_TTL = 300000; // 5 minutes
 const catalogCache = {
@@ -213,20 +217,23 @@ function resolveSubscriptionPricingSummary(subscription) {
 }
 
 async function serializeSubscriptionForClient(subscription, lang) {
-  const catalog = await loadWalletCatalogMaps({ subscription, lang });
-  const contractReadView = getSubscriptionContractReadView(subscription, {
+  const readSubscription = subscription && subscription.deliveryMode === "pickup"
+    ? repairLegacyPickupSubscriptionReadView(subscription, await getPickupLocationsSetting(), lang)
+    : subscription;
+  const catalog = await loadWalletCatalogMaps({ subscription: readSubscription, lang });
+  const contractReadView = getSubscriptionContractReadView(readSubscription, {
     audience: "client",
     lang,
     context: "client_subscription_read",
   });
-  const deliverySlot = subscription.deliverySlot && typeof subscription.deliverySlot === "object"
-    ? subscription.deliverySlot
+  const deliverySlot = readSubscription.deliverySlot && typeof readSubscription.deliverySlot === "object"
+    ? readSubscription.deliverySlot
     : {
-      type: subscription.deliveryMode,
-      window: subscription.deliveryWindow || "",
+      type: readSubscription.deliveryMode,
+      window: readSubscription.deliveryWindow || "",
       slotId: "",
     };
-  const data = { ...subscription };
+  const data = { ...readSubscription };
   delete data.__v;
 
   const businessDate = await getRestaurantBusinessDate();
@@ -237,9 +244,9 @@ async function serializeSubscriptionForClient(subscription, lang) {
   return localizeSubscriptionReadPayload({
     ...data,
     mealBalance,
-    deliveryAddress: subscription.deliveryAddress || null,
+    deliveryAddress: readSubscription.deliveryAddress || null,
     deliverySlot,
-    pricingSummary: resolveSubscriptionPricingSummary(subscription),
+    pricingSummary: resolveSubscriptionPricingSummary(readSubscription),
     contract: contractReadView.contract,
   }, {
     lang,

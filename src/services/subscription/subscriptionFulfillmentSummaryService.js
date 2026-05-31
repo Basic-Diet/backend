@@ -2,6 +2,7 @@
 
 const Setting = require("../../models/Setting");
 const { pickLang, t } = require("../../utils/i18n");
+const { logger } = require("../../utils/logger");
 const {
   formatWindowLabel,
   resolvePickupLocationSelection,
@@ -19,7 +20,11 @@ function cleanString(value) {
 }
 
 function pickValue(value, lang) {
-  return cleanString(pickLang(value, lang) || value);
+  const localized = pickLang(value, lang);
+  if (typeof localized === "string") return localized.trim();
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
 }
 
 function buildFormattedAddress(address = {}, lang = "ar") {
@@ -108,6 +113,54 @@ function buildPickupLocationSummary(subscription, pickupLocations = [], lang = "
     longitude: addressObject.lng !== undefined ? addressObject.lng : (resolved.lng ?? resolved.longitude ?? null),
     mapUrl: cleanString(resolved.mapUrl || resolved.googleMapsUrl || resolved.mapsUrl) || null,
   };
+}
+
+function isObjectCoercionSentinel(value) {
+  return typeof value === "string" && value.trim() === "[object Object]";
+}
+
+function repairLegacyPickupSubscriptionReadView(subscription, pickupLocations = [], lang = "ar") {
+  if (!subscription || subscription.deliveryMode !== "pickup") return subscription;
+
+  const snapshotDelivery = subscription.contractSnapshot
+    && typeof subscription.contractSnapshot === "object"
+    && subscription.contractSnapshot.delivery
+    && typeof subscription.contractSnapshot.delivery === "object"
+    ? subscription.contractSnapshot.delivery
+    : null;
+  const pickupLocationId = cleanString(subscription.pickupLocationId || (snapshotDelivery && snapshotDelivery.pickupLocationId));
+  if (!pickupLocationId) return subscription;
+
+  const repairLiveAddress = isObjectCoercionSentinel(subscription.deliveryAddress && subscription.deliveryAddress.line1);
+  const repairSnapshotAddress = isObjectCoercionSentinel(snapshotDelivery && snapshotDelivery.address && snapshotDelivery.address.line1);
+  if (!repairLiveAddress && !repairSnapshotAddress) return subscription;
+
+  const resolved = resolvePickupLocationSelection(pickupLocations, pickupLocationId, lang, []);
+  if (!resolved || !resolved.address) return subscription;
+
+  const repairedFields = [];
+  const repaired = { ...subscription };
+  if (repairLiveAddress) {
+    repaired.deliveryAddress = { ...resolved.address };
+    repairedFields.push("deliveryAddress.line1");
+  }
+  if (repairSnapshotAddress) {
+    repaired.contractSnapshot = {
+      ...subscription.contractSnapshot,
+      delivery: {
+        ...snapshotDelivery,
+        address: { ...resolved.address },
+      },
+    };
+    repairedFields.push("contractSnapshot.delivery.address.line1");
+  }
+
+  logger.warn("Repaired legacy pickup address for subscription read", {
+    subscriptionId: subscription._id ? String(subscription._id) : null,
+    pickupLocationId,
+    repairedFields,
+  });
+  return repaired;
 }
 
 function resolveEffectiveAddress(subscription, day) {
@@ -272,4 +325,5 @@ module.exports = {
   buildFulfillmentReadFields,
   buildPickupLocationSummary,
   getPickupLocationsSetting,
+  repairLegacyPickupSubscriptionReadView,
 };

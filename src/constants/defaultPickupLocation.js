@@ -16,8 +16,10 @@ const DEFAULT_PICKUP_LOCATION = Object.freeze({
     en: "Main Branch",
   },
   address: {
-    ar: "H4GX+JF7، السلامة، جدة 23436، المملكة العربية السعودية",
-    en: "H4GX+JF7, Al Salamah, Jeddah 23436, Saudi Arabia",
+    line1: {
+      ar: "H4GX+JF7، السلامة، جدة 23436، المملكة العربية السعودية",
+      en: "H4GX+JF7, Al Salamah, Jeddah 23436, Saudi Arabia",
+    },
   },
   isActive: true,
   active: true,
@@ -35,7 +37,10 @@ function buildDefaultPickupLocation() {
     ...DEFAULT_PICKUP_LOCATION,
     name: { ...DEFAULT_PICKUP_LOCATION.name },
     title: { ...DEFAULT_PICKUP_LOCATION.title },
-    address: { ...DEFAULT_PICKUP_LOCATION.address },
+    address: {
+      ...DEFAULT_PICKUP_LOCATION.address,
+      line1: { ...DEFAULT_PICKUP_LOCATION.address.line1 },
+    },
     pickupWindows: [...DEFAULT_PICKUP_LOCATION.pickupWindows],
     windows: [...DEFAULT_PICKUP_LOCATION.windows],
   };

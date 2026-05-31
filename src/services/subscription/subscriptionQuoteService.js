@@ -668,9 +668,7 @@ async function resolveCheckoutQuoteOrThrow(
       err.code = "VALIDATION_ERROR";
       throw err;
     }
-    if (!delivery.address) {
-      delivery.address = resolvedPickupLocation.address || null;
-    }
+    delivery.address = resolvedPickupLocation.address || null;
   }
   if (delivery.type === "delivery" && !delivery.address && !allowMissingDeliveryAddress) {
     const err = new Error("Missing delivery address");

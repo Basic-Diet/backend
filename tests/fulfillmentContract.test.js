@@ -3,7 +3,14 @@ require("dotenv").config();
 const assert = require("assert");
 const {
   buildFulfillmentReadFields,
+  repairLegacyPickupSubscriptionReadView,
 } = require("../src/services/subscription/subscriptionFulfillmentSummaryService");
+const { buildDefaultPickupLocation } = require("../src/constants/defaultPickupLocation");
+const { buildLockedOperationalSnapshotDetails } = require("../src/utils/delivery");
+const {
+  resolveDeliveryCatalog,
+  resolvePickupLocationSelection,
+} = require("../src/utils/subscription/subscriptionCatalog");
 
 const pickupLocations = [
   {
@@ -127,6 +134,68 @@ function run() {
   });
   assert.strictEqual(missingDeliveryWindow.deliveryWindow, null);
   assert.strictEqual(missingDeliveryWindow.fulfillmentSummary.lockedMessage, "موعد التوصيل غير محدد بعد");
+
+  const defaultLocation = buildDefaultPickupLocation();
+  const defaultCatalog = resolveDeliveryCatalog({
+    lang: "en",
+    windows: [],
+    pickupLocations: [defaultLocation],
+  });
+  assert.strictEqual(defaultCatalog.pickupLocations[0].name, "Main Branch");
+  assert.strictEqual(defaultCatalog.pickupLocations[0].address.line1, "H4GX+JF7, Al Salamah, Jeddah 23436, Saudi Arabia");
+
+  const legacyDefaultLocation = {
+    ...defaultLocation,
+    address: {
+      ar: "عنوان الفرع القديم",
+      en: "Legacy branch address",
+    },
+  };
+  const resolvedLegacyLocation = resolvePickupLocationSelection([legacyDefaultLocation], "main", "en", []);
+  assert.strictEqual(resolvedLegacyLocation.name, "Main Branch");
+  assert.strictEqual(resolvedLegacyLocation.address.line1, "Legacy branch address");
+  assert(!JSON.stringify(resolvedLegacyLocation).includes("[object Object]"));
+
+  const scalarAddressLocation = resolvePickupLocationSelection([{
+    id: "scalar_address",
+    name: "Scalar Address Branch",
+    address: "Scalar address",
+  }], "scalar_address", "en", []);
+  assert.strictEqual(scalarAddressLocation.address.line1, "Scalar address");
+
+  const legacySubscription = {
+    _id: "legacy_pickup_subscription",
+    deliveryMode: "pickup",
+    pickupLocationId: "main",
+    deliveryAddress: { line1: "[object Object]" },
+    contractHash: "immutable_hash",
+    contractSnapshot: {
+      delivery: {
+        pickupLocationId: "main",
+        address: { line1: "[object Object]" },
+      },
+    },
+  };
+  const repairedSubscription = repairLegacyPickupSubscriptionReadView(
+    legacySubscription,
+    [legacyDefaultLocation],
+    "en"
+  );
+  assert.strictEqual(repairedSubscription.deliveryAddress.line1, "Legacy branch address");
+  assert.strictEqual(repairedSubscription.contractSnapshot.delivery.address.line1, "Legacy branch address");
+  assert.strictEqual(repairedSubscription.contractHash, "immutable_hash");
+  assert.strictEqual(legacySubscription.deliveryAddress.line1, "[object Object]");
+  assert.strictEqual(legacySubscription.contractSnapshot.delivery.address.line1, "[object Object]");
+
+  const lockedSnapshotDetails = buildLockedOperationalSnapshotDetails({
+    deliveryMode: "pickup",
+    pickupLocationId: "main",
+    deliveryAddress: { line1: "[object Object]" },
+  }, null, {
+    pickupLocations: [legacyDefaultLocation],
+  });
+  assert.strictEqual(lockedSnapshotDetails.pickupLocationName, "الفرع الرئيسي");
+  assert.strictEqual(lockedSnapshotDetails.pickupAddress.line1, "عنوان الفرع القديم");
 
   console.log("fulfillmentContract.test.js passed");
 }
