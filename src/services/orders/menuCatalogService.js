@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 
+const BuilderProtein = require("../../models/BuilderProtein");
 const MenuAuditLog = require("../../models/MenuAuditLog");
 const MenuCategory = require("../../models/MenuCategory");
 const MenuOption = require("../../models/MenuOption");
@@ -8,8 +9,10 @@ const MenuProduct = require("../../models/MenuProduct");
 const MenuVersion = require("../../models/MenuVersion");
 const ProductGroupOption = require("../../models/ProductGroupOption");
 const ProductOptionGroup = require("../../models/ProductOptionGroup");
+const Sandwich = require("../../models/Sandwich");
 const Setting = require("../../models/Setting");
 const { pickLang } = require("../../utils/i18n");
+const { CUSTOMER_VISIBLE_CARB_KEYS } = require("../../config/mealPlannerContract");
 const {
   generateUniqueKey,
   isAllowedCategoryCardVariant,
@@ -37,6 +40,13 @@ const PRODUCT_ITEM_TYPES = [
   "ice_cream",
   "product",
 ];
+const CUSTOMER_VISIBLE_CARB_KEY_SET = new Set(CUSTOMER_VISIBLE_CARB_KEYS);
+const BASIC_MEAL_PUBLIC_GROUP_KEY_SET = new Set(["carbs", "proteins"]);
+const BASIC_MEAL_STANDARD_PROTEIN_KEY_SET = new Set(["chicken", "beef", "fish", "eggs"]);
+const HIDDEN_PUBLIC_PRODUCT_KEYS = new Set(["small_salad"]);
+const PUBLIC_PRODUCT_CATEGORY_KEY_OVERRIDES = new Map([
+  ["basic_meal", "meals"],
+]);
 
 class MenuValidationError extends Error {
   constructor(message, code = "VALIDATION_ERROR", status = 400, details) {
@@ -62,6 +72,10 @@ function assertObjectId(value, fieldName = "id") {
     throw new MenuValidationError(`${fieldName} must be a valid ObjectId`, "INVALID_OBJECT_ID");
   }
   return String(value);
+}
+
+async function mirrorCompatibilityImage(Model, id, imageUrl) {
+  await Model.updateOne({ _id: id }, { $set: { imageUrl: String(imageUrl || "").trim() } });
 }
 
 function isPlainObject(value) {
@@ -246,13 +260,13 @@ function serializePublicCategory(category, lang, products) {
   };
 }
 
-function serializePublicProduct(product, lang, optionGroups) {
+function serializePublicProduct(product, lang, optionGroups, categoryId = product.categoryId) {
   const hasOptionGroups = Array.isArray(optionGroups) && optionGroups.length > 0;
   const requiresBuilder = hasOptionGroups || product.pricingModel === "per_100g";
   return {
     id: String(product._id),
     key: product.key,
-    categoryId: String(product.categoryId),
+    categoryId: String(categoryId),
     name: localizeName(product.name, lang),
     nameI18n: localizedPair(product.name),
     description: localizeName(product.description, lang),
@@ -318,6 +332,38 @@ function serializePublicOption(relation, option, lang) {
   };
 }
 
+function isCustomerVisibleProduct(product, category) {
+  if (HIDDEN_PUBLIC_PRODUCT_KEYS.has(product.key)) return false;
+  if (category?.key === "carbs") return CUSTOMER_VISIBLE_CARB_KEY_SET.has(product.key);
+  return true;
+}
+
+function isCustomerVisibleGroup(product, group) {
+  if (product?.key === "basic_meal") return BASIC_MEAL_PUBLIC_GROUP_KEY_SET.has(group?.key);
+  return true;
+}
+
+function isCustomerVisibleOption(option, group, product) {
+  if (group?.key === "carbs") return CUSTOMER_VISIBLE_CARB_KEY_SET.has(option.key);
+  if (product?.key === "basic_meal" && group?.key === "proteins") {
+    return BASIC_MEAL_STANDARD_PROTEIN_KEY_SET.has(option.key);
+  }
+  return !Array.isArray(option.ruleTags) || !option.ruleTags.includes("missing_external");
+}
+
+function resolvePublicProductCategory(product, categoriesById, categoriesByKey) {
+  const overrideKey = PUBLIC_PRODUCT_CATEGORY_KEY_OVERRIDES.get(product.key);
+  return (overrideKey && categoriesByKey.get(overrideKey))
+    || categoriesById.get(String(product.categoryId))
+    || null;
+}
+
+function sortPublicProducts(left, right) {
+  if (left.key === "basic_meal") return -1;
+  if (right.key === "basic_meal") return 1;
+  return left.sortOrder - right.sortOrder;
+}
+
 async function getSettingValue(key, fallback) {
   const setting = await Setting.findOne({ key }).lean();
   return setting ? setting.value : fallback;
@@ -352,10 +398,15 @@ async function getPublishedMenu({ lang = "en", branchId = "" } = {}) {
   ]);
 
   const categoryIds = new Set(categories.map((category) => String(category._id)));
+  const categoriesById = new Map(categories.map((category) => [String(category._id), category]));
+  const categoriesByKey = new Map(categories.map((category) => [category.key, category]));
   const productsByCategory = new Map();
   const productsById = new Map(
     products
-      .filter((product) => categoryIds.has(String(product.categoryId)))
+      .filter((product) => (
+        categoryIds.has(String(product.categoryId))
+        && isCustomerVisibleProduct(product, categoriesById.get(String(product.categoryId)))
+      ))
       .map((product) => [String(product._id), product])
   );
   const groupsById = new Map(groups.map((group) => [String(group._id), group]));
@@ -371,11 +422,11 @@ async function getPublishedMenu({ lang = "en", branchId = "" } = {}) {
   groupRelations.forEach((relation) => {
     const product = productsById.get(String(relation.productId));
     const group = groupsById.get(String(relation.groupId));
-    if (!product || !group) return;
+    if (!product || !group || !isCustomerVisibleGroup(product, group)) return;
     const optionRows = (optionRelationsByProductGroup.get(`${relation.productId}:${relation.groupId}`) || [])
       .map((optionRelation) => {
         const option = optionsById.get(String(optionRelation.optionId));
-        if (!option || String(option.groupId) !== String(group._id)) return null;
+        if (!option || String(option.groupId) !== String(group._id) || !isCustomerVisibleOption(option, group, product)) return null;
         return serializePublicOption(optionRelation, option, lang);
       })
       .filter(Boolean)
@@ -388,18 +439,20 @@ async function getPublishedMenu({ lang = "en", branchId = "" } = {}) {
   });
 
   productsById.forEach((product) => {
-    const categoryId = String(product.categoryId);
+    const publicCategory = resolvePublicProductCategory(product, categoriesById, categoriesByKey);
+    if (!publicCategory) return;
+    const categoryId = String(publicCategory._id);
     if (!productsByCategory.has(categoryId)) productsByCategory.set(categoryId, []);
     const groupsForProduct = Array.isArray(product._publicGroups)
       ? product._publicGroups.sort((a, b) => a.sortOrder - b.sortOrder)
       : [];
-    productsByCategory.get(categoryId).push(serializePublicProduct(product, lang, groupsForProduct));
+    productsByCategory.get(categoryId).push(serializePublicProduct(product, lang, groupsForProduct, publicCategory._id));
   });
 
   const serializedCategories = categories
     .map((category) => {
       const rows = (productsByCategory.get(String(category._id)) || [])
-        .sort((a, b) => a.sortOrder - b.sortOrder);
+        .sort(sortPublicProducts);
       return serializePublicCategory(category, lang, rows);
     })
     .filter((category) => category.products.length > 0);
@@ -1606,7 +1659,9 @@ module.exports = {
     const payload = normalizeProductPayload(body, existing);
     const category = await MenuCategory.findOne({ _id: payload.categoryId, isActive: true }).lean();
     if (!category) throw new MenuValidationError("categoryId does not reference an active category", "CATEGORY_NOT_FOUND", 404);
-    return updateEntity(MenuProduct, id, payload, { entityType: "menu_product", actor, action: changeAction(payload) });
+    const product = await updateEntity(MenuProduct, id, payload, { entityType: "menu_product", actor, action: changeAction(payload) });
+    await mirrorCompatibilityImage(Sandwich, id, payload.imageUrl);
+    return product;
   },
   updateOptionGroup: async (id, body, actor) => {
     const existing = await MenuOptionGroup.findById(assertObjectId(id)).lean();
@@ -1618,7 +1673,9 @@ module.exports = {
     const existing = await MenuOption.findById(assertObjectId(id)).lean();
     if (!existing) throw new MenuNotFoundError();
     const payload = normalizeOptionPayload(body, existing);
-    return updateEntity(MenuOption, id, payload, { entityType: "menu_option", actor, action: changeAction(payload) });
+    const option = await updateEntity(MenuOption, id, payload, { entityType: "menu_option", actor, action: changeAction(payload) });
+    await mirrorCompatibilityImage(BuilderProtein, id, payload.imageUrl);
+    return option;
   },
   updateCategoryVisibility: (id, body, actor) => updateEntityField(MenuCategory, id, "isVisible", body.isVisible, { entityType: "menu_category", actor, action: "visibility_changed" }),
   updateCategoryAvailability: (id, body, actor) => updateEntityField(MenuCategory, id, "isAvailable", body.isAvailable, { entityType: "menu_category", actor, action: "availability_changed" }),

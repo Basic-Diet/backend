@@ -26,6 +26,25 @@ const PREMIUM_LARGE_SALAD_PREMIUM_KEY = MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD
 const PREMIUM_LARGE_SALAD_PRESET_KEY = LARGE_SALAD_CATEGORY_KEY;
 const PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA = 2900;
 
+const CUSTOMER_VISIBLE_CARB_KEYS = Object.freeze([
+  "white_rice",
+  "turmeric_rice",
+  "alfredo_pasta",
+  "red_sauce_pasta",
+  "roasted_potato",
+  "sweet_potato",
+  "grilled_mixed_vegetables",
+]);
+
+const SUBSCRIPTION_COLD_SANDWICH_KEYS = Object.freeze([
+  "beef_burger_sandwich",
+  "turkey_cold_sandwich",
+  "boiled_egg_sandwich",
+  "tuna_sandwich",
+  "mexican_chicken_sandwich",
+  "grilled_chicken_sandwich",
+]);
+
 const STANDARD_CARB_RULES = Object.freeze({
   maxTypes: 2,
   maxTotalGrams: 300,
@@ -58,12 +77,13 @@ const PROTEIN_DISPLAY_GROUPS = Object.freeze([
 const PROTEIN_DISPLAY_GROUP_KEYS = new Set(PROTEIN_DISPLAY_GROUPS.map((group) => group.key));
 
 const SALAD_SELECTION_GROUPS = Object.freeze([
-  { key: "leafy_greens", name: { ar: "ورقيات", en: "Leafy Greens" }, minSelect: 0, maxSelect: 99, sortOrder: 10, source: "ingredient" },
-  { key: "vegetables", name: { ar: "خضار", en: "Vegetables" }, minSelect: 0, maxSelect: 99, sortOrder: 20, source: "ingredient" },
+  { key: "leafy_greens", name: { ar: "ورقيات", en: "Leafy Greens" }, minSelect: 0, maxSelect: 2, sortOrder: 10, source: "ingredient" },
+  { key: "vegetables", name: { ar: "خضار", en: "Vegetables" }, minSelect: 0, maxSelect: 19, sortOrder: 20, source: "ingredient" },
   { key: "protein", name: { ar: "بروتين", en: "Protein" }, minSelect: 1, maxSelect: 1, sortOrder: 30, source: "protein" },
-  { key: "cheese_nuts", name: { ar: "أجبان ومكسرات", en: "Cheese & Nuts" }, minSelect: 0, maxSelect: 99, sortOrder: 40, source: "ingredient" },
-  { key: "fruits", name: { ar: "فواكه", en: "Fruits" }, minSelect: 0, maxSelect: 99, sortOrder: 50, source: "ingredient" },
+  { key: "cheese_nuts", name: { ar: "أجبان ومكسرات", en: "Cheese & Nuts" }, minSelect: 0, maxSelect: 2, sortOrder: 40, source: "ingredient" },
+  { key: "fruits", name: { ar: "فواكه", en: "Fruits" }, minSelect: 0, maxSelect: 4, sortOrder: 50, source: "ingredient" },
   { key: "sauce", name: { ar: "صوص", en: "Sauce" }, minSelect: 1, maxSelect: 1, sortOrder: 60, source: "ingredient" },
+  { key: "extra_protein_50g", name: { ar: "إضافة بروتين", en: "Extra Protein" }, minSelect: 0, maxSelect: 1, sortOrder: 70, source: "option" },
 ]);
 
 const SALAD_INGREDIENT_GROUP_KEYS = new Set(
@@ -187,6 +207,7 @@ function getMealPlannerCategoryDefinition({ key, dimension }) {
 
 module.exports = {
   BEEF_DAILY_LIMIT,
+  CUSTOMER_VISIBLE_CARB_KEYS,
   LARGE_SALAD_CATEGORY_KEY,
   LEGACY_MEAL_SELECTION_TYPES,
   LEGACY_PROTEIN_FAMILY_ALIASES,
@@ -204,6 +225,7 @@ module.exports = {
   SANDWICH_CATEGORY_KEYS,
   STANDARD_CARB_CATEGORY_KEY,
   STANDARD_CARB_RULES,
+  SUBSCRIPTION_COLD_SANDWICH_KEYS,
   SYSTEM_CURRENCY,
   getMealPlannerCategoryDefinition,
   getMealPlannerRules,

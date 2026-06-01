@@ -4,7 +4,7 @@ const { getCloudinaryClient } = require("../config/cloudinary");
 const { logger } = require("../utils/logger");
 
 const BASE_UPLOAD_FOLDER = "basicdiet";
-const DEFAULT_IMAGE_FOLDER = `${BASE_UPLOAD_FOLDER}/uploads`;
+const DEFAULT_IMAGE_FOLDER = "basicdiet145/menu";
 const ALLOWED_UPLOAD_FOLDER_KEYS = Object.freeze([
   "plans",
   "meals",
@@ -26,7 +26,7 @@ function createUploadError(status, code, message, details) {
 
 function normalizeRequestedFolder(folderInput) {
   if (folderInput === undefined || folderInput === null || String(folderInput).trim() === "") {
-    return DEFAULT_IMAGE_FOLDER;
+    return String(process.env.CLOUDINARY_UPLOAD_FOLDER || DEFAULT_IMAGE_FOLDER).trim();
   }
 
   const rawSegments = String(folderInput)
@@ -116,11 +116,19 @@ async function uploadImageBuffer({ buffer, mimetype, originalFilename, folder } 
         }
 
         return resolve({
+          imageUrl: cloudinary.url(result.public_id, {
+            secure: true,
+            transformation: [{ fetch_format: "auto", quality: "auto" }],
+          }),
           url: result.secure_url || result.url || "",
           secureUrl: result.secure_url || result.url || "",
           publicId: result.public_id,
           resourceType: result.resource_type,
           folder: result.folder || targetFolder,
+          width: result.width,
+          height: result.height,
+          format: result.format,
+          bytes: result.bytes,
         });
       }
     );

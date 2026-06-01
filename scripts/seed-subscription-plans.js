@@ -8,7 +8,7 @@ const Plan = require("../src/models/Plan");
 const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
 const SYSTEM_CURRENCY = "SAR";
 const EXPECTED_PLAN_COUNT = 3;
-const EXPECTED_NESTED_PRICE_POINTS = 27;
+const EXPECTED_NESTED_PRICE_POINTS = 45;
 
 function name(ar, en = ar) {
   return { ar, en };
@@ -24,21 +24,27 @@ function createFlatPlanKey(mealsPerDay, durationDays, grams) {
 
 const priceMatrixHalala = {
   7: {
-    100: { 1: 11500, 2: 23000, 3: 34500 },
-    150: { 1: 14500, 2: 29000, 3: 43500 },
-    200: { 1: 17500, 2: 35000, 3: 52500 },
+    100: { 1: 13800, 2: 27600, 3: 41400, 4: 55200, 5: 69000 },
+    150: { 1: 17400, 2: 34800, 3: 52200, 4: 69600, 5: 87000 },
+    200: { 1: 21000, 2: 42000, 3: 63000, 4: 84000, 5: 105000 },
   },
   26: {
-    100: { 1: 43000, 2: 77900, 3: 112900 },
-    150: { 1: 54900, 2: 98800, 3: 144300 },
-    200: { 1: 62500, 2: 118400, 3: 167700 },
+    100: { 1: 51600, 2: 93500, 3: 135500, 4: 180600, 5: 225700 },
+    150: { 1: 65900, 2: 118600, 3: 173200, 4: 230900, 5: 288600 },
+    200: { 1: 75000, 2: 142100, 3: 201200, 4: 268300, 5: 335400 },
   },
   30: {
-    100: { 1: 48900, 2: 89900, 3: 125900 },
-    150: { 1: 60000, 2: 110900, 3: 161900 },
-    200: { 1: 69000, 2: 134900, 3: 189900 },
+    100: { 1: 58700, 2: 107900, 3: 151100, 4: 201400, 5: 251800 },
+    150: { 1: 72000, 2: 133100, 3: 194300, 4: 259000, 5: 323800 },
+    200: { 1: 82800, 2: 161900, 3: 227900, 4: 303800, 5: 379800 },
   },
 };
+
+// TODO: Duration-specific subscription addon prices are intentionally not
+// persisted in the Plan seed. Snack, salad, and juice are subscription addons
+// whose prices vary by duration and should be managed from the dashboard once
+// the addon schema/service contract is finalized. Delivery is not a
+// subscription addon; it belongs to delivery/shipping/checkout settings.
 
 function buildSkipPolicy(durationDays) {
   if (durationDays === 7) return { enabled: true, maxDays: 1 };
@@ -75,7 +81,10 @@ function buildSubscriptionPlanRows() {
       daysCount: durationDays,
       durationDays,
       sortOrder: durationIndex + 1,
-      name: name(`اشتراك ${durationDays} ${durationDays === 7 ? "أيام" : "يوم"}`, `${durationDays}-Day Subscription`),
+      name: name(
+        `إشتراك وجبات لمدة ${durationDays} أيام يشمل وجبات ( سمك - لحم - دجاج )`,
+        `${durationDays}-Day Meal Subscription includes meals (Fish - Beef - Chicken)`
+      ),
       description: name(
         `اشتراك لمدة ${durationDays} ${durationDays === 7 ? "أيام" : "يوم"} بخيارات 100 و150 و200 جرام.`,
         `${durationDays}-day subscription with 100g, 150g, and 200g portion options.`
@@ -131,8 +140,8 @@ function assertSubscriptionPlanRows() {
     }
 
     for (const gramsOption of row.gramsOptions) {
-      if ((gramsOption.mealsOptions || []).length !== 3) {
-        throw new Error(`Expected 3 meals options for ${row.key}/${gramsOption.grams}g`);
+      if ((gramsOption.mealsOptions || []).length !== 5) {
+        throw new Error(`Expected 5 meals options for ${row.key}/${gramsOption.grams}g`);
       }
 
       for (const mealOption of gramsOption.mealsOptions) {
@@ -166,29 +175,33 @@ async function deactivateWrongFlatPlans({ log = console } = {}) {
   return { matched, modified };
 }
 
-async function seedSubscriptionPlans({ cleanupFlatPlans = true, log = console } = {}) {
+async function seedSubscriptionPlans({ cleanupFlatPlans = false, sync = false, log = console } = {}) {
   assertSubscriptionPlanRows();
 
   let created = 0;
+  let skipped = 0;
   let updated = 0;
 
   for (const row of subscriptionPlanRows) {
-    const existing = await Plan.findOne({ key: row.key }).select("_id").lean();
-    await Plan.updateOne(
-      { key: row.key },
-      {
-        $set: row,
-        $unset: {
-          mealSizeGrams: "",
-          mealsPerDay: "",
-        },
-      },
-      { upsert: true, runValidators: true }
-    );
-
+    const existing = await Plan.findOne({ key: row.key });
     if (existing) {
-      updated += 1;
+      skipped += 1;
+      if (sync) {
+        await Plan.updateOne(
+          { key: row.key },
+          {
+            $set: row,
+            $unset: {
+              mealSizeGrams: "",
+              mealsPerDay: "",
+            },
+          },
+          { runValidators: true }
+        );
+        updated += 1;
+      }
     } else {
+      await Plan.create(row);
       created += 1;
     }
   }
@@ -200,13 +213,17 @@ async function seedSubscriptionPlans({ cleanupFlatPlans = true, log = console } 
     log.log("Wrong flat subscription plans cleanup skipped.");
   }
 
-  const foundCount = await Plan.countDocuments({ key: { $in: subscriptionPlanKeys }, isActive: true });
+  const foundCount = await Plan.countDocuments({ key: { $in: subscriptionPlanKeys } });
+  const activeCount = await Plan.countDocuments({ key: { $in: subscriptionPlanKeys }, isActive: true });
   const samplePlan = await Plan.findOne({ key: subscriptionPlanKeys[0] }).lean();
 
+  log.log(`Subscription plans mode: ${sync ? "sync" : "create-missing-only"}`);
   log.log(`Subscription top-level plans created: ${created}`);
+  log.log(`Subscription top-level plans skipped existing: ${skipped}`);
   log.log(`Subscription top-level plans updated: ${updated}`);
-  log.log(`Expected active seeded subscription plan count: ${EXPECTED_PLAN_COUNT}`);
-  log.log(`Found active seeded subscription plan count: ${foundCount}`);
+  log.log(`Expected seeded subscription plan count: ${EXPECTED_PLAN_COUNT}`);
+  log.log(`Found seeded subscription plan count: ${foundCount}`);
+  log.log(`Found active seeded subscription plan count: ${activeCount}`);
   log.log(`Expected nested subscription price points: ${EXPECTED_NESTED_PRICE_POINTS}`);
 
   if (foundCount !== EXPECTED_PLAN_COUNT) {
@@ -217,8 +234,10 @@ async function seedSubscriptionPlans({ cleanupFlatPlans = true, log = console } 
     expectedCount: EXPECTED_PLAN_COUNT,
     expectedNestedPricePoints: EXPECTED_NESTED_PRICE_POINTS,
     foundCount,
+    activeCount,
     nestedPricePoints: countNestedPricePoints(subscriptionPlanRows),
     created,
+    skipped,
     updated,
     cleanup,
     keys: subscriptionPlanKeys,
@@ -227,8 +246,10 @@ async function seedSubscriptionPlans({ cleanupFlatPlans = true, log = console } 
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
+  const sync = argv.includes("--sync") || ["1", "true", "yes", "y"].includes(String(process.env.BOOTSTRAP_SYNC || "").trim().toLowerCase());
   return {
-    cleanupFlatPlans: !argv.includes("--skip-flat-plan-cleanup"),
+    sync,
+    cleanupFlatPlans: sync && !argv.includes("--skip-flat-plan-cleanup"),
   };
 }
 
@@ -240,16 +261,16 @@ async function main() {
   console.log("Connected to MongoDB for subscription plans seeding.");
 
   try {
-    const result = await seedSubscriptionPlans({ cleanupFlatPlans: args.cleanupFlatPlans });
-    const sampleGramsOption = result.samplePlan.gramsOptions[0];
-    const sampleMealOption = sampleGramsOption.mealsOptions[0];
+    const result = await seedSubscriptionPlans({ cleanupFlatPlans: args.cleanupFlatPlans, sync: args.sync });
+    const sampleGramsOption = result.samplePlan?.gramsOptions?.[0];
+    const sampleMealOption = sampleGramsOption?.mealsOptions?.[0];
     console.log("Sample seeded plan:", {
-      key: result.samplePlan.key,
-      daysCount: result.samplePlan.daysCount,
-      durationDays: result.samplePlan.durationDays,
-      grams: sampleGramsOption.grams,
-      mealsPerDay: sampleMealOption.mealsPerDay,
-      priceHalala: sampleMealOption.priceHalala,
+      key: result.samplePlan?.key,
+      daysCount: result.samplePlan?.daysCount,
+      durationDays: result.samplePlan?.durationDays,
+      grams: sampleGramsOption?.grams,
+      mealsPerDay: sampleMealOption?.mealsPerDay,
+      priceHalala: sampleMealOption?.priceHalala,
     });
     console.log("Subscription plans seed complete.");
   } finally {

@@ -289,6 +289,7 @@ async function createAddon(req, res, options = {}) {
       body: req.body,
       file: req.file,
       folder: ADDON_IMAGE_FOLDER,
+      allowDirectImageUrl: true,
     });
 
     const row = await Addon.create({
@@ -331,6 +332,7 @@ async function updateAddon(req, res, options = {}) {
       file: req.file,
       folder: ADDON_IMAGE_FOLDER,
       currentImageUrl: existing.imageUrl,
+      allowDirectImageUrl: true,
     });
 
     existing.set({

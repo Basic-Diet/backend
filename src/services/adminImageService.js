@@ -49,9 +49,14 @@ function normalizeUploadResponse(upload) {
 
   return {
     url: secureUrl,
+    imageUrl: pickFirstNonEmptyString(upload && upload.imageUrl, secureUrl),
     secureUrl,
     publicId: pickFirstNonEmptyString(upload && upload.publicId, upload && upload.public_id),
     resourceType: pickFirstNonEmptyString(upload && upload.resourceType, upload && upload.resource_type),
+    width: upload && upload.width,
+    height: upload && upload.height,
+    format: pickFirstNonEmptyString(upload && upload.format),
+    bytes: upload && upload.bytes,
   };
 }
 
@@ -76,9 +81,10 @@ async function resolveManagedImageFromRequest({
   folder,
   currentImageUrl = "",
   uploadImage,
+  allowDirectImageUrl = false,
 } = {}) {
   const directImageUrl = normalizeOptionalString(body && body.imageUrl);
-  if (directImageUrl) {
+  if (directImageUrl && !allowDirectImageUrl) {
     throw createInvalidImageRequestError(
       "imageUrl is managed by the server. Upload an image file using multipart/form-data instead."
     );
@@ -89,10 +95,18 @@ async function resolveManagedImageFromRequest({
     throw createInvalidImageRequestError("removeImage cannot be true when an image file is provided");
   }
 
+  if (directImageUrl) {
+    return {
+      imageUrl: directImageUrl,
+      changed: directImageUrl !== normalizeOptionalString(currentImageUrl),
+      upload: null,
+    };
+  }
+
   if (file) {
     const upload = await uploadImageFile(file, { folder, uploadImage });
     return {
-      imageUrl: upload.secureUrl,
+      imageUrl: upload.imageUrl,
       changed: true,
       upload,
     };

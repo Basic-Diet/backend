@@ -37,6 +37,7 @@ async function uploadAdminImage(req, res, deps = {}) {
     });
 
     return res.status(201).json({
+      success: true,
       status: true,
       data: responseData,
     });

@@ -2,6 +2,11 @@ const multer = require("multer");
 const errorResponse = require("../utils/errorResponse");
 
 const DEFAULT_MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 function getMaxImageUploadBytes() {
   const parsed = Number(process.env.IMAGE_UPLOAD_MAX_BYTES || DEFAULT_MAX_IMAGE_UPLOAD_BYTES);
@@ -25,7 +30,7 @@ function createAdminImageUploadMiddleware({ fieldName = "image", maxFileSize = g
       files: 1,
     },
     fileFilter: (_req, file, cb) => {
-      if (file && typeof file.mimetype === "string" && file.mimetype.startsWith("image/")) {
+      if (file && ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype)) {
         return cb(null, true);
       }
       return cb(createInvalidMimeTypeError(file));
@@ -86,6 +91,7 @@ const adminImageUploadMiddleware = createAdminImageUploadMiddleware();
 
 module.exports = {
   adminImageUploadMiddleware,
+  ALLOWED_IMAGE_MIME_TYPES,
   createAdminImageUploadMiddleware,
   DEFAULT_MAX_IMAGE_UPLOAD_BYTES,
   getMaxImageUploadBytes,

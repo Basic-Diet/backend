@@ -392,7 +392,7 @@ function inspectPlans(plans, endpoint, source) {
   const active = plans.filter((plan) => plan.isActive !== false);
   const visibleKeys = active.map(keyOf).filter(Boolean);
   const canonical = active.filter((plan) => CANONICAL_PLAN_KEYS.has(keyOf(plan)));
-  if (source === "client" && active.length === 27) addFinding("Business Logic", "critical", "Subscription plans contract", `${endpoint} exposes 27 active flat plans as top-level plans.`);
+  if (source === "client" && active.length === 45) addFinding("Business Logic", "critical", "Subscription plans contract", `${endpoint} exposes 45 active flat plans as top-level plans.`);
   const legacy = active.filter((plan) => LEGACY_PLAN_KEYS.includes(keyOf(plan)));
   if (legacy.length) addFinding("UX/API Contract", source === "client" ? "high" : "warning", "Subscription plans contract", `${endpoint} exposes legacy active plan keys: ${legacy.map(keyOf).join(", ")}.`);
   if (source === "client" && canonical.length !== 3) addFinding("Business Logic", "high", "Subscription plans contract", `${endpoint} exposes canonical keys [${visibleKeys.join(", ")}], expected exactly the 7/26/30 day canonical plans.`);
@@ -401,7 +401,7 @@ function inspectPlans(plans, endpoint, source) {
     for (const requiredGrams of [100, 150, 200]) {
       const row = grams.find((item) => Number(item.grams) === requiredGrams);
       if (!row) addFinding("Business Logic", "high", "Subscription plans contract", `${keyOf(plan)} is missing ${requiredGrams}g pricing.`);
-      for (const meals of [1, 2, 3]) {
+      for (const meals of [1, 2, 3, 4, 5]) {
         const option = row && asArray(row.mealsOptions).find((item) => Number(item.mealsPerDay || item.meals) === meals);
         if (!option || !Number.isFinite(Number(option.priceHalala))) addFinding("Business Logic", "high", "Subscription plans contract", `${keyOf(plan)} ${requiredGrams}g is missing ${meals}-meal priceHalala.`);
       }

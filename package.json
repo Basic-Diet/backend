@@ -34,6 +34,7 @@
     "seed:subscription-plans": "node scripts/seed-subscription-plans.js",
     "seed:one-time-menu": "node scripts/seed-one-time-menu.js",
     "bootstrap:data": "node scripts/seed-catalog.js && ALLOW_ACCOUNT_BOOTSTRAP=true node scripts/create_default_accounts.js",
+    "bootstrap:data:sync": "BOOTSTRAP_SYNC=true node scripts/seed-catalog.js && ALLOW_ACCOUNT_BOOTSTRAP=true node scripts/create_default_accounts.js",
     "ensure:pickup-main": "node scripts/ensure-default-pickup-location.js",
     "audit:pickup-addresses": "node scripts/audit-pickup-address-serialization.js",
     "migrate:builder-to-menu": "node scripts/migrate-builder-to-menu.js",
@@ -60,7 +61,7 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "cloudinary": "^2.9.0",
+    "cloudinary": "^2.10.0",
     "cors": "^2.8.5",
     "date-fns": "^3.6.0",
     "date-fns-tz": "^3.1.3",

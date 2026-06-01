@@ -66,6 +66,7 @@ dist/
 *.log
 logs/
 scripts/logs/
+scripts/cloudinary-onboarding.js
 tmp/
 graphify-out/
 graph.dot

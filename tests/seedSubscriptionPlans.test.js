@@ -48,16 +48,17 @@ for (const plan of subscriptionPlanRows) {
   assert.deepStrictEqual(plan.gramsOptions.map((option) => option.grams), [100, 150, 200]);
 
   for (const gramsOption of plan.gramsOptions) {
-    assert.strictEqual(gramsOption.mealsOptions.length, 3, `${plan.key}/${gramsOption.grams}g should have 3 meal options`);
-    assert.deepStrictEqual(gramsOption.mealsOptions.map((option) => option.mealsPerDay), [1, 2, 3]);
+    assert.strictEqual(gramsOption.mealsOptions.length, 5, `${plan.key}/${gramsOption.grams}g should have 5 meal options`);
+    assert.deepStrictEqual(gramsOption.mealsOptions.map((option) => option.mealsPerDay), [1, 2, 3, 4, 5]);
   }
 }
 
-assertPrice(7, 100, 1, 11500);
-assertPrice(7, 200, 3, 52500);
-assertPrice(26, 200, 2, 118400);
-assertPrice(30, 150, 3, 161900);
-assertPrice(30, 200, 3, 189900);
+assertPrice(7, 100, 1, 13800);
+assertPrice(7, 200, 5, 105000);
+assertPrice(26, 150, 4, 230900);
+assertPrice(26, 200, 2, 142100);
+assertPrice(30, 150, 3, 194300);
+assertPrice(30, 200, 5, 379800);
 
 const serializedPlans = subscriptionPlanRows.map((plan) => resolvePlanCatalogEntry(withId(plan), "en"));
 assert.strictEqual(serializedPlans.length, 3);
@@ -65,8 +66,8 @@ for (const plan of serializedPlans) {
   assert.strictEqual(plan.gramsOptions.length, 3);
   assert.strictEqual(plan.weightOptions.length, 3);
   for (const gramsOption of plan.weightOptions) {
-    assert.strictEqual(gramsOption.mealsOptions.length, 3);
-    assert.strictEqual(gramsOption.mealOptions.length, 3);
+    assert.strictEqual(gramsOption.mealsOptions.length, 5);
+    assert.strictEqual(gramsOption.mealOptions.length, 5);
   }
 }
 

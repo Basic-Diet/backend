@@ -321,8 +321,8 @@ Each plan contains:
 - `gramsOptions[]`
   - `grams`: 100 / 150 / 200
   - `mealsOptions[]`
-    - `mealsPerDay`: 1 / 2 / 3
-    - `priceHalala`
+    - `mealsPerDay`: 1 / 2 / 3 / 4 / 5
+    - `priceHalala` (Total nested price points: 45)
 
 Important:
 Flutter must not treat each grams/meals combination as a separate plan card.
@@ -331,6 +331,8 @@ Plan duration -> grams -> meals per day -> price.
 
 Prices are stored in halala.
 Display SAR by dividing `priceHalala` by 100.
+
+Duration-specific subscription addon prices are intentionally not persisted in the `Plan` seed. Snack, salad, and juice are subscription addons whose prices vary by duration and should be managed from the dashboard once the addon schema/service contract is finalized. Delivery is not a subscription addon; it belongs to delivery/shipping/checkout settings.
 
 ## M. Checkout and pickup behavior
 

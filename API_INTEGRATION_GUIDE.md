@@ -286,7 +286,7 @@ Address book, preferences, allergies, and goals are not currently implemented as
 
 | الحقل | النوع | المعنى |
 |-------|-------|--------|
-| `slotIndex` | Number | تتابع الوجبة داخل اليوم `(1, 2, 3...)` |
+| `slotIndex` | Number | تتابع الوجبة داخل اليوم `(1, 2, 3, 4, 5...)` |
 | `slotKey` | String | معرف نصي فريد للـ slot |
 | `status` | String | `empty` / `partial` / `complete` |
 | `proteinId` | String | معرف البروتين المختار |

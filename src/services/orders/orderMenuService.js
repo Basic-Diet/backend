@@ -4,13 +4,18 @@ const BuilderProtein = require("../../models/BuilderProtein");
 const SaladIngredient = require("../../models/SaladIngredient");
 const Sandwich = require("../../models/Sandwich");
 const Setting = require("../../models/Setting");
-const { SALAD_SELECTION_GROUPS, SYSTEM_CURRENCY } = require("../../config/mealPlannerContract");
+const {
+  CUSTOMER_VISIBLE_CARB_KEYS,
+  SALAD_SELECTION_GROUPS,
+  SYSTEM_CURRENCY,
+} = require("../../config/mealPlannerContract");
 const { pickLang } = require("../../utils/i18n");
 const { getRestaurantHours } = require("../restaurantHoursService");
 const {
   getPublishedMenu,
   hasPublishedMenuCatalog,
 } = require("./menuCatalogService");
+const CUSTOMER_VISIBLE_CARB_KEY_SET = new Set(CUSTOMER_VISIBLE_CARB_KEYS);
 
 function localizeName(value, lang) {
   return pickLang(value, lang) || "";
@@ -114,7 +119,7 @@ async function getOneTimeOrderMenu({ lang = "en", fulfillmentMethod } = {}) {
         currency: protein.currency || SYSTEM_CURRENCY,
         nutrition: protein.nutrition || {},
       })),
-      carbs: carbs.map((carb) => toCatalogItem(carb, lang, {
+      carbs: carbs.filter((carb) => CUSTOMER_VISIBLE_CARB_KEY_SET.has(carb.key)).map((carb) => toCatalogItem(carb, lang, {
         displayCategoryKey: carb.displayCategoryKey,
         nutrition: carb.nutrition || {},
       })),
@@ -134,7 +139,7 @@ async function getOneTimeOrderMenu({ lang = "en", fulfillmentMethod } = {}) {
         calories: Number(ingredient.calories || 0),
         maxQuantity: ingredient.maxQuantity || null,
       })),
-      groups: SALAD_SELECTION_GROUPS.map((group) => ({
+      groups: SALAD_SELECTION_GROUPS.filter((group) => group.source !== "option").map((group) => ({
         key: group.key,
         name: localizeName(group.name, lang),
         minSelect: group.minSelect,

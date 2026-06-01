@@ -12,9 +12,13 @@ The correct hierarchy is:
 
 - 3 top-level plans: 7 days, 26 days, and 30 days.
 - Each plan has 3 gram options: 100g, 150g, and 200g.
-- Each gram option has 3 meal options: 1 meal/day, 2 meals/day, and 3 meals/day.
+- Each gram option has 5 meal options: 1, 2, 3, 4, 5 meals/day. (Total nested price points: 45)
 
 Prices are stored in halala. Frontend clients should display SAR by dividing halala values by `100`.
+
+Duration-specific subscription addon prices are intentionally not persisted in the `Plan` seed. Snack, salad, and juice are subscription addons whose prices vary by duration and should be managed from the dashboard once the addon schema/service contract is finalized. Delivery is not a subscription addon; it belongs to delivery/shipping/checkout settings.
+
+`npm run bootstrap:data` is additive by default. It creates missing catalog rows, relations, plans, settings, pickup locations, and addons without overwriting dashboard-managed values. Use `npm run bootstrap:data:sync` only for an intentional canonical sync. Legacy flat-plan deactivation and menu publication also run only in explicit sync mode.
 
 Seeded top-level plans are identified by stable duration keys:
 
