@@ -8,6 +8,8 @@ const CatalogItem = require("../../src/models/CatalogItem");
 const MenuOption = require("../../src/models/MenuOption");
 const MenuProduct = require("../../src/models/MenuProduct");
 
+const SAMPLE_VERIFY_KEYS = Object.freeze(["white_rice", "alfredo_pasta", "chicken", "beef_steak"]);
+
 function parseArgs(argv) {
   return {
     apply: argv.includes("--apply"),
@@ -118,9 +120,146 @@ function buildReport({ catalogItems, products, options }) {
   };
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
+function missingCatalogItemIdFilter(id) {
+  return {
+    _id: id,
+    $or: [
+      { catalogItemId: null },
+      { catalogItemId: { $exists: false } },
+    ],
+  };
+}
+
+async function loadCatalogLinkInputs() {
+  const [catalogItems, products, options] = await Promise.all([
+    CatalogItem.find({}).lean(),
+    MenuProduct.find({}).lean(),
+    MenuOption.find({}).lean(),
+  ]);
+  return { catalogItems, products, options };
+}
+
+async function countUsageForCatalogIds(ids) {
+  if (!ids.length) return {};
+  const objectIds = ids.map((id) => new mongoose.Types.ObjectId(String(id)));
+  const [productCounts, optionCounts] = await Promise.all([
+    MenuProduct.aggregate([
+      { $match: { catalogItemId: { $in: objectIds } } },
+      { $group: { _id: "$catalogItemId", count: { $sum: 1 } } },
+    ]),
+    MenuOption.aggregate([
+      { $match: { catalogItemId: { $in: objectIds } } },
+      { $group: { _id: "$catalogItemId", count: { $sum: 1 } } },
+    ]),
+  ]);
+  const counts = {};
+  for (const id of ids) {
+    counts[String(id)] = { linkedProductsCount: 0, linkedOptionsCount: 0, usageCount: 0 };
+  }
+  for (const row of productCounts) {
+    const key = String(row._id);
+    counts[key] = { ...(counts[key] || {}), linkedProductsCount: row.count };
+  }
+  for (const row of optionCounts) {
+    const key = String(row._id);
+    counts[key] = { ...(counts[key] || {}), linkedOptionsCount: row.count };
+  }
+  for (const row of Object.values(counts)) {
+    row.linkedProductsCount = Number(row.linkedProductsCount || 0);
+    row.linkedOptionsCount = Number(row.linkedOptionsCount || 0);
+    row.usageCount = row.linkedProductsCount + row.linkedOptionsCount;
+  }
+  return counts;
+}
+
+async function buildSampleVerification(keys = SAMPLE_VERIFY_KEYS) {
+  const samples = [];
+  for (const key of keys) {
+    const [catalogItem, product, option] = await Promise.all([
+      CatalogItem.findOne({ key }).select("_id key").lean(),
+      MenuProduct.findOne({ key }).select("_id key catalogItemId").lean(),
+      MenuOption.findOne({ key }).select("_id key groupId catalogItemId").lean(),
+    ]);
+    const countByCatalogId = catalogItem ? await countUsageForCatalogIds([catalogItem._id]) : {};
+    samples.push({
+      key,
+      catalogItemId: catalogItem ? String(catalogItem._id) : null,
+      menuProductCatalogItemId: product && product.catalogItemId ? String(product.catalogItemId) : null,
+      menuOptionCatalogItemId: option && option.catalogItemId ? String(option.catalogItemId) : null,
+      productMatchesCatalog: Boolean(product && catalogItem && product.catalogItemId && String(product.catalogItemId) === String(catalogItem._id)),
+      optionMatchesCatalog: Boolean(option && catalogItem && option.catalogItemId && String(option.catalogItemId) === String(catalogItem._id)),
+      counts: catalogItem ? countByCatalogId[String(catalogItem._id)] : { linkedProductsCount: 0, linkedOptionsCount: 0, usageCount: 0 },
+    });
+  }
+  return samples;
+}
+
+async function verifyReportLinks(report) {
+  const [productRows, optionRows] = await Promise.all([
+    report.proposedProductLinks.length
+      ? MenuProduct.find({ _id: { $in: report.proposedProductLinks.map((link) => link.menuProductId) } }).select("_id catalogItemId").lean()
+      : [],
+    report.proposedOptionLinks.length
+      ? MenuOption.find({ _id: { $in: report.proposedOptionLinks.map((link) => link.menuOptionId) } }).select("_id catalogItemId").lean()
+      : [],
+  ]);
+  const productsById = new Map(productRows.map((row) => [String(row._id), row]));
+  const optionsById = new Map(optionRows.map((row) => [String(row._id), row]));
+  const linkFailures = [];
+
+  for (const link of report.proposedProductLinks) {
+    const row = productsById.get(link.menuProductId);
+    if (!row || String(row.catalogItemId || "") !== String(link.newValue)) {
+      linkFailures.push({ sourceModel: "MenuProduct", sourceId: link.menuProductId, key: link.key, expectedCatalogItemId: link.newValue });
+    }
+  }
+  for (const link of report.proposedOptionLinks) {
+    const row = optionsById.get(link.menuOptionId);
+    if (!row || String(row.catalogItemId || "") !== String(link.newValue)) {
+      linkFailures.push({ sourceModel: "MenuOption", sourceId: link.menuOptionId, key: link.key, expectedCatalogItemId: link.newValue });
+    }
+  }
+
+  const catalogIds = [...new Set([
+    ...report.proposedProductLinks.map((link) => link.newValue),
+    ...report.proposedOptionLinks.map((link) => link.newValue),
+  ])];
+  return {
+    ok: linkFailures.length === 0,
+    checkedProductLinks: report.proposedProductLinks.length,
+    checkedOptionLinks: report.proposedOptionLinks.length,
+    linkFailures,
+    countsByCatalogItemId: await countUsageForCatalogIds(catalogIds),
+    sampleKeys: await buildSampleVerification(),
+  };
+}
+
+async function applyReport(report) {
+  const productOps = report.proposedProductLinks.map((link) => ({
+    updateOne: {
+      filter: missingCatalogItemIdFilter(link.menuProductId),
+      update: { $set: { catalogItemId: link.newValue } },
+    },
+  }));
+  const optionOps = report.proposedOptionLinks.map((link) => ({
+    updateOne: {
+      filter: missingCatalogItemIdFilter(link.menuOptionId),
+      update: { $set: { catalogItemId: link.newValue } },
+    },
+  }));
+
+  const [productResult, optionResult] = await Promise.all([
+    productOps.length ? MenuProduct.bulkWrite(productOps) : Promise.resolve({ modifiedCount: 0 }),
+    optionOps.length ? MenuOption.bulkWrite(optionOps) : Promise.resolve({ modifiedCount: 0 }),
+  ]);
+  return {
+    productLinksModified: productResult.modifiedCount || 0,
+    optionLinksModified: optionResult.modifiedCount || 0,
+  };
+}
+
+async function runCatalogLinkMigration({ argv = process.argv.slice(2), mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI } = {}) {
+  const args = parseArgs(argv);
   if (!mongoUri) {
     throw new Error("MONGO_URI or MONGODB_URI is required");
   }
@@ -133,49 +272,45 @@ async function main() {
 
   await mongoose.connect(mongoUri);
   try {
-    const [catalogItems, products, options] = await Promise.all([
-      CatalogItem.find({}).lean(),
-      MenuProduct.find({}).lean(),
-      MenuOption.find({}).lean(),
-    ]);
-    const report = buildReport({ catalogItems, products, options });
+    const report = buildReport(await loadCatalogLinkInputs());
 
     if (!args.apply) {
-      console.log(JSON.stringify(report, null, 2));
-      return;
+      return report;
     }
 
-    const productOps = report.proposedProductLinks.map((link) => ({
-      updateOne: {
-        filter: { _id: link.menuProductId, catalogItemId: { $in: [null, undefined] } },
-        update: { $set: { catalogItemId: link.newValue } },
-      },
-    }));
-    const optionOps = report.proposedOptionLinks.map((link) => ({
-      updateOne: {
-        filter: { _id: link.menuOptionId, catalogItemId: { $in: [null, undefined] } },
-        update: { $set: { catalogItemId: link.newValue } },
-      },
-    }));
-
-    const [productResult, optionResult] = await Promise.all([
-      productOps.length ? MenuProduct.bulkWrite(productOps) : Promise.resolve({ modifiedCount: 0 }),
-      optionOps.length ? MenuOption.bulkWrite(optionOps) : Promise.resolve({ modifiedCount: 0 }),
-    ]);
-    console.log(JSON.stringify({
+    const applied = await applyReport(report);
+    return {
       ...report,
       mode: "apply",
-      applied: {
-        productLinksModified: productResult.modifiedCount || 0,
-        optionLinksModified: optionResult.modifiedCount || 0,
-      },
-    }, null, 2));
+      applied,
+      verification: await verifyReportLinks(report),
+    };
   } finally {
     await mongoose.connection.close();
   }
 }
 
-main().catch((err) => {
-  console.error(err.message);
-  process.exit(1);
-});
+async function main() {
+  const report = await runCatalogLinkMigration({ argv: process.argv.slice(2) });
+  console.log(JSON.stringify(report, null, 2));
+}
+
+module.exports = {
+  applyReport,
+  buildReport,
+  buildSampleVerification,
+  countUsageForCatalogIds,
+  isProductionUri,
+  loadCatalogLinkInputs,
+  parseArgs,
+  runCatalogLinkMigration,
+  stableKey,
+  verifyReportLinks,
+};
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
+}

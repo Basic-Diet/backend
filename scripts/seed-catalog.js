@@ -15,11 +15,87 @@ const Setting = require("../src/models/Setting");
 const BuilderCarb = require("../src/models/BuilderCarb");
 const BuilderCategory = require("../src/models/BuilderCategory");
 const BuilderProtein = require("../src/models/BuilderProtein");
+const CatalogItem = require("../src/models/CatalogItem");
 const SaladIngredient = require("../src/models/SaladIngredient");
 const Sandwich = require("../src/models/Sandwich");
 const { publishMenu } = require("../src/services/orders/menuCatalogService");
 const { pickupLocations, settings } = require("./fixtures/subscription-demo-data");
 const { seedSubscriptionPlans } = require("./seed-subscription-plans");
+const { CUSTOMER_VISIBLE_CARB_KEYS, STANDARD_MEAL_PROTEIN_KEYS } = require("../src/config/mealPlannerContract");
+
+const canonicalCatalogItems = [
+  // Carbs
+  { key: "white_rice", itemKind: "carb", nutrition: { calories: 190 } },
+  { key: "turmeric_rice", itemKind: "carb", nutrition: { calories: 200 } },
+  { key: "alfredo_pasta", itemKind: "carb", nutrition: { calories: 300 } },
+  { key: "red_sauce_pasta", itemKind: "carb", nutrition: { calories: 180 } },
+  { key: "roasted_potato", itemKind: "carb", nutrition: { calories: 120 } },
+  { key: "sweet_potato", itemKind: "carb", nutrition: { calories: 120 } },
+  { key: "grilled_mixed_vegetables", itemKind: "carb", nutrition: { calories: 87 } },
+  // Standard Proteins
+  { key: "chicken", itemKind: "protein" },
+  { key: "beef", itemKind: "protein" },
+  { key: "fish", itemKind: "protein" },
+  { key: "eggs", itemKind: "protein" },
+  { key: "boiled_eggs", itemKind: "protein", nutrition: { calories: 155 } },
+  { key: "tuna", itemKind: "protein", nutrition: { calories: 116 } },
+  // Variant Proteins
+  { key: "chicken_fajita", itemKind: "protein", nutrition: { calories: 200 } },
+  { key: "spicy_chicken", itemKind: "protein", nutrition: { calories: 220 } },
+  { key: "italian_spiced_chicken", itemKind: "protein", nutrition: { calories: 200 } },
+  { key: "chicken_tikka", itemKind: "protein", nutrition: { calories: 200 } },
+  { key: "asian_chicken", itemKind: "protein", nutrition: { calories: 220 } },
+  { key: "chicken_strips", itemKind: "protein", nutrition: { calories: 250 } },
+  { key: "grilled_chicken", itemKind: "protein", nutrition: { calories: 175 } },
+  { key: "mexican_chicken", itemKind: "protein", nutrition: { calories: 210 } },
+  { key: "meatballs", itemKind: "protein", nutrition: { calories: 280 } },
+  { key: "beef_stroganoff", itemKind: "protein", nutrition: { calories: 250 } },
+  { key: "fish_fillet", itemKind: "protein", nutrition: { calories: 130 } },
+  // Premium Proteins
+  { key: "beef_steak", itemKind: "protein", nutrition: { calories: 270 } },
+  { key: "shrimp", itemKind: "protein", nutrition: { calories: 380 } },
+  { key: "salmon", itemKind: "protein", nutrition: { calories: 210 } },
+];
+
+const menuOptionCatalogItemKeyByOptionKey = {
+  white_rice: "white_rice",
+  turmeric_rice: "turmeric_rice",
+  alfredo_pasta: "alfredo_pasta",
+  red_sauce_pasta: "red_sauce_pasta",
+  roasted_potato: "roasted_potato",
+  sweet_potato: "sweet_potato",
+  grilled_mixed_vegetables: "grilled_mixed_vegetables",
+  chicken: "chicken",
+  beef: "beef",
+  fish: "fish",
+  eggs: "eggs",
+  boiled_eggs: "boiled_eggs",
+  tuna: "tuna",
+  chicken_fajita: "chicken_fajita",
+  spicy_chicken: "spicy_chicken",
+  italian_spiced_chicken: "italian_spiced_chicken",
+  chicken_tikka: "chicken_tikka",
+  asian_chicken: "asian_chicken",
+  chicken_strips: "chicken_strips",
+  grilled_chicken: "grilled_chicken",
+  mexican_chicken: "mexican_chicken",
+  meatballs: "meatballs",
+  beef_stroganoff: "beef_stroganoff",
+  fish_fillet: "fish_fillet",
+  beef_steak: "beef_steak",
+  shrimp: "shrimp",
+  salmon: "salmon",
+};
+
+const menuProductCatalogItemKeyByProductKey = {
+  white_rice: "white_rice",
+  turmeric_rice: "turmeric_rice",
+  alfredo_pasta: "alfredo_pasta",
+  red_sauce_pasta: "red_sauce_pasta",
+  roasted_potato: "roasted_potato",
+  sweet_potato: "sweet_potato",
+  grilled_mixed_vegetables: "grilled_mixed_vegetables",
+};
 
 const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
 const now = new Date();
@@ -49,7 +125,7 @@ async function upsertByMode(Model, query, createPayload, { label, sync = false, 
     stats.skipped += 1;
     if (!sync) return existing;
 
-    const { _id, ...syncPayload } = createPayload;
+    const { _id, catalogItemId, ...syncPayload } = createPayload; // NEVER update catalogItemId on existing rows!
     await Model.updateOne(query, { $set: syncPayload }, { runValidators: true });
     stats.updated += 1;
     return Model.findOne(query);
@@ -271,12 +347,7 @@ const premiumLargeSaladProteinRelations = subscriptionPremiumLargeSaladProteinKe
 }));
 
 // Canonical basic_meal protein allowlist — must match STANDARD_MEAL_PROTEIN_KEYS in mealPlannerContract.js
-const standardProteinOptionKeys = [
-  "chicken",
-  "beef",
-  "fish",
-  "eggs",
-];
+const standardProteinOptionKeys = [...STANDARD_MEAL_PROTEIN_KEYS];
 
 const oneTimeMealProteinRelations = standardProteinOptionKeys.map((key, index) => ({
   key,
@@ -460,6 +531,7 @@ const productGroupAllowedOptionKeys = {
     ...customSaladAllowedOptions,
   },
   basic_meal: {
+    carbs: [...CUSTOMER_VISIBLE_CARB_KEYS],
     proteins: standardProteinOptionKeys,
   },
   premium_large_salad: {
@@ -693,6 +765,7 @@ const productRows = [
       ["proteins", 1, 1, true],
       ["cheese_nuts", 0, 2, false],
       ["sauces", 1, 1, true],
+      ["extra_protein_50g", 0, 1, false],
     ],
   },
   {
@@ -726,7 +799,6 @@ const productRows = [
       ["proteins", 1, 1, true],
       ["cheese_nuts", 0, 2, false],
       ["sauces", 1, 1, true],
-      ["extra_protein_50g", 0, 1, false],
     ],
   },
   {
@@ -848,7 +920,7 @@ async function seedCategories({ sync = false } = {}) {
   return categoryMap;
 }
 
-async function seedOptionGroupsAndOptions({ sync = false } = {}) {
+async function seedOptionGroupsAndOptions({ catalogItemMap = new Map(), sync = false } = {}) {
   const groupMap = new Map();
   const optionMap = new Map();
 
@@ -869,6 +941,8 @@ async function seedOptionGroupsAndOptions({ sync = false } = {}) {
 
     for (let optionIndex = 0; optionIndex < groupDef.options.length; optionIndex += 1) {
       const optionDef = groupDef.options[optionIndex];
+      const catalogItemKey = menuOptionCatalogItemKeyByOptionKey[optionDef.key];
+      const catalogItem = catalogItemKey ? catalogItemMap.get(catalogItemKey) : null;
       const option = await upsertByMode(
         MenuOption,
         { groupId: group._id, key: optionDef.key },
@@ -876,6 +950,7 @@ async function seedOptionGroupsAndOptions({ sync = false } = {}) {
           groupId: group._id,
           key: optionDef.key,
           name: optionDef.name,
+          ...(catalogItem ? { catalogItemId: catalogItem._id } : {}),
           ...(hasOwn(optionDef, "imageUrl") ? { imageUrl: optionDef.imageUrl } : {}),
           availableFor: optionDef.availableFor || ["one_time", "subscription"],
           availableForSubscription: (optionDef.availableFor || ["one_time", "subscription"]).includes("subscription"),
@@ -1007,7 +1082,7 @@ async function seedBuilderCompatibilityMirrors({ optionMap, builderCategoryMap, 
   }
 }
 
-async function seedProducts({ categoryMap, groupMap, optionMap, sync = false }) {
+async function seedProducts({ catalogItemMap = new Map(), categoryMap, groupMap, optionMap, sync = false }) {
   const productMap = new Map();
 
   for (let productIndex = 0; productIndex < productRows.length; productIndex += 1) {
@@ -1015,6 +1090,8 @@ async function seedProducts({ categoryMap, groupMap, optionMap, sync = false }) 
     const category = categoryMap.get(row.category);
     if (!category) throw new Error(`Missing category ${row.category} for ${row.key}`);
 
+    const catalogItemKey = menuProductCatalogItemKeyByProductKey[row.key];
+    const catalogItem = catalogItemKey ? catalogItemMap.get(catalogItemKey) : null;
     const product = await upsertByMode(
       MenuProduct,
       { key: row.key },
@@ -1022,6 +1099,7 @@ async function seedProducts({ categoryMap, groupMap, optionMap, sync = false }) 
         categoryId: category._id,
         key: row.key,
         name: row.name,
+        ...(catalogItem ? { catalogItemId: catalogItem._id } : {}),
         ...(row.description ? { description: row.description } : {}),
         ...(hasOwn(row, "imageUrl") ? { imageUrl: row.imageUrl } : {}),
         itemType: row.itemType,
@@ -1140,7 +1218,7 @@ async function seedSandwichCompatibility(productMap, { sync = false } = {}) {
     "mexican_chicken_cold_sandwich",
     "grilled_chicken_cold_sandwich",
   ];
-  const sandwichProducts = productRows.filter((row) => ["cold_sandwich", "sourdough"].includes(row.itemType));
+  const sandwichProducts = productRows.filter((row) => subscriptionSandwichKeys.includes(row.key));
   for (let index = 0; index < sandwichProducts.length; index += 1) {
     const row = sandwichProducts[index];
     const product = productMap.get(row.key);
@@ -1276,40 +1354,68 @@ async function seedSettings({ sync = false } = {}) {
   }
 }
 
-async function seed() {
-  if (!uri) throw new Error("MONGO_URI or MONGODB_URI is required");
-  const args = parseArgs();
+async function seedCatalogItems() {
+  const catalogItemMap = new Map();
+  const stats = getStats("Catalog Items");
 
-  await mongoose.connect(uri);
-  console.log("Connected to MongoDB for canonical catalog seeding.");
-  console.log(`Bootstrap mode: ${args.sync ? "sync" : "create-missing-only"}`);
+  for (const row of canonicalCatalogItems) {
+    const existing = await CatalogItem.findOne({ key: row.key });
+    if (existing) {
+      stats.skipped += 1;
+      catalogItemMap.set(existing.key, existing);
+      continue;
+    }
 
-  if (args.onlySubscriptionPlans) {
+    const carbRow = carbRows.find((candidate) => candidate.key === row.key);
+    const proteinRow = proteinRowsByKey.get(row.key);
+    const doc = await CatalogItem.create({
+      key: row.key,
+      nameI18n: carbRow?.name || proteinRow?.name || name(row.key, row.key),
+      itemKind: row.itemKind,
+      nutrition: row.nutrition || {},
+      isActive: true,
+      isAvailable: true,
+    });
+
+    stats.created += 1;
+    catalogItemMap.set(doc.key, doc);
+  }
+
+  return catalogItemMap;
+}
+
+async function seedCatalog({ sync = false, reset = false, onlySubscriptionPlans = false } = {}) {
+  const runSync = sync === true;
+  const runReset = reset === true;
+
+  console.log(`Bootstrap mode: ${runSync ? "sync" : "create-missing-only"}`);
+
+  if (onlySubscriptionPlans) {
     console.log("Only subscription plans flag detected. Menu/catalog seed will be skipped.");
-    await seedSubscriptionPlans({ sync: args.sync, cleanupFlatPlans: args.sync });
+    await seedSubscriptionPlans({ sync: runSync, cleanupFlatPlans: runSync });
     console.log("Subscription plans-only seed complete.");
-    await mongoose.disconnect();
     return;
   }
 
-  if (args.reset) {
-    console.warn("Resetting catalog-owned collections because --reset or ALLOW_CATALOG_RESET=true was provided.");
+  if (runReset) {
+    console.warn("Resetting catalog-owned collections because reset flag was provided.");
     await resetCatalogData();
   } else {
     console.log("Reset skipped. Existing rows will be preserved.");
   }
 
-  const builderCategoryMap = await seedBuilderCompatibilityCategories({ sync: args.sync });
-  const categoryMap = await seedCategories({ sync: args.sync });
-  const { groupMap, optionMap } = await seedOptionGroupsAndOptions({ sync: args.sync });
-  await seedBuilderCompatibilityMirrors({ optionMap, builderCategoryMap, sync: args.sync });
-  const productMap = await seedProducts({ categoryMap, groupMap, optionMap, sync: args.sync });
-  await seedSandwichCompatibility(productMap, { sync: args.sync });
-  await seedSubscriptionPlans({ sync: args.sync, cleanupFlatPlans: args.sync });
-  await seedSubscriptionAddons(productMap, { sync: args.sync });
-  await seedSettings({ sync: args.sync });
+  const catalogItemMap = await seedCatalogItems();
+  const builderCategoryMap = await seedBuilderCompatibilityCategories({ sync: runSync });
+  const categoryMap = await seedCategories({ sync: runSync });
+  const { groupMap, optionMap } = await seedOptionGroupsAndOptions({ catalogItemMap, sync: runSync });
+  await seedBuilderCompatibilityMirrors({ optionMap, builderCategoryMap, sync: runSync });
+  const productMap = await seedProducts({ catalogItemMap, categoryMap, groupMap, optionMap, sync: runSync });
+  await seedSandwichCompatibility(productMap, { sync: runSync });
+  await seedSubscriptionPlans({ sync: runSync, cleanupFlatPlans: runSync });
+  await seedSubscriptionAddons(productMap, { sync: runSync });
+  await seedSettings({ sync: runSync });
 
-  if (args.sync) {
+  if (runSync) {
     await publishMenu({ notes: "Explicit canonical catalog sync" });
     console.log("Menu published because explicit sync mode was enabled.");
   } else {
@@ -1317,16 +1423,45 @@ async function seed() {
   }
 
   printBootstrapStats();
-  console.log(args.reset ? "Reset performed." : "No reset performed.");
-  console.log(args.sync ? "Explicit sync updates were allowed." : "No destructive operations performed.");
+  console.log(runReset ? "Reset performed." : "No reset performed.");
+  console.log(runSync ? "Explicit sync updates were allowed." : "No destructive operations performed.");
   console.log("Canonical catalog seed complete.");
-  await mongoose.disconnect();
 }
 
-seed().catch(async (err) => {
-  console.error(err);
-  if (mongoose.connection.readyState !== 0) {
-    await mongoose.disconnect();
+module.exports = {
+  seedCatalog,
+  seedSubscriptionPlans,
+  seedCategories,
+  seedOptionGroupsAndOptions,
+  seedProducts,
+  seedSandwichCompatibility,
+};
+
+if (require.main === module) {
+  if (!uri) {
+    console.error("MONGO_URI or MONGODB_URI is required");
+    process.exit(1);
   }
-  process.exit(1);
-});
+
+  const args = parseArgs();
+  const runSync = args.sync && isTruthy(process.env.BOOTSTRAP_SYNC);
+  const runReset = args.reset || (runSync && isTruthy(process.env.ALLOW_CATALOG_RESET));
+
+  mongoose.connect(uri)
+    .then(() => {
+      console.log("Connected to MongoDB for canonical catalog seeding.");
+      return seedCatalog({
+        sync: runSync,
+        reset: runReset,
+        onlySubscriptionPlans: args.onlySubscriptionPlans,
+      });
+    })
+    .then(() => mongoose.disconnect())
+    .catch(async (err) => {
+      console.error(err);
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.disconnect();
+      }
+      process.exit(1);
+    });
+}

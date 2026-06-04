@@ -572,6 +572,9 @@ async function seedViaDashboard(api) {
       assert(standardChicken, "standard chicken appears in proteins");
       assert.strictEqual(standardChicken.selectionType, "standard_meal");
       assert(sandwich, "menu sandwich product appears in builderCatalog.sandwiches");
+      assert.strictEqual(sandwich.priceHalala, 1300, "builderCatalog sandwich uses canonical menu price");
+      assert.strictEqual(sandwich.calories, 220, "builderCatalog sandwich includes compatibility calories");
+      assert.strictEqual(sandwich.proteinFamilyKey, "chicken", "builderCatalog sandwich includes compatibility protein family");
       assert(catalog.premiumLargeSalad, "premiumLargeSalad is present");
       assert(catalog.premiumLargeSalad.carbId, "premiumLargeSalad keeps carbId field");
       assert((catalog.premiumLargeSalad.ingredients || []).some((item) => item.groupKey === "protein" && item.id === String(shrimp._id)), "premiumLargeSalad includes protein menu options");
@@ -647,6 +650,9 @@ async function seedViaDashboard(api) {
       assert.strictEqual(v2Sandwich.selectionType, "sandwich");
       assert(v2Sandwich.key, "sandwich V2 product includes key");
       assert(v2Sandwich.ui && typeof v2Sandwich.ui.cardVariant === "string", "sandwich V2 product has sanitized ui");
+      assert.strictEqual(v2Sandwich.priceHalala, 1300, "sandwich V2 product uses canonical menu price");
+      assert.strictEqual(v2Sandwich.calories, 220, "sandwich V2 product includes compatibility calories");
+      assert.strictEqual(v2Sandwich.proteinFamilyKey, "chicken", "sandwich V2 product includes compatibility protein family");
 
       const saladProduct = saladSection.products && saladSection.products[0];
       assert(saladProduct, "premium large salad V2 exposes product");

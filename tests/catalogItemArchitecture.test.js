@@ -12,6 +12,7 @@ const MenuOptionGroup = require("../src/models/MenuOptionGroup");
 const MenuProduct = require("../src/models/MenuProduct");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
+const catalogItemService = require("../src/services/catalog/catalogItemService");
 const menuCatalogService = require("../src/services/orders/menuCatalogService");
 const { priceMenuCart } = require("../src/services/orders/menuPricingService");
 
@@ -80,14 +81,17 @@ async function createPublishedProduct(category, key, catalogItemId, overrides = 
 }
 
 async function createBuilderOption(product, catalogItemId, key = "white_rice", groupKey = "carbs") {
-  const group = await MenuOptionGroup.create({
-    key: groupKey,
-    name: { en: groupKey, ar: groupKey },
-    isActive: true,
-    isVisible: true,
-    isAvailable: true,
-    publishedAt: new Date(),
-  });
+  let group = await MenuOptionGroup.findOne({ key: groupKey });
+  if (!group) {
+    group = await MenuOptionGroup.create({
+      key: groupKey,
+      name: { en: groupKey, ar: groupKey },
+      isActive: true,
+      isVisible: true,
+      isAvailable: true,
+      publishedAt: new Date(),
+    });
+  }
   const option = await MenuOption.create({
     groupId: group._id,
     catalogItemId: catalogItemId || null,
@@ -153,6 +157,26 @@ async function run() {
       const { option } = await createBuilderOption(product, null, "legacy_option");
       assert.strictEqual(product.catalogItemId, null);
       assert.strictEqual(option.catalogItemId, null);
+    });
+
+    await test("Dashboard CatalogItem counts use direct product and option links", async () => {
+      const category = await createPublishedCategory("direct_usage_counts");
+      const linkedItem = await CatalogItem.create({ key: "direct_count_item", nameI18n: { en: "Direct Count Item", ar: "" }, itemKind: "product" });
+      const legacyItem = await CatalogItem.create({ key: "legacy_count_item", nameI18n: { en: "Legacy Count Item", ar: "" }, itemKind: "product" });
+      const linkedProduct = await createPublishedProduct(category, "direct_count_product", linkedItem._id);
+      await createPublishedProduct(category, "legacy_count_product", null);
+      await createBuilderOption(linkedProduct, linkedItem._id, "direct_count_option", "direct_count_options");
+      await createBuilderOption(linkedProduct, null, "legacy_count_option", "legacy_count_options");
+
+      const linkedCatalogItem = await catalogItemService.getCatalogItem(linkedItem._id);
+      assert.strictEqual(linkedCatalogItem.linkedProductsCount, 1);
+      assert.strictEqual(linkedCatalogItem.linkedOptionsCount, 1);
+      assert.strictEqual(linkedCatalogItem.usageCount, 2);
+
+      const legacyCatalogItem = await catalogItemService.getCatalogItem(legacyItem._id);
+      assert.strictEqual(legacyCatalogItem.linkedProductsCount, 0);
+      assert.strictEqual(legacyCatalogItem.linkedOptionsCount, 0);
+      assert.strictEqual(legacyCatalogItem.usageCount, 0);
     });
 
     await test("Dashboard menu service rejects invalid and switched catalog links", async () => {

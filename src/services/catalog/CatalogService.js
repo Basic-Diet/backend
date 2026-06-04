@@ -4,6 +4,7 @@ const MenuProduct = require("../../models/MenuProduct");
 const MenuCategory = require("../../models/MenuCategory");
 const ProductGroupOption = require("../../models/ProductGroupOption");
 const ProductOptionGroup = require("../../models/ProductOptionGroup");
+const Sandwich = require("../../models/Sandwich");
 const { pickLang } = require("../../utils/i18n");
 const { sanitizeObject } = require("../../utils/encoding");
 const {
@@ -63,15 +64,33 @@ const MENU_SALAD_GROUP_ALIASES = Object.freeze({
   sauces: "sauce",
   proteins: "protein",
 });
+const SUBSCRIPTION_SANDWICH_METADATA_BY_KEY = Object.freeze({
+  turkey_cold_sandwich: { calories: 220, proteinFamilyKey: "other" },
+  boiled_egg_cold_sandwich: { calories: 160, proteinFamilyKey: "eggs" },
+  tuna_cold_sandwich: { calories: 200, proteinFamilyKey: "fish" },
+  scrambled_egg_cold_sandwich: { calories: 150, proteinFamilyKey: "eggs" },
+  classic_halloumi_cold_sandwich: { calories: 200, proteinFamilyKey: "other" },
+  chicken_fajita_cold_sandwich: { calories: 230, proteinFamilyKey: "chicken" },
+  mexican_chicken_cold_sandwich: { calories: 260, proteinFamilyKey: "chicken" },
+  grilled_chicken_cold_sandwich: { calories: 220, proteinFamilyKey: "chicken" },
+});
 
 function localized(value, lang) {
   return pickLang(value, lang) || pickLang(value, "en") || pickLang(value, "ar") || "";
 }
 
 function localizedPair(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return {
+      ar: typeof value.ar === "string" ? value.ar : "",
+      en: typeof value.en === "string" ? value.en : "",
+    };
+  }
+
+  const scalar = typeof value === "string" ? value : "";
   return {
-    ar: pickLang(value, "ar") || "",
-    en: pickLang(value, "en") || "",
+    ar: scalar,
+    en: scalar,
   };
 }
 
@@ -189,7 +208,9 @@ function buildProteinPayload(option, lang, { isPremium }) {
     key: option.key || "",
     displayCategoryKey,
     name: localized(option.name, lang),
+    nameI18n: localizedPair(option.name),
     description: localized(option.description, lang),
+    descriptionI18n: localizedPair(option.description),
     proteinFamilyKey,
     proteinFamilyNameI18n: getProteinFamilyNameI18n(proteinFamilyKey),
     ruleTags: Array.isArray(option.ruleTags) ? option.ruleTags : [],
@@ -208,7 +229,9 @@ function buildCarbPayload(option, lang) {
     key: option.key || "",
     displayCategoryKey: String(option.displayCategoryKey || "standard_carbs").trim() || "standard_carbs",
     name: localized(option.name, lang),
+    nameI18n: localizedPair(option.name),
     description: localized(option.description, lang),
+    descriptionI18n: localizedPair(option.description),
     sortOrder: Number(option.sortOrder || 0),
   };
 }
@@ -505,10 +528,32 @@ function buildV2ProductFromMenuProduct(product, lang, overrides = {}) {
     pricingModel: product.pricingModel || "fixed",
     priceHalala: Number(product.priceHalala || 0),
     currency: product.currency || SYSTEM_CURRENCY,
+    calories: product.calories === undefined || product.calories === null ? undefined : Number(product.calories || 0),
+    proteinFamilyKey: product.proteinFamilyKey || undefined,
     sortOrder: Number(product.sortOrder || 0),
     ui: normalizeProductUiMetadata(product.ui),
     optionGroups: overrides.optionGroups || [],
     ...overrides,
+  });
+}
+
+async function enrichSandwichProductsWithCompatibilityMetadata(products = []) {
+  const ids = (products || []).map((product) => product && product._id).filter(Boolean);
+  if (!ids.length) return products || [];
+
+  const mirrors = await Sandwich.find({ _id: { $in: ids }, isActive: { $ne: false } }).lean();
+  const mirrorById = new Map(mirrors.map((mirror) => [String(mirror._id), mirror]));
+
+  return (products || []).map((product) => {
+    const mirror = mirrorById.get(String(product._id));
+    const fallback = SUBSCRIPTION_SANDWICH_METADATA_BY_KEY[product.key] || {};
+    if (!mirror && !Object.keys(fallback).length) return product;
+
+    return {
+      ...product,
+      calories: mirror?.calories ?? fallback.calories,
+      proteinFamilyKey: mirror?.proteinFamilyKey || fallback.proteinFamilyKey,
+    };
   });
 }
 
@@ -780,7 +825,9 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
     resolvePremiumLargeSaladPricing(),
   ]);
   const sandwichCatalogItemsById = await loadCatalogItemsByIdForDocs(sandwichRows);
-  const sandwiches = filterGloballyAvailable(sandwichRows, sandwichCatalogItemsById);
+  const sandwiches = await enrichSandwichProductsWithCompatibilityMetadata(
+    filterGloballyAvailable(sandwichRows, sandwichCatalogItemsById)
+  );
 
   const proteinOptions = proteinGroupData.options;
   const carbOptions = carbGroupData.options;
@@ -869,7 +916,9 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
       key: protein.key,
       displayCategoryKey: protein.displayCategoryKey,
       name: protein.name,
+      nameI18n: protein.nameI18n,
       description: protein.description,
+      descriptionI18n: protein.descriptionI18n,
       proteinFamilyKey: protein.proteinFamilyKey,
       proteinFamilyNameI18n: protein.proteinFamilyNameI18n,
       ruleTags: protein.ruleTags,
@@ -882,7 +931,9 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
       key: protein.key,
       displayCategoryKey: protein.displayCategoryKey,
       name: protein.name,
+      nameI18n: protein.nameI18n,
       description: protein.description,
+      descriptionI18n: protein.descriptionI18n,
       proteinFamilyKey: protein.proteinFamilyKey,
       proteinFamilyNameI18n: protein.proteinFamilyNameI18n,
       ruleTags: protein.ruleTags,

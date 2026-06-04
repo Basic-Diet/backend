@@ -121,6 +121,8 @@ function normalizePayload(body = {}, existing = null) {
 function serialize(row, counts = {}) {
   if (!row) return null;
   const obj = typeof row.toObject === "function" ? row.toObject() : { ...row };
+  const linkedProductsCount = Number(counts.linkedProductsCount || 0);
+  const linkedOptionsCount = Number(counts.linkedOptionsCount || 0);
   return {
     id: String(obj._id),
     key: obj.key,
@@ -131,9 +133,9 @@ function serialize(row, counts = {}) {
     nutrition: obj.nutrition || {},
     isActive: obj.isActive !== false,
     isAvailable: obj.isAvailable !== false,
-    linkedProductsCount: Number(counts.linkedProductsCount || 0),
-    linkedOptionsCount: Number(counts.linkedOptionsCount || 0),
-    usageCount: Number(counts.usageCount || counts.linkedProductsCount || 0) + Number(counts.linkedOptionsCount || 0),
+    linkedProductsCount,
+    linkedOptionsCount,
+    usageCount: linkedProductsCount + linkedOptionsCount,
     createdAt: obj.createdAt,
     updatedAt: obj.updatedAt,
   };
