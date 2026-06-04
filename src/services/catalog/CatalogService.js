@@ -12,6 +12,7 @@ const {
   CUSTOMER_VISIBLE_CARB_KEYS,
   PREMIUM_LARGE_SALAD_PREMIUM_KEY,
   PREMIUM_LARGE_SALAD_PRESET_KEY,
+  PREMIUM_MEAL_PROTEIN_KEYS,
   PROTEIN_DISPLAY_GROUPS,
   SALAD_SELECTION_GROUPS,
   SYSTEM_CURRENCY,
@@ -43,6 +44,12 @@ const MENU_PROTEIN_GROUP_KEY = "proteins";
 const MENU_CARB_GROUP_KEY = "carbs";
 const MENU_SALAD_EXTRA_PROTEIN_GROUP_KEY = "extra_protein_50g";
 const CUSTOMER_VISIBLE_CARB_KEY_SET = new Set(CUSTOMER_VISIBLE_CARB_KEYS);
+const PREMIUM_MEAL_PROTEIN_KEY_SET = new Set(PREMIUM_MEAL_PROTEIN_KEYS);
+const PREMIUM_MEAL_EXTRA_FEE_HALALA_BY_KEY = Object.freeze({
+  beef_steak: 2000,
+  shrimp: 2000,
+  salmon: 2000,
+});
 const SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEY_SET = new Set(SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS);
 const SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEY_SET = new Set(SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS);
 
@@ -148,14 +155,26 @@ function inferProteinFamilyKey(option) {
   return normalizeProteinFamilyKey(option.displayCategoryKey || option.key);
 }
 
+function isPremiumMealProtein(option) {
+  const key = String(option?.key || option?.premiumKey || "").trim().toLowerCase();
+  return PREMIUM_MEAL_PROTEIN_KEY_SET.has(key);
+}
+
+function resolvePremiumMealExtraFeeHalala(option) {
+  const key = String(option?.key || option?.premiumKey || "").trim().toLowerCase();
+  if (PREMIUM_MEAL_EXTRA_FEE_HALALA_BY_KEY[key] !== undefined) {
+    return PREMIUM_MEAL_EXTRA_FEE_HALALA_BY_KEY[key];
+  }
+  return Number(option?.extraFeeHalala ?? option?.extraPriceHalala ?? 0);
+}
+
 function buildProteinPayload(option, lang, { isPremium }) {
   const proteinFamilyKey = inferProteinFamilyKey(option);
   const displayCategoryKey = normalizeProteinDisplayCategoryKey(option.displayCategoryKey, {
     isPremium,
     proteinFamilyKey,
   });
-  // Use extraFeeHalala (new shared field) or fallback to extraPriceHalala
-  const extraFeeHalala = Number(option.extraFeeHalala ?? option.extraPriceHalala ?? 0);
+  const extraFeeHalala = isPremium ? resolvePremiumMealExtraFeeHalala(option) : 0;
   const premiumKey = String(option.premiumKey || option.key || "").trim() || null;
 
   return {
@@ -756,9 +775,8 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
 
   const normalizedProteins = proteinOptions
     .map((option) => {
-      const resolvedPrice = Number(option.extraFeeHalala ?? option.extraPriceHalala ?? 0);
       return buildProteinPayload(option, lang, { 
-        isPremium: resolvedPrice > 0 
+        isPremium: isPremiumMealProtein(option),
       });
     })
     .sort(sortByCatalogOrder);

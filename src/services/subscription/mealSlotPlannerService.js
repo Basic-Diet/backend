@@ -10,6 +10,7 @@ const Sandwich = require("../../models/Sandwich");
 const { isValidObjectId } = mongoose;
 const {
   LEGACY_MEAL_SELECTION_TYPES,
+  PREMIUM_MEAL_PROTEIN_KEYS,
   PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
   PREMIUM_LARGE_SALAD_PREMIUM_KEY,
   PREMIUM_LARGE_SALAD_PRESET_KEY,
@@ -41,6 +42,12 @@ const DEFAULT_SLOT_KEY_PREFIX = "slot_";
 const MENU_PROTEIN_GROUP_KEY = "proteins";
 const MENU_CARB_GROUP_KEY = "carbs";
 const MENU_SALAD_EXTRA_PROTEIN_GROUP_KEY = "extra_protein_50g";
+const PREMIUM_MEAL_PROTEIN_KEY_SET = new Set(PREMIUM_MEAL_PROTEIN_KEYS);
+const PREMIUM_MEAL_EXTRA_FEE_HALALA_BY_KEY = Object.freeze({
+  beef_steak: 2000,
+  shrimp: 2000,
+  salmon: 2000,
+});
 const SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEY_SET = new Set(SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS);
 const SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEY_SET = new Set(SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS);
 
@@ -112,12 +119,16 @@ async function getMenuGroupId(groupKey, session) {
 }
 
 function mapMenuProteinOption(option) {
-  const isPremium = Number(option.extraPriceHalala || 0) > 0;
+  const proteinKey = String(option.key || option.premiumKey || "").trim().toLowerCase();
+  const isPremium = PREMIUM_MEAL_PROTEIN_KEY_SET.has(proteinKey);
+  const premiumExtraFeeHalala = isPremium
+    ? (PREMIUM_MEAL_EXTRA_FEE_HALALA_BY_KEY[proteinKey] ?? Number(option.extraFeeHalala ?? option.extraPriceHalala ?? 0))
+    : 0;
   return {
     ...option,
     isPremium,
     premiumKey: option.premiumKey || option.key || null,
-    extraFeeHalala: Number(option.extraPriceHalala || 0),
+    extraFeeHalala: Number(premiumExtraFeeHalala || 0),
     proteinFamilyKey: option.proteinFamilyKey || option.displayCategoryKey || "other",
     displayCategoryKey: option.displayCategoryKey || (isPremium ? "premium" : option.proteinFamilyKey || "other"),
     ruleTags: Array.isArray(option.ruleTags) ? option.ruleTags : [],

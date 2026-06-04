@@ -164,14 +164,8 @@ const saladOptionRows = {
   ],
 };
 
-const proteinRows = [
-  { key: "chicken", name: name("دجاج", "Chicken"), proteinFamilyKey: "chicken" },
-  { key: "beef", name: name("لحم", "Beef"), proteinFamilyKey: "beef" },
-  { key: "fish", name: name("سمك", "Fish"), proteinFamilyKey: "fish" },
-  { key: "eggs", name: name("بيض", "Eggs"), proteinFamilyKey: "eggs" },
-  { key: "beef_steak", name: name("ستيك لحم", "Beef Steak"), calories: 270, proteinFamilyKey: "beef" },
-  { key: "shrimp", name: name("جمبري", "Shrimp"), calories: 380, proteinFamilyKey: "fish" },
-  { key: "salmon", name: name("سالمون", "Salmon"), calories: 210, proteinFamilyKey: "fish" },
+// TODO: MenuOption has no nutrition field. Keep salad-only protein calories here until canonical option nutrition is supported.
+const saladProteinRows = [
   { key: "boiled_eggs", name: name("بيض مسلوق", "Boiled Eggs"), calories: 155, proteinFamilyKey: "eggs" },
   { key: "tuna", name: name("تونا", "Tuna"), calories: 116, proteinFamilyKey: "fish" },
   { key: "chicken_fajita", name: name("فاهيتا", "Chicken Fajita"), calories: 200, proteinFamilyKey: "chicken" },
@@ -184,10 +178,16 @@ const proteinRows = [
   { key: "mexican_chicken", name: name("دجاج مكسيكي", "Mexican Chicken"), calories: 210, proteinFamilyKey: "chicken" },
   { key: "meatballs", name: name("كرات لحم", "Meatballs"), calories: 280, proteinFamilyKey: "beef" },
   { key: "beef_stroganoff", name: name("لحم استرغانوف", "Beef Stroganoff"), calories: 250, proteinFamilyKey: "beef" },
+  { key: "beef_steak", name: name("ستيك لحم", "Beef Steak"), calories: 270, proteinFamilyKey: "beef" },
+  { key: "shrimp", name: name("جمبري", "Shrimp"), calories: 380, proteinFamilyKey: "fish" },
   { key: "fish_fillet", name: name("سمك فيليه", "Fish Fillet"), calories: 130, proteinFamilyKey: "fish" },
-];
-
-const proteinRowsByKey = new Map(proteinRows.map((row) => [row.key, row]));
+  { key: "salmon", name: name("سالمون", "Salmon"), calories: 210, proteinFamilyKey: "fish" },
+].map((row) => ({
+  ...row,
+  displayCategoryKey: row.displayCategoryKey || row.proteinFamilyKey,
+  ruleTags: ["salad_only"],
+  availableFor: ["one_time", "subscription"],
+}));
 
 const saladProteinPriceOverrides = {
   meatballs: 300,
@@ -218,99 +218,11 @@ const subscriptionPremiumLargeSaladProteinKeys = [
   "fish_fillet",
 ];
 
-const standardMealProteinRelations = [
-  "chicken",
-  "beef",
-  "fish",
-  "eggs",
-  "boiled_eggs",
-  "tuna",
-  "chicken_fajita",
-  "spicy_chicken",
-  "italian_spiced_chicken",
-  "chicken_tikka",
-  "asian_chicken",
-  "chicken_strips",
-  "grilled_chicken",
-  "mexican_chicken",
-  "meatballs",
-  "beef_stroganoff",
-  "fish_fillet",
-].map((key, index) => ({
-  key,
-  selectionType: "standard_meal",
-  displayCategoryKey: proteinRowsByKey.get(key)?.proteinFamilyKey || "other",
-  isPremium: false,
-  extraFeeHalala: 0,
-  sortOrder: (index + 1) * 10,
-}));
-
-const premiumMealProteinRelations = [
-  "beef_steak",
-  "shrimp",
-  "salmon",
-].map((key, index) => ({
-  key,
-  selectionType: "premium_meal",
-  displayCategoryKey: "premium",
-  isPremium: true,
-  premiumKey: key,
-  extraFeeHalala: 2000,
-  sortOrder: (index + 1) * 10,
-}));
-
-const premiumLargeSaladProteinRelations = subscriptionPremiumLargeSaladProteinKeys.map((key, index) => ({
-  key,
-  selectionType: "premium_large_salad",
-  displayCategoryKey: proteinRowsByKey.get(key)?.proteinFamilyKey || "other",
-  isPremium: false,
-  extraFeeHalala: 0,
-  sortOrder: (index + 1) * 10,
-}));
-
-const oneTimeMealProteinRelations = ["chicken", "beef", "fish", "eggs"].map((key, index) => ({
-  key,
-  selectionType: "basic_meal",
-  displayCategoryKey: proteinRowsByKey.get(key)?.proteinFamilyKey || "other",
-  extraPriceHalala: 0,
-  sortOrder: (index + 1) * 10,
-}));
-
-const oneTimeSaladProteinRelations = [
-  "boiled_eggs",
-  "tuna",
-  "chicken_fajita",
-  "spicy_chicken",
-  "italian_spiced_chicken",
-  "chicken_tikka",
-  "asian_chicken",
-  "chicken_strips",
-  "grilled_chicken",
-  "mexican_chicken",
-  "meatballs",
-  "beef_stroganoff",
-  "beef_steak",
-  "shrimp",
-  "fish_fillet",
-  "salmon",
-].map((key, index) => ({
-  key,
-  selectionType: "basic_salad",
-  displayCategoryKey: proteinRowsByKey.get(key)?.proteinFamilyKey || "other",
-  extraPriceHalala: saladProteinPriceOverrides[key] || 0,
-  sortOrder: (index + 1) * 10,
-}));
-
-const subscriptionProteinRelationByKey = new Map(
-  [...standardMealProteinRelations, ...premiumMealProteinRelations].map((relation) => [relation.key, relation])
-);
-const oneTimeSaladProteinRelationByKey = new Map(oneTimeSaladProteinRelations.map((relation) => [relation.key, relation]));
-
 const customSaladAllowedOptions = {
   leafy_greens: saladOptionRows.leafy_greens.filter((row) => !row.ruleTags?.includes("missing_external")).map((row) => row.key),
   vegetables_legumes: saladOptionRows.vegetables_legumes.map((row) => row.key),
   fruits: saladOptionRows.fruits.filter((row) => !row.ruleTags?.includes("missing_external")).map((row) => row.key),
-  proteins: oneTimeSaladProteinRelations.map((row) => row.key),
+  proteins: saladProteinRows.map((row) => row.key),
   cheese_nuts: saladOptionRows.cheese_nuts.filter((row) => !row.ruleTags?.includes("missing_external")).map((row) => row.key),
   sauces: saladOptionRows.sauces.filter((row) => !row.ruleTags?.some((tag) => ["missing_external", "light_options_only"].includes(tag))).map((row) => row.key),
   extra_protein_50g: Object.keys(saladExtraProteinPriceOverrides),
@@ -374,7 +286,71 @@ const groupDefinitions = [
     key: "proteins",
     name: name("بروتينات", "Proteins"),
     ui: { displayStyle: "radio_cards" },
-    options: proteinRows,
+    options: [
+      {
+        key: "chicken",
+        name: name("دجاج", "Chicken"),
+        displayCategoryKey: "chicken",
+        proteinFamilyKey: "chicken",
+        selectionType: "standard_meal",
+        extraFeeHalala: 0,
+      },
+      {
+        key: "beef",
+        name: name("لحم", "Beef"),
+        displayCategoryKey: "beef",
+        proteinFamilyKey: "beef",
+        selectionType: "standard_meal",
+        extraFeeHalala: 0,
+      },
+      {
+        key: "fish",
+        name: name("سمك", "Fish"),
+        displayCategoryKey: "fish",
+        proteinFamilyKey: "fish",
+        selectionType: "standard_meal",
+        extraFeeHalala: 0,
+      },
+      {
+        key: "eggs",
+        name: name("بيض", "Eggs"),
+        displayCategoryKey: "eggs",
+        proteinFamilyKey: "eggs",
+        selectionType: "standard_meal",
+        extraFeeHalala: 0,
+      },
+      {
+        key: "beef_steak",
+        name: name("ستيك لحم", "Beef Steak"),
+        calories: 270,
+        premiumKey: "beef_steak",
+        displayCategoryKey: "beef",
+        proteinFamilyKey: "beef",
+        selectionType: "premium_meal",
+        extraFeeHalala: 2000,
+      },
+      {
+        key: "shrimp",
+        name: name("جمبري", "Shrimp"),
+        calories: 380,
+        premiumKey: "shrimp",
+        displayCategoryKey: "fish",
+        proteinFamilyKey: "fish",
+        selectionType: "premium_meal",
+        extraFeeHalala: 2000,
+      },
+      {
+        key: "salmon",
+        name: name("سالمون", "Salmon"),
+        calories: 210,
+        premiumKey: "salmon",
+        displayCategoryKey: "fish",
+        proteinFamilyKey: "fish",
+        selectionType: "premium_meal",
+        extraFeeHalala: 2000,
+      },
+      ...saladProteinRows.filter((row) => !["beef_steak", "shrimp", "salmon"].includes(row.key)),
+    ],
   },
   {
     key: "carbs",
@@ -428,7 +404,7 @@ const saladIngredientGroupAliases = {
   sauces: "sauce",
 };
 
-const standardProteinOptionKeys = oneTimeMealProteinRelations.map((row) => row.key);
+const standardProteinOptionKeys = ["chicken", "beef", "fish", "eggs"];
 
 const extraProteinByMeal = {
   beef_steak_meal_150g: "extra_beef_steak_50g",
@@ -454,7 +430,7 @@ const productGroupAllowedOptionKeys = {
   },
   premium_large_salad: {
     ...customSaladAllowedOptions,
-    proteins: premiumLargeSaladProteinRelations.map((row) => row.key),
+    proteins: subscriptionPremiumLargeSaladProteinKeys,
     extra_protein_50g: [],
   },
   ...lightOptionAllowedOptions,
@@ -470,7 +446,7 @@ const saladProductGroupOptionPriceOverrides = Object.fromEntries(
   ["basic_salad"].map((productKey) => [
     productKey,
     {
-      proteins: Object.fromEntries(oneTimeSaladProteinRelations.map((relation) => [relation.key, relation.extraPriceHalala || 0])),
+      proteins: saladProteinPriceOverrides,
       extra_protein_50g: saladExtraProteinPriceOverrides,
     },
   ])
@@ -480,13 +456,6 @@ function resolveProductGroupOptionPriceHalala(productKey, groupKey, optionDef) {
   return saladProductGroupOptionPriceOverrides[productKey]?.[groupKey]?.[optionDef.key]
     ?? optionDef.extraPriceHalala
     ?? 0;
-}
-
-function resolveProductGroupOptionSortOrder(productKey, groupKey, optionDef, fallbackSortOrder) {
-  if (productKey === "basic_salad" && groupKey === "proteins") {
-    return oneTimeSaladProteinRelationByKey.get(optionDef.key)?.sortOrder || fallbackSortOrder;
-  }
-  return fallbackSortOrder;
 }
 
 const mealProductDefaults = {
@@ -865,21 +834,15 @@ async function seedOptionGroupsAndOptions({ sync = false } = {}) {
           ...(hasOwn(optionDef, "imageUrl") ? { imageUrl: optionDef.imageUrl } : {}),
           availableFor: optionDef.availableFor || ["one_time", "subscription"],
           availableForSubscription: (optionDef.availableFor || ["one_time", "subscription"]).includes("subscription"),
-          nutrition: {
-            calories: Number(optionDef.calories || optionDef.nutrition?.calories || 0),
-            proteinGrams: Number(optionDef.nutrition?.proteinGrams || 0),
-            carbGrams: Number(optionDef.nutrition?.carbGrams || 0),
-            fatGrams: Number(optionDef.nutrition?.fatGrams || 0),
-          },
-          extraPriceHalala: groupDef.key === "proteins" ? 0 : (optionDef.extraPriceHalala ?? 0),
+          extraPriceHalala: optionDef.extraPriceHalala ?? 0,
           extraWeightPriceHalala: 0,
           extraWeightUnitGrams: 0,
-          extraFeeHalala: groupDef.key === "proteins" ? 0 : Number(optionDef.extraFeeHalala || 0),
-          premiumKey: groupDef.key === "proteins" ? "" : (optionDef.premiumKey || ""),
+          extraFeeHalala: Number(optionDef.extraFeeHalala || 0),
+          premiumKey: optionDef.premiumKey || "",
           proteinFamilyKey: optionDef.proteinFamilyKey || "",
-          displayCategoryKey: groupDef.key === "proteins" ? "" : (optionDef.displayCategoryKey || ""),
-          selectionType: groupDef.key === "proteins" ? "" : (optionDef.selectionType || ""),
-          ruleTags: groupDef.key === "proteins" ? [] : (optionDef.ruleTags || []),
+          displayCategoryKey: optionDef.displayCategoryKey || "",
+          selectionType: optionDef.selectionType || "",
+          ruleTags: optionDef.ruleTags || [],
           ...activePublishedFields((optionIndex + 1) * 10),
         },
         { label: "Options", sync }
@@ -920,15 +883,12 @@ async function seedBuilderCompatibilityMirrors({ optionMap, builderCategoryMap, 
       const option = optionMap.get(`${groupDef.key}:${optionDef.key}`);
       if (!option) continue;
 
-      if (groupDef.key === "proteins") {
-        const subscriptionRelation = subscriptionProteinRelationByKey.get(optionDef.key);
-        if (!subscriptionRelation) continue;
-
-        const displayCategoryKey = subscriptionRelation.displayCategoryKey || "other";
+      if (groupDef.key === "proteins" && !optionDef.ruleTags?.includes("salad_only")) {
+        const displayCategoryKey = optionDef.displayCategoryKey || "other";
         const displayCategory = builderCategoryMap.get(`protein:${displayCategoryKey}`);
         if (!displayCategory) continue;
 
-        const query = subscriptionRelation.premiumKey ? { premiumKey: subscriptionRelation.premiumKey } : { key: optionDef.key };
+        const query = optionDef.premiumKey ? { premiumKey: optionDef.premiumKey } : { key: optionDef.key };
         const payload = {
           _id: option._id,
           key: optionDef.key,
@@ -937,16 +897,16 @@ async function seedBuilderCompatibilityMirrors({ optionMap, builderCategoryMap, 
           displayCategoryId: displayCategory._id,
           displayCategoryKey,
           proteinFamilyKey: optionDef.proteinFamilyKey || "other",
-          selectionType: subscriptionRelation.selectionType,
-          isPremium: Boolean(subscriptionRelation.isPremium),
-          extraFeeHalala: Number(subscriptionRelation.extraFeeHalala || 0),
+          selectionType: optionDef.selectionType || "standard_meal",
+          isPremium: Number(optionDef.extraFeeHalala || 0) > 0,
+          extraFeeHalala: Number(optionDef.extraFeeHalala || 0),
           nutrition: { calories: Number(optionDef.calories || 0) },
           currency: SYSTEM_CURRENCY,
           availableForSubscription: true,
           isActive: true,
-          sortOrder: subscriptionRelation.sortOrder || ((optionIndex + 1) * 10),
+          sortOrder: (optionIndex + 1) * 10,
         };
-        if (subscriptionRelation.premiumKey) payload.premiumKey = subscriptionRelation.premiumKey;
+        if (optionDef.premiumKey) payload.premiumKey = optionDef.premiumKey;
 
         await upsertByMode(BuilderProtein, query, payload, { label: "Builder proteins", sync });
       }
@@ -1076,7 +1036,7 @@ async function seedProducts({ categoryMap, groupMap, optionMap, sync = false }) 
               isActive: true,
               isVisible: true,
               isAvailable: true,
-              sortOrder: resolveProductGroupOptionSortOrder(row.key, groupKey, optionDef, (optionIndex + 1) * 10),
+              sortOrder: (optionIndex + 1) * 10,
             },
             { label: "Product-option relations", sync, relation: true }
           );

@@ -48,7 +48,12 @@ async function resolvePlanningSubscriptionForOperation(subscription, session = n
   };
 }
 
-async function reconcileAddonInclusions(subscription, day, requestedAddonIds = []) {
+async function reconcileAddonInclusions(
+  subscription,
+  day,
+  requestedAddonIds = [],
+  { resolveChoiceProductById = resolveAddonChoiceProductById } = {}
+) {
   if (!Array.isArray(requestedAddonIds) || requestedAddonIds.length === 0) {
     day.addonSelections = [];
     return;
@@ -57,7 +62,7 @@ async function reconcileAddonInclusions(subscription, day, requestedAddonIds = [
   const choiceMap = new Map();
   for (const addonId of requestedAddonIds) {
     if (choiceMap.has(String(addonId))) continue;
-    const choice = await resolveAddonChoiceProductById(addonId);
+    const choice = await resolveChoiceProductById(addonId);
     if (choice) choiceMap.set(String(addonId), choice);
   }
 
@@ -80,6 +85,14 @@ async function reconcileAddonInclusions(subscription, day, requestedAddonIds = [
     const doc = choice.product;
     const category = choice.addonCategory;
     const entitlement = entitlements.find((e) => e.category === category);
+    if (!entitlement) {
+      throw {
+        status: 403,
+        code: "ADDON_ENTITLEMENT_REQUIRED",
+        message: `Subscription does not include ${category} add-on entitlement`,
+        details: { category },
+      };
+    }
     
     let source = "pending_payment";
     let priceHalala = doc.priceHalala || Math.round((doc.price || 0) * 100);
@@ -958,6 +971,7 @@ async function performDayPlanningConfirmation({ userId, subscriptionId, date, ru
 module.exports = {
   consumePremiumBalanceAtomically,
   releasePremiumBalanceAtomically,
+  reconcileAddonInclusions,
   performDaySelectionUpdate,
   performDaySelectionValidation,
   performDayPlanningConfirmation,

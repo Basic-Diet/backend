@@ -23,6 +23,9 @@ const {
   buildCanonicalPlanningView,
   isCanonicalDayPlanningEligible,
 } = require("./subscriptionDayPlanningService");
+const {
+  buildAddonEntitlementsReadModel,
+} = require("./subscriptionAddonEntitlementReadService");
 const { toKSADateString } = require("../../utils/date");
 const { logger } = require("../../utils/logger");
 
@@ -51,6 +54,11 @@ function serializeSubscriptionDayForClient(subscription, day, runtimeOverrides =
   if (Array.isArray(day.addonSelections)) {
     serializedDay.addonSelections = day.addonSelections;
   }
+
+  serializedDay.addonEntitlements = buildAddonEntitlementsReadModel(
+    subscription && subscription.addonSubscriptions,
+    serializedDay.addonSelections || []
+  );
 
   if (runtime.isCanonicalDayPlanningEligible(subscription, {
     flagEnabled: isPhase2CanonicalDayPlanningEnabled(),

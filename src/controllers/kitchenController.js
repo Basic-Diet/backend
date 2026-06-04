@@ -27,6 +27,9 @@ const { logger } = require("../utils/logger");
 const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
 const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
+const {
+  buildAddonEntitlementsReadModel,
+} = require("../services/subscription/subscriptionAddonEntitlementReadService");
 
 async function getPickupLocationsSetting() {
   const setting = await Setting.findOne({ key: "pickup_locations" }).lean();
@@ -48,31 +51,6 @@ function isPickupOperationalDay(day = {}) {
       || day.pickupPreparedAt
       || ["in_preparation", "ready_for_pickup", "fulfilled", "no_show", "canceled_at_branch"].includes(day.status)
   );
-}
-
-function buildAddonEntitlements(addonSubscriptions = [], addonSelections = []) {
-  const subscriptions = Array.isArray(addonSubscriptions) ? addonSubscriptions : [];
-  const selections = Array.isArray(addonSelections) ? addonSelections : [];
-  return ["juice", "snack", "small_salad"].reduce((accumulator, category) => {
-    const entitlement = subscriptions.find((item) => item && item.category === category);
-    const selection = selections.find((item) => item && item.category === category);
-    const selectedItem = selection
-      ? {
-        id: selection.addonId ? String(selection.addonId) : null,
-        name: selection.name || "",
-        source: selection.source || "",
-        priceHalala: Number(selection.priceHalala || 0),
-        currency: selection.currency || "SAR",
-      }
-      : null;
-
-    accumulator[category] = {
-      subscribed: Boolean(entitlement),
-      selectedItem,
-      status: entitlement ? (selectedItem ? "selected" : "pending_selection") : "not_subscribed",
-    };
-    return accumulator;
-  }, {});
 }
 
 function getTrackedPremiumCredits(subscription) {
@@ -213,7 +191,6 @@ function resolvePickupQueueStatusOrder(status) {
 async function listDailyOrders(req, res) {
   const { date } = req.params;
   const days = await SubscriptionDay.find({ date })
-    .populate({ path: "addonsOneTime", select: "name price type" })
     .populate({
       path: "subscriptionId",
       select: "addonSubscriptions premiumSelections addonSelections userId deliveryMode deliveryAddress deliveryWindow planId selectedMealsPerDay totalMeals"
@@ -275,7 +252,7 @@ async function listDailyOrders(req, res) {
     const addonSelections = operationalSnapshot && Array.isArray(operationalSnapshot.addonSelections)
       ? operationalSnapshot.addonSelections
       : (d.addonSelections || []);
-    const addonEntitlements = buildAddonEntitlements(subscriptionAddons, addonSelections);
+    const addonEntitlements = buildAddonEntitlementsReadModel(subscriptionAddons, addonSelections);
 
     return {
       ...d,
