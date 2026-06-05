@@ -52,6 +52,7 @@ async function getOrderMenu(req, res) {
   const menu = await getOneTimeOrderMenu({
     lang,
     fulfillmentMethod: req.query && req.query.fulfillmentMethod,
+    includePublicV2: req.query && String(req.query.includePublicV2 || "").toLowerCase() === "true",
   });
 
   return res.status(200).json({ status: true, data: menu });

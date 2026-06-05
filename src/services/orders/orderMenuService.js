@@ -60,19 +60,112 @@ async function getSettingValue(key, fallback) {
   return setting ? setting.value : fallback;
 }
 
-async function getOneTimeOrderMenu({ lang = "en", fulfillmentMethod } = {}) {
+function publicMenuActionForProduct(product = {}) {
+  const behaviorHint = product.ui && product.ui.behaviorHint;
+  if (behaviorHint === "direct_add" || product.canAddDirectly === true) {
+    return {
+      type: "direct_add",
+      canAddDirectly: true,
+      requiresBuilder: false,
+    };
+  }
+  return {
+    type: behaviorHint || "open_builder",
+    canAddDirectly: product.canAddDirectly === true,
+    requiresBuilder: product.requiresBuilder !== false,
+  };
+}
+
+function publicMenuPricingForProduct(product = {}) {
+  return {
+    model: product.pricingModel || "fixed",
+    priceHalala: Number(product.priceHalala || 0),
+    currency: product.currency || SYSTEM_CURRENCY,
+    baseUnitGrams: Number(product.baseUnitGrams || 0),
+    defaultWeightGrams: Number(product.defaultWeightGrams || 0),
+    minWeightGrams: Number(product.minWeightGrams || 0),
+    maxWeightGrams: Number(product.maxWeightGrams || 0),
+    weightStepGrams: Number(product.weightStepGrams || 0),
+  };
+}
+
+function buildPublicMenuV2(menu = {}) {
+  const sections = (menu.categories || []).map((category) => ({
+    id: category.id,
+    key: category.key,
+    type: "product_collection",
+    name: category.name,
+    nameI18n: category.nameI18n,
+    description: category.description,
+    descriptionI18n: category.descriptionI18n,
+    imageUrl: category.imageUrl || "",
+    sortOrder: Number(category.sortOrder || 0),
+    ui: category.ui || {},
+    products: (category.products || []).map((product) => ({
+      id: product.id,
+      key: product.key,
+      categoryId: product.categoryId || category.id,
+      categoryKey: category.key,
+      itemType: product.itemType,
+      name: product.name,
+      nameI18n: product.nameI18n,
+      description: product.description,
+      descriptionI18n: product.descriptionI18n,
+      imageUrl: product.imageUrl || "",
+      sortOrder: Number(product.sortOrder || 0),
+      pricing: publicMenuPricingForProduct(product),
+      action: publicMenuActionForProduct(product),
+      ui: product.ui || {},
+      optionGroups: product.optionGroups || [],
+    })),
+  }));
+
+  const products = sections.flatMap((section) => section.products);
+
+  return {
+    contractVersion: "one_time_menu.v2",
+    source: menu.source || "one_time_order",
+    fulfillmentMethod: menu.fulfillmentMethod || "pickup",
+    currency: menu.currency || SYSTEM_CURRENCY,
+    vatIncluded: menu.vatIncluded !== false,
+    vatPercentage: Number(menu.vatPercentage || 0),
+    sections,
+    productIndex: {
+      byId: Object.fromEntries(products.map((product) => [product.id, {
+        sectionKey: product.categoryKey,
+        productKey: product.key,
+      }])),
+      byKey: Object.fromEntries(products.map((product) => [product.key, {
+        sectionKey: product.categoryKey,
+        productId: product.id,
+      }])),
+    },
+    rules: {
+      selectionLimitSemantics: "maxSelections_null_means_unlimited",
+      pricingUnit: "halala",
+      visibility: "published_active_visible_available_one_time_only",
+      ordering: "section_sortOrder_then_product_sortOrder",
+    },
+  };
+}
+
+async function getOneTimeOrderMenu({ lang = "en", fulfillmentMethod, includePublicV2 = false } = {}) {
   if (await hasPublishedMenuCatalog()) {
     const [menu, restaurantHours] = await Promise.all([
       getPublishedMenu({ lang, branchId: "" }),
       getRestaurantHours().catch(() => ({})),
     ]);
-    return {
+    const payload = {
       ...menu,
       restaurantHours: {
         ...restaurantHours,
         fulfillmentMethod: "pickup",
       },
     };
+    if (includePublicV2) {
+      payload.publicMenuV2 = buildPublicMenuV2(payload);
+    }
+    return payload;
   }
 
   const [
@@ -104,7 +197,7 @@ async function getOneTimeOrderMenu({ lang = "en", fulfillmentMethod } = {}) {
     return item;
   });
 
-  return {
+  const payload = {
     currency: SYSTEM_CURRENCY,
     source: "one_time_order",
     fulfillmentMethod: "pickup",
@@ -156,9 +249,14 @@ async function getOneTimeOrderMenu({ lang = "en", fulfillmentMethod } = {}) {
       fulfillmentMethod: "pickup",
     },
   };
+  if (includePublicV2) {
+    payload.publicMenuV2 = buildPublicMenuV2(payload);
+  }
+  return payload;
 }
 
 module.exports = {
   getOneTimeOrderMenu,
+  buildPublicMenuV2,
   normalizeWindows,
 };

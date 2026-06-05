@@ -65,6 +65,7 @@ const reorderCategories = wrap(async (req, res) => send(res, await service.reord
 const listProducts = wrap(async (req, res) => send(res, await service.listProducts(listOptions(req))));
 const createProduct = wrap(async (req, res) => send(res, await service.createProduct(req.body, actorFromRequest(req)), 201));
 const getProduct = wrap(async (req, res) => send(res, await service.getProduct(req.params.id)));
+const getProductComposer = wrap(async (req, res) => send(res, await service.getProductComposer(req.params.productId || req.params.id)));
 const updateProduct = wrap(async (req, res) => send(res, await service.updateProduct(req.params.id, req.body, actorFromRequest(req))));
 const updateProductVisibility = wrap(async (req, res) => send(res, await service.updateProductVisibility(req.params.id || req.params.productId, req.body, actorFromRequest(req))));
 const deleteProduct = wrap(async (req, res) => send(res, await service.deleteProduct(req.params.id, actorFromRequest(req))));
@@ -187,6 +188,7 @@ module.exports = {
   listProducts,
   createProduct,
   getProduct,
+  getProductComposer,
   updateProduct,
   updateProductVisibility,
   deleteProduct,

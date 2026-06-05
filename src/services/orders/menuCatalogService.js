@@ -1117,6 +1117,214 @@ async function listProductGroups(productId, options = {}) {
   };
 }
 
+function buildDashboardProductComposerValidation({ product, category, linkedOptionGroups }) {
+  const errors = [];
+  const warnings = [];
+  const pushIssue = (target, code, message, extra = {}) => {
+    target.push({ code, message, ...extra });
+  };
+
+  if (!category) {
+    pushIssue(errors, "missing_category", "Product category is missing");
+  } else {
+    if (category.isActive === false) pushIssue(warnings, "inactive_category", "Product category is inactive");
+    if (category.isVisible === false) pushIssue(warnings, "hidden_category", "Product category is hidden");
+    if (category.isAvailable === false) pushIssue(warnings, "unavailable_category", "Product category is unavailable");
+  }
+
+  if (product.isActive === false) pushIssue(warnings, "inactive_product", "Product is inactive");
+  if (product.isVisible === false) pushIssue(warnings, "hidden_product", "Product is hidden");
+  if (product.isAvailable === false) pushIssue(warnings, "unavailable_product", "Product is unavailable");
+  if (!product.publishedAt) pushIssue(warnings, "unpublished_product", "Product has unpublished changes or has not been published");
+
+  for (const linkedGroup of linkedOptionGroups) {
+    const groupKey = linkedGroup.group?.key || linkedGroup.groupId;
+    if (!linkedGroup.group) {
+      pushIssue(errors, "missing_linked_group", `Linked option group is missing: ${linkedGroup.groupId}`, {
+        groupId: linkedGroup.groupId,
+      });
+      continue;
+    }
+    if (linkedGroup.group.isActive === false) pushIssue(warnings, "inactive_linked_group", `Linked option group is inactive: ${groupKey}`, { groupId: linkedGroup.groupId });
+    if (linkedGroup.group.isVisible === false) pushIssue(warnings, "hidden_linked_group", `Linked option group is hidden: ${groupKey}`, { groupId: linkedGroup.groupId });
+    if (linkedGroup.group.isAvailable === false) pushIssue(warnings, "unavailable_linked_group", `Linked option group is unavailable: ${groupKey}`, { groupId: linkedGroup.groupId });
+    if (linkedGroup.isRequired && linkedGroup.options.filter((row) => row.isActive !== false).length < linkedGroup.minSelections) {
+      pushIssue(errors, "required_group_insufficient_options", `Required option group ${groupKey} has fewer active linked options than minSelections`, {
+        groupId: linkedGroup.groupId,
+      });
+    }
+
+    for (const linkedOption of linkedGroup.options) {
+      const optionKey = linkedOption.option?.key || linkedOption.optionId;
+      if (!linkedOption.option) {
+        pushIssue(errors, "missing_linked_option", `Linked option is missing: ${linkedOption.optionId}`, {
+          groupId: linkedGroup.groupId,
+          optionId: linkedOption.optionId,
+        });
+        continue;
+      }
+      if (String(linkedOption.option.groupId || "") !== String(linkedGroup.groupId || "")) {
+        pushIssue(errors, "linked_option_group_mismatch", `Linked option ${optionKey} does not belong to group ${groupKey}`, {
+          groupId: linkedGroup.groupId,
+          optionId: linkedOption.optionId,
+        });
+      }
+      if (linkedOption.option.isActive === false) pushIssue(warnings, "inactive_linked_option", `Linked option is inactive: ${optionKey}`, { groupId: linkedGroup.groupId, optionId: linkedOption.optionId });
+      if (linkedOption.option.isVisible === false) pushIssue(warnings, "hidden_linked_option", `Linked option is hidden: ${optionKey}`, { groupId: linkedGroup.groupId, optionId: linkedOption.optionId });
+      if (linkedOption.option.isAvailable === false) pushIssue(warnings, "unavailable_linked_option", `Linked option is unavailable: ${optionKey}`, { groupId: linkedGroup.groupId, optionId: linkedOption.optionId });
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+function serializeDashboardLinkedOption(relation, option) {
+  const optionPayload = option ? serializeDoc(option) : null;
+  const fallbackExtraPriceHalala = optionPayload ? optionPayload.extraPriceHalala : null;
+  const fallbackExtraWeightUnitGrams = optionPayload ? optionPayload.extraWeightUnitGrams : null;
+  const fallbackExtraWeightPriceHalala = optionPayload ? optionPayload.extraWeightPriceHalala : null;
+  const override = {
+    extraPriceHalala: relation.extraPriceHalala,
+    extraWeightUnitGrams: relation.extraWeightUnitGrams,
+    extraWeightPriceHalala: relation.extraWeightPriceHalala,
+    effectiveExtraPriceHalala: relation.extraPriceHalala !== null && relation.extraPriceHalala !== undefined
+      ? relation.extraPriceHalala
+      : fallbackExtraPriceHalala,
+    effectiveExtraWeightUnitGrams: relation.extraWeightUnitGrams !== null && relation.extraWeightUnitGrams !== undefined
+      ? relation.extraWeightUnitGrams
+      : fallbackExtraWeightUnitGrams,
+    effectiveExtraWeightPriceHalala: relation.extraWeightPriceHalala !== null && relation.extraWeightPriceHalala !== undefined
+      ? relation.extraWeightPriceHalala
+      : fallbackExtraWeightPriceHalala,
+  };
+
+  return {
+    id: String(relation._id),
+    productId: String(relation.productId),
+    groupId: String(relation.groupId),
+    optionId: String(relation.optionId),
+    extraPriceHalala: relation.extraPriceHalala,
+    extraWeightUnitGrams: relation.extraWeightUnitGrams,
+    extraWeightPriceHalala: relation.extraWeightPriceHalala,
+    isActive: truthyByDefault(relation.isActive),
+    isVisible: truthyByDefault(relation.isVisible),
+    isAvailable: truthyByDefault(relation.isAvailable),
+    sortOrder: Number(relation.sortOrder || 0),
+    relation: serializeDoc(relation),
+    override,
+    option: optionPayload,
+  };
+}
+
+function serializeDashboardLinkedGroup(relation, group, options) {
+  const payload = {
+    id: String(relation._id),
+    productId: String(relation.productId),
+    groupId: String(relation.groupId),
+    minSelections: Number(relation.minSelections || 0),
+    maxSelections: relation.maxSelections === null || relation.maxSelections === undefined ? null : Number(relation.maxSelections),
+    isRequired: Boolean(relation.isRequired),
+    isActive: truthyByDefault(relation.isActive),
+    isVisible: truthyByDefault(relation.isVisible),
+    isAvailable: truthyByDefault(relation.isAvailable),
+    sortOrder: Number(relation.sortOrder || 0),
+    relation: serializeDoc(relation),
+    group: group ? serializeDoc(group) : null,
+    options,
+  };
+
+  return payload;
+}
+
+async function getProductComposer(productId) {
+  assertObjectId(productId, "productId");
+  const product = await MenuProduct.findById(productId).lean();
+  if (!product) throw new MenuNotFoundError("Product not found");
+
+  const [category, groupRelations, optionRelations] = await Promise.all([
+    product.categoryId ? MenuCategory.findById(product.categoryId).lean() : null,
+    ProductOptionGroup.find({ productId }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    ProductGroupOption.find({ productId }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+  ]);
+
+  const groupIds = [...new Set(groupRelations.map((relation) => String(relation.groupId)))];
+  const optionIds = [...new Set(optionRelations.map((relation) => String(relation.optionId)))];
+  const [groups, options] = await Promise.all([
+    groupIds.length ? MenuOptionGroup.find({ _id: { $in: groupIds } }).lean() : [],
+    optionIds.length ? MenuOption.find({ _id: { $in: optionIds } }).lean() : [],
+  ]);
+
+  const groupsById = new Map(groups.map((group) => [String(group._id), group]));
+  const optionsById = new Map(options.map((option) => [String(option._id), option]));
+  const optionRelationsByGroup = new Map();
+  for (const relation of optionRelations) {
+    const groupId = String(relation.groupId);
+    if (!optionRelationsByGroup.has(groupId)) optionRelationsByGroup.set(groupId, []);
+    optionRelationsByGroup.get(groupId).push(relation);
+  }
+
+  const linkedOptionGroups = groupRelations.map((relation) => {
+    const groupId = String(relation.groupId);
+    const linkedOptions = (optionRelationsByGroup.get(groupId) || [])
+      .map((optionRelation) => serializeDashboardLinkedOption(
+        optionRelation,
+        optionsById.get(String(optionRelation.optionId)) || null
+      ))
+      .sort((left, right) => left.sortOrder - right.sortOrder);
+
+    return serializeDashboardLinkedGroup(
+      relation,
+      groupsById.get(groupId) || null,
+      linkedOptions
+    );
+  }).sort((left, right) => left.sortOrder - right.sortOrder);
+
+  const productPayload = serializeDoc(product);
+  productPayload.groups = linkedOptionGroups;
+  productPayload.optionGroups = linkedOptionGroups;
+
+  const validation = buildDashboardProductComposerValidation({
+    product,
+    category,
+    linkedOptionGroups,
+  });
+
+  return {
+    contractVersion: "dashboard_product_composer.v1",
+    product: productPayload,
+    category: category ? serializeDoc(category) : null,
+    publishState: {
+      isPublished: Boolean(product.publishedAt),
+      publishedAt: product.publishedAt || null,
+      versionId: product.versionId ? String(product.versionId) : null,
+    },
+    availability: {
+      isActive: truthyByDefault(product.isActive),
+      isVisible: truthyByDefault(product.isVisible),
+      isAvailable: truthyByDefault(product.isAvailable),
+      availableFor: Array.isArray(product.availableFor) ? product.availableFor : [],
+      branchAvailability: Array.isArray(product.branchAvailability) ? product.branchAvailability : [],
+    },
+    pricing: {
+      pricingModel: product.pricingModel || "fixed",
+      priceHalala: Number(product.priceHalala || 0),
+      baseUnitGrams: Number(product.baseUnitGrams || 0),
+      defaultWeightGrams: Number(product.defaultWeightGrams || 0),
+      minWeightGrams: Number(product.minWeightGrams || 0),
+      maxWeightGrams: Number(product.maxWeightGrams || 0),
+      weightStepGrams: Number(product.weightStepGrams || 0),
+      currency: product.currency || SYSTEM_CURRENCY,
+    },
+    ui: normalizeProductUiMetadata(product.ui),
+    linkedOptionGroups,
+    validation,
+  };
+}
+
 async function createProductGroup(productId, body, actor = {}) {
   assertObjectId(productId, "productId");
   const payload = normalizeProductGroupRelationPayload({ ...body, productId });
@@ -1757,6 +1965,7 @@ module.exports = {
   listOptions: (options) => listModel(MenuOption, options, options && options.groupId ? { groupId: assertObjectId(options.groupId, "groupId") } : {}),
   getCategory: (id) => getModel(MenuCategory, id),
   getProduct: (id) => getModel(MenuProduct, id),
+  getProductComposer,
   getOptionGroup: (id) => getModel(MenuOptionGroup, id),
   getOption: (id) => getModel(MenuOption, id),
   createCategory: async (body, actor) => {

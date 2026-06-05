@@ -22,6 +22,7 @@ router.post("/products", asyncHandler(controller.createProduct));
 router.patch("/products/reorder", asyncHandler(controller.reorderProducts));
 router.post("/products/:id/duplicate", asyncHandler(controller.duplicateProduct));
 router.patch("/products/:id/category", asyncHandler(controller.updateProduct)); // Already handles categoryId in normalizeProductPayload
+router.get("/products/:productId/composer", asyncHandler(controller.getProductComposer));
 router.get("/products/:productId/option-groups", asyncHandler(controller.listProductGroups));
 router.post("/products/:productId/option-groups", asyncHandler(controller.createProductGroup));
 router.patch("/products/:productId/option-groups/:groupId", asyncHandler(controller.updateProductGroup));

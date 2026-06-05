@@ -166,6 +166,52 @@ function appAuth(userId) {
       await api.post("/api/dashboard/menu/publish").set(dashboardAuth()).send({ notes: "Initial publish" });
     });
 
+    await test("Dashboard product composer hydrates product, group relations, option overrides, and validation", async () => {
+      const res = await api.get(`/api/dashboard/menu/products/${product.id}/composer`).set(dashboardAuth());
+      expectStatus(res, 200, "product composer");
+      assert.strictEqual(res.body.status, true);
+
+      const data = res.body.data;
+      assert.strictEqual(data.contractVersion, "dashboard_product_composer.v1");
+      assert.strictEqual(data.product.id, product.id);
+      assert.strictEqual(data.product.key, "basic_salad");
+      assert.strictEqual(data.category.id, category.id);
+      assert.strictEqual(data.publishState.isPublished, true);
+      assert(data.publishState.publishedAt, "composer includes publishedAt");
+      assert.strictEqual(data.availability.isActive, true);
+      assert.strictEqual(data.availability.isVisible, true);
+      assert.strictEqual(data.availability.isAvailable, true);
+      assert(Array.isArray(data.availability.availableFor), "composer includes channel availability");
+      assert.strictEqual(data.pricing.pricingModel, "per_100g");
+      assert.strictEqual(data.pricing.priceHalala, 2900);
+      assert(data.ui && typeof data.ui.cardVariant === "string", "composer includes product ui metadata");
+      assert(Array.isArray(data.linkedOptionGroups), "composer linkedOptionGroups is array");
+      assert(Array.isArray(data.product.optionGroups), "composer product.optionGroups compatibility alias is array");
+      assert(Array.isArray(data.product.groups), "composer product.groups compatibility alias is array");
+
+      const linkedGroup = data.linkedOptionGroups.find((item) => item.groupId === group.id);
+      assert(linkedGroup, "composer includes linked group");
+      assert.strictEqual(linkedGroup.group.id, group.id);
+      assert.strictEqual(linkedGroup.group.key, "proteins");
+      assert.strictEqual(linkedGroup.minSelections, 1);
+      assert.strictEqual(linkedGroup.maxSelections, 1);
+      assert.strictEqual(linkedGroup.isRequired, true);
+      assert.strictEqual(linkedGroup.relation.groupId, group.id);
+      assert(Array.isArray(linkedGroup.options), "composer linked group options is array");
+
+      const linkedOption = linkedGroup.options.find((item) => item.optionId === option.id);
+      assert(linkedOption, "composer includes linked option");
+      assert.strictEqual(linkedOption.option.id, option.id);
+      assert.strictEqual(linkedOption.option.key, "chicken");
+      assert.strictEqual(linkedOption.override.extraPriceHalala, null);
+      assert.strictEqual(linkedOption.override.effectiveExtraWeightUnitGrams, 50);
+      assert.strictEqual(linkedOption.override.effectiveExtraWeightPriceHalala, 500);
+      assert.strictEqual(linkedOption.relation.optionId, option.id);
+      assert.strictEqual(data.validation.ok, true);
+      assert(Array.isArray(data.validation.errors), "composer validation errors array");
+      assert(Array.isArray(data.validation.warnings), "composer validation warnings array");
+    });
+
     await test("A) extraWeightUnitGrams override", async () => {
       // Current menu shows 50 (from option)
       let res = await api.get("/api/orders/menu?lang=en");
@@ -211,6 +257,12 @@ function appAuth(userId) {
       res = await api.get("/api/orders/menu?lang=en");
       let p = res.body.data.categories[0].products.find(x => x.key === "basic_salad");
       assert.strictEqual(p.optionGroups[0].options.length, 0, "Option should be hidden from mobile menu when unavailable");
+
+      res = await api.get(`/api/dashboard/menu/products/${product.id}/composer`).set(dashboardAuth());
+      expectStatus(res, 200, "Composer reflects disabled option");
+      const disabledComposerGroup = res.body.data.linkedOptionGroups.find((item) => item.groupId === group.id);
+      const disabledComposerOption = disabledComposerGroup.options.find((item) => item.optionId === option.id);
+      assert.strictEqual(disabledComposerOption.isAvailable, false, "Composer reflects option availability edit");
 
       res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
         fulfillmentMethod: "pickup",
@@ -264,6 +316,14 @@ function appAuth(userId) {
       let p = res.body.data.categories[0].products.find(x => x.key === "basic_salad");
       assert.strictEqual(p.optionGroups[0].maxSelections, 2, "Menu reflects new maxSelections");
 
+      res = await api.get(`/api/dashboard/menu/products/${product.id}/composer`).set(dashboardAuth());
+      expectStatus(res, 200, "Composer reflects updated rules");
+      const composerGroup = res.body.data.linkedOptionGroups.find((item) => item.groupId === group.id);
+      assert(composerGroup, "Composer includes updated linked group");
+      assert.strictEqual(composerGroup.minSelections, 1, "Composer reflects minSelections edit");
+      assert.strictEqual(composerGroup.maxSelections, 2, "Composer reflects maxSelections edit");
+      assert.strictEqual(res.body.data.validation.ok, true, "Composer validation remains ok after rule edit");
+
       // Verify quote enforcement
       const beefOption = p.optionGroups[0].options.find(o => o.key === "beef");
       const chickenOption = p.optionGroups[0].options.find(o => o.key === "chicken");
@@ -296,6 +356,13 @@ function appAuth(userId) {
       expectStatus(res, 200, "Update beef price override");
 
       await api.post("/api/dashboard/menu/publish").set(dashboardAuth()).send({ notes: "Update beef price" });
+
+      res = await api.get(`/api/dashboard/menu/products/${product.id}/composer`).set(dashboardAuth());
+      expectStatus(res, 200, "Composer reflects option override");
+      const overrideComposerGroup = res.body.data.linkedOptionGroups.find((item) => item.groupId === group.id);
+      const overrideComposerOption = overrideComposerGroup.options.find((item) => item.optionId === beefOptionId);
+      assert.strictEqual(overrideComposerOption.extraPriceHalala, 1500, "Composer exposes override price");
+      assert.strictEqual(overrideComposerOption.override.effectiveExtraPriceHalala, 1500, "Composer exposes effective override price");
 
       res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
         fulfillmentMethod: "pickup",
@@ -338,6 +405,7 @@ function appAuth(userId) {
       
       const createRes = await api.post("/api/orders").set(appAuth(user._id)).send({
         fulfillmentMethod: "pickup",
+        idempotencyKey: "weekly-menu-dashboard-water-snapshot",
         items: [{ productId: String(water._id), qty: 1, selectedOptions: [] }]
       });
       expectStatus(createRes, 201, "Create water order");

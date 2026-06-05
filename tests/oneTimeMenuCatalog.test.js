@@ -962,6 +962,54 @@ async function seedViaDashboard(api) {
       assert(!product.optionGroups[0].options.some((item) => item.id === ctx.options[3].id), "inactive option is hidden");
     });
 
+    await test("GET /api/orders/menu keeps default response stable and exposes opt-in publicMenuV2", async () => {
+      let res = await api.get("/api/orders/menu?lang=en");
+      expectStatus(res, 200, "default public menu");
+      assert.strictEqual(res.body.data.publicMenuV2, undefined, "publicMenuV2 is opt-in only");
+
+      res = await api.get("/api/orders/menu?lang=en&includePublicV2=true");
+      expectStatus(res, 200, "public menu v2 opt-in");
+      const menu = res.body.data;
+      const contract = menu.publicMenuV2;
+      assert(contract, "publicMenuV2 exists");
+      assert.strictEqual(contract.contractVersion, "one_time_menu.v2");
+      assert.strictEqual(contract.source, "one_time_order");
+      assert.strictEqual(contract.fulfillmentMethod, "pickup");
+      assert.strictEqual(contract.currency, "SAR");
+      assert.strictEqual(contract.vatIncluded, true);
+      assert(Array.isArray(contract.sections), "publicMenuV2.sections is array");
+      assert.strictEqual(contract.sections.length, menu.categories.length, "V2 section count mirrors public categories");
+      assert(contract.rules, "publicMenuV2 rules exist");
+      assert.strictEqual(contract.rules.selectionLimitSemantics, "maxSelections_null_means_unlimited");
+      assert.strictEqual(contract.rules.pricingUnit, "halala");
+
+      const section = contract.sections.find((item) => item.key === ctx.category.key);
+      assert(section, "fixture category section exists");
+      assert.strictEqual(section.type, "product_collection");
+      assert.deepStrictEqual(section.ui, menu.categories.find((item) => item.key === ctx.category.key).ui);
+
+      const product = section.products.find((item) => item.id === ctx.fixedProduct.id);
+      assert(product, "V2 product exists in its section");
+      assert.strictEqual(product.categoryKey, ctx.category.key);
+      assert.strictEqual(product.pricing.model, "fixed");
+      assert.strictEqual(product.pricing.priceHalala, 1000);
+      assert.strictEqual(product.pricing.currency, "SAR");
+      assert.strictEqual(product.action.type, "open_builder");
+      assert.strictEqual(product.action.requiresBuilder, true);
+      assert.strictEqual(product.action.canAddDirectly, false);
+      assert(Array.isArray(product.optionGroups), "V2 keeps product option groups");
+      assert.strictEqual(contract.productIndex.byId[product.id].sectionKey, ctx.category.key);
+      assert.strictEqual(contract.productIndex.byKey[product.key].productId, product.id);
+
+      const directProduct = contract.sections
+        .flatMap((item) => item.products)
+        .find((item) => item.id === ctx.directProduct.id);
+      assert(directProduct, "V2 direct product exists");
+      assert.strictEqual(directProduct.action.type, "direct_add");
+      assert.strictEqual(directProduct.action.canAddDirectly, true);
+      assert.strictEqual(directProduct.action.requiresBuilder, false);
+    });
+
     await test("Dashboard availableFor filters one-time products and options without changing public shape", async () => {
       try {
         let res = await api.patch(`/api/dashboard/menu/products/${ctx.fixedProduct.id}`).set(adminHeaders).send({
