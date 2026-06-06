@@ -346,16 +346,19 @@ async function getSubscriptionMenu(req, res) {
 async function getSubscriptionMealPlannerMenu(req, res) {
   const lang = getRequestLang(req);
   const includeLegacy = String(req.query?.includeLegacy || "").toLowerCase() === "true";
+  const requestedContractVersion = String(req.query?.contractVersion || req.query?.version || "").trim().toLowerCase();
+  const includeV3 = requestedContractVersion === "v3" || requestedContractVersion === "meal_planner_menu.v3";
   const [regularMeals, mealCategories, addons, mealPlannerCatalog] = await Promise.all([
     Meal.find({ type: "regular", isActive: true, availableForSubscription: { $ne: false }, categoryId: { $ne: null } })
       .sort({ sortOrder: 1, createdAt: -1 })
       .lean(),
     MealCategory.find({}).sort({ sortOrder: 1, createdAt: -1 }).lean(),
     Addon.find({ isActive: true, kind: "item", billingMode: "flat_once" }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
-    getMealPlannerCatalog({ lang }),
+    getMealPlannerCatalog({ lang, includeV3 }),
   ]);
   const builderCatalog = mealPlannerCatalog?.builderCatalog || mealPlannerCatalog || {};
   const builderCatalogV2 = mealPlannerCatalog?.builderCatalogV2 || null;
+  const plannerCatalog = mealPlannerCatalog?.plannerCatalog || null;
   const premiumMeals = mapBuilderPremiumProteinsToLegacyRows(builderCatalog);
   const mealCatalog = buildSubscriptionMealCatalog({
     lang,
@@ -372,6 +375,9 @@ async function getSubscriptionMealPlannerMenu(req, res) {
   };
   if (builderCatalogV2) {
     data.builderCatalogV2 = builderCatalogV2;
+  }
+  if (plannerCatalog) {
+    data.plannerCatalog = plannerCatalog;
   }
 
   if (includeLegacy) {

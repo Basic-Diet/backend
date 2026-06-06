@@ -198,6 +198,75 @@ function assertBuilderCatalogV2(catalog, legacyCatalog) {
   );
 }
 
+function assertPlannerCatalogV3(catalog) {
+  assertObject(catalog, "plannerCatalog");
+  assert.strictEqual(catalog.contractVersion, "meal_planner_menu.v3", "plannerCatalog contractVersion");
+  assert.strictEqual(catalog.currency, "SAR", "plannerCatalog currency");
+  assertString(catalog.catalogHash, "plannerCatalog catalogHash");
+  assert(catalog.catalogHash.startsWith("sha256:"), "plannerCatalog catalogHash is sha256 tagged");
+  assertArray(catalog.sections, "plannerCatalog.sections");
+  assertObject(catalog.rules, "plannerCatalog.rules");
+  assert.strictEqual(catalog.rules.version, "meal_planner_rules.v4", "plannerCatalog rules version");
+
+  const standardSection = sectionByKey(catalog, "standard_meal");
+  assertObject(standardSection, "plannerCatalog standard section");
+  assert.strictEqual(standardSection.type, "configurable_product", "plannerCatalog standard type");
+  const standardProduct = firstProduct(standardSection, "plannerCatalog standard");
+  assert.strictEqual(standardProduct.key, "basic_meal", "plannerCatalog standard uses MenuProduct basic_meal");
+  assert.strictEqual(standardProduct.selectionType, "standard_meal", "plannerCatalog standard selectionType");
+  assertObject(standardProduct.pricing, "plannerCatalog standard pricing");
+  assert.strictEqual(standardProduct.pricing.model, "per_100g", "plannerCatalog standard pricing model");
+  assertHalala(standardProduct.pricing.basePriceHalala, "plannerCatalog standard basePriceHalala");
+  assertArray(standardProduct.optionGroups, "plannerCatalog standard optionGroups");
+
+  const standardProteinGroup = groupByKey(standardProduct, "proteins");
+  const standardCarbGroup = groupByKey(standardProduct, "carbs");
+  assertObject(standardProteinGroup, "plannerCatalog standard proteins group");
+  assertObject(standardCarbGroup, "plannerCatalog standard carbs group");
+  assert.strictEqual(standardProteinGroup.minSelections, 1, "plannerCatalog protein min follows relation");
+  assert.strictEqual(standardProteinGroup.maxSelections, 1, "plannerCatalog protein max follows relation");
+  assertArray(standardProteinGroup.options, "plannerCatalog protein options");
+  assert(standardProteinGroup.options.length > 0, "plannerCatalog protein options populated");
+  assertObject(standardProteinGroup.options[0].nutrition, "plannerCatalog option nutrition");
+  assertHalala(standardProteinGroup.options[0].extraPriceHalala, "plannerCatalog option relation extra price");
+  assertArray(standardProteinGroup.optionSections, "plannerCatalog protein optionSections");
+
+  const premiumSection = sectionByKey(catalog, "premium_meal");
+  assertObject(premiumSection, "plannerCatalog premium section");
+  const premiumProduct = firstProduct(premiumSection, "plannerCatalog premium");
+  assert.strictEqual(premiumProduct.key, "basic_meal", "plannerCatalog premium uses same product shell");
+  assert.strictEqual(premiumProduct.selectionType, "premium_meal", "plannerCatalog premium selectionType");
+  const premiumProteinGroup = groupByKey(premiumProduct, "proteins");
+  assertObject(premiumProteinGroup, "plannerCatalog premium proteins group");
+  assert.strictEqual(
+    premiumProteinGroup.compatibilitySource,
+    "canonical_menu_option_premium_filter",
+    "plannerCatalog documents current premium relation compatibility adapter"
+  );
+
+  const sandwichSection = sectionByKey(catalog, "sandwich");
+  assertObject(sandwichSection, "plannerCatalog sandwich section");
+  assert.strictEqual(sandwichSection.type, "product_list", "plannerCatalog sandwich type");
+  const sandwich = (sandwichSection.products || []).find((product) => product.key === "grilled_chicken_cold_sandwich");
+  assertObject(sandwich, "plannerCatalog grilled chicken sandwich");
+  assert.strictEqual(sandwich.action.type, "direct_add", "plannerCatalog sandwich action");
+
+  const saladSection = sectionByKey(catalog, "premium_large_salad");
+  assertObject(saladSection, "plannerCatalog premium salad section");
+  const saladProduct = firstProduct(saladSection, "plannerCatalog premium salad");
+  assert.strictEqual(saladProduct.selectionType, "premium_large_salad", "plannerCatalog premium salad selectionType");
+  assertObject(saladProduct.pricing, "plannerCatalog premium salad pricing");
+  assertArray(saladProduct.optionGroups, "plannerCatalog premium salad optionGroups");
+  assert(
+    saladProduct.optionGroups.some((group) => group.key === "vegetables_legumes" && group.canonicalGroupKey === "vegetables"),
+    "plannerCatalog keeps DB salad group key with migration alias"
+  );
+  assert(
+    !saladProduct.optionGroups.some((group) => group.key === "extra_protein_50g"),
+    "plannerCatalog omits premium salad extra protein group"
+  );
+}
+
 async function enrichContractFixtureMetadata() {
   const proteinsGroup = await MenuOptionGroup.findOne({ key: "proteins" }).lean();
   assertObject(proteinsGroup, "proteins fixture group");
@@ -237,6 +306,14 @@ async function run() {
     assertObject(res.body.data, "default response data");
     assertDefaultTopLevelCompatibility(res.body.data);
     assertBuilderCatalogV2(res.body.data.builderCatalogV2, res.body.data.builderCatalog);
+
+    res = await api.get("/api/subscriptions/meal-planner-menu?contractVersion=v3&lang=en");
+    assert.strictEqual(res.status, 200, `v3 catalog status: ${JSON.stringify(res.body)}`);
+    assert.strictEqual(res.body.status, true, "v3 response status");
+    assertObject(res.body.data, "v3 response data");
+    assertObject(res.body.data.builderCatalog, "v3 response keeps builderCatalog compatibility");
+    assertObject(res.body.data.builderCatalogV2, "v3 response keeps builderCatalogV2 compatibility");
+    assertPlannerCatalogV3(res.body.data.plannerCatalog);
 
     res = await api.get("/api/subscriptions/meal-planner-menu?includeLegacy=true&lang=en");
     assert.strictEqual(res.status, 200, `includeLegacy catalog status: ${JSON.stringify(res.body)}`);

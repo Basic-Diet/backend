@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const MenuOption = require("../../models/MenuOption");
 const MenuOptionGroup = require("../../models/MenuOptionGroup");
 const MenuProduct = require("../../models/MenuProduct");
@@ -46,6 +47,7 @@ const {
 } = require("./catalogAvailabilityService");
 
 const BUILDER_CATALOG_V2_VERSION = "meal_planner_menu.v2";
+const PLANNER_CATALOG_V3_VERSION = "meal_planner_menu.v3";
 const MENU_PROTEIN_GROUP_KEY = "proteins";
 const MENU_CARB_GROUP_KEY = "carbs";
 const MENU_SALAD_EXTRA_PROTEIN_GROUP_KEY = "extra_protein_50g";
@@ -537,6 +539,350 @@ function buildV2ProductFromMenuProduct(product, lang, overrides = {}) {
   });
 }
 
+function buildNutritionPayload(row = {}) {
+  const nutrition = row.nutrition && typeof row.nutrition === "object" ? row.nutrition : {};
+  return {
+    calories: Number(nutrition.calories ?? row.calories ?? 0),
+    proteinGrams: Number(nutrition.proteinGrams ?? row.proteinGrams ?? 0),
+    carbGrams: Number(nutrition.carbGrams ?? row.carbGrams ?? 0),
+    fatGrams: Number(nutrition.fatGrams ?? row.fatGrams ?? 0),
+  };
+}
+
+function buildV3CatalogHash(payload) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex");
+}
+
+function buildV3PricingPayload(product = {}, overrides = {}) {
+  return {
+    model: overrides.pricingModel || product.pricingModel || "fixed",
+    basePriceHalala: Number(overrides.priceHalala ?? product.priceHalala ?? 0),
+    extraFeeHalala: Number(overrides.extraFeeHalala ?? 0),
+    currency: overrides.currency || product.currency || SYSTEM_CURRENCY,
+  };
+}
+
+function buildV3ProductPayload(product, lang, overrides = {}) {
+  return sanitizeObject({
+    id: String(product._id),
+    key: product.key || "",
+    selectionType: overrides.selectionType || product.selectionType || "",
+    itemType: product.itemType || "",
+    name: localized(product.name, lang),
+    nameI18n: localizedPair(product.name),
+    description: localized(product.description, lang),
+    descriptionI18n: localizedPair(product.description),
+    imageUrl: product.imageUrl || "",
+    pricing: buildV3PricingPayload(product, overrides.pricing || {}),
+    nutrition: buildNutritionPayload(product),
+    action: overrides.action || {
+      type: overrides.optionGroups && overrides.optionGroups.length ? "open_builder" : "direct_add",
+      requiresBuilder: Boolean(overrides.optionGroups && overrides.optionGroups.length),
+    },
+    ui: normalizeProductUiMetadata(product.ui),
+    optionGroups: overrides.optionGroups || [],
+    sortOrder: Number(product.sortOrder || 0),
+    premiumKey: overrides.premiumKey,
+    presetKey: overrides.presetKey,
+    priceSource: overrides.priceSource,
+  });
+}
+
+function buildV3OptionPayload({ option, relation, lang, overrides = {} }) {
+  const extraPriceHalala = Number(relation?.extraPriceHalala ?? option.extraPriceHalala ?? 0);
+  const proteinFamilyKey = resolveProteinVisualFamilyKey(option) || option.proteinFamilyKey || "";
+
+  return sanitizeObject({
+    id: String(option._id),
+    optionId: String(option._id),
+    key: option.key || "",
+    name: localized(option.name, lang),
+    nameI18n: localizedPair(option.name),
+    description: localized(option.description, lang),
+    descriptionI18n: localizedPair(option.description),
+    imageUrl: option.imageUrl || "",
+    nutrition: buildNutritionPayload(option),
+    extraPriceHalala,
+    extraFeeHalala: Number(relation?.extraPriceHalala ?? option.extraFeeHalala ?? option.extraPriceHalala ?? 0),
+    extraWeightUnitGrams: Number(relation?.extraWeightUnitGrams ?? option.extraWeightUnitGrams ?? 0),
+    extraWeightPriceHalala: Number(relation?.extraWeightPriceHalala ?? option.extraWeightPriceHalala ?? 0),
+    currency: option.currency || SYSTEM_CURRENCY,
+    proteinFamilyKey,
+    proteinFamilyNameI18n: proteinFamilyKey ? getProteinFamilyNameI18n(proteinFamilyKey) : undefined,
+    displayCategoryKey: option.displayCategoryKey || proteinFamilyKey || "",
+    isPremium: overrides.isPremium === undefined ? Boolean(option.isPremium) : Boolean(overrides.isPremium),
+    premiumKey: option.premiumKey || option.key || null,
+    ruleTags: Array.isArray(option.ruleTags) ? option.ruleTags : [],
+    sortOrder: Number(relation?.sortOrder ?? option.sortOrder ?? 0),
+  });
+}
+
+async function buildV3ProductOptionGroups({ product, lang, optionFilter = null, groupKeyResolver = null }) {
+  if (!product) return [];
+
+  const groupRelations = await ProductOptionGroup.find(activeRelationQuery({ productId: product._id }))
+    .sort({ sortOrder: 1, createdAt: -1 })
+    .lean();
+  const groupIds = groupRelations.map((relation) => relation.groupId);
+  const groups = await MenuOptionGroup.find(activeCatalogQuery({ _id: { $in: groupIds } })).lean();
+  const groupsById = new Map(groups.map((group) => [String(group._id), group]));
+  const allowedGroupIds = new Set(groups.map((group) => String(group._id)));
+  const optionRelations = await ProductGroupOption.find(activeRelationQuery({
+    productId: product._id,
+    groupId: { $in: [...allowedGroupIds] },
+  }))
+    .sort({ sortOrder: 1, createdAt: -1 })
+    .lean();
+  const optionIds = optionRelations.map((relation) => relation.optionId);
+  const optionRows = await MenuOption.find(activeCatalogQuery({
+    _id: { $in: optionIds },
+    availableForSubscription: { $ne: false },
+    ...availableForChannelQuery("subscription"),
+  })).lean();
+  const catalogItemsById = await loadCatalogItemsByIdForDocs(optionRows);
+  const options = filterGloballyAvailable(optionRows, catalogItemsById);
+  const optionsById = new Map(options.map((option) => [String(option._id), option]));
+  const optionRelationsByGroup = new Map();
+
+  for (const relation of optionRelations) {
+    const groupId = String(relation.groupId);
+    if (!optionRelationsByGroup.has(groupId)) optionRelationsByGroup.set(groupId, []);
+    optionRelationsByGroup.get(groupId).push(relation);
+  }
+
+  return groupRelations
+    .map((relation) => {
+      const group = groupsById.get(String(relation.groupId));
+      if (!group) return null;
+
+      const resolvedGroupKeys = typeof groupKeyResolver === "function"
+        ? groupKeyResolver(group)
+        : { key: group.key };
+      if (!resolvedGroupKeys) return null;
+
+      const groupOptions = (optionRelationsByGroup.get(String(relation.groupId)) || [])
+        .map((optionRelation) => {
+          const option = optionsById.get(String(optionRelation.optionId));
+          if (!option) return null;
+          if (typeof optionFilter === "function" && !optionFilter({ option, group, relation: optionRelation })) {
+            return null;
+          }
+          return buildV3OptionPayload({ option, relation: optionRelation, lang });
+        })
+        .filter(Boolean)
+        .sort(sortByCatalogOrder);
+
+      return sanitizeObject({
+        id: String(group._id),
+        groupId: String(group._id),
+        key: resolvedGroupKeys.key || group.key,
+        canonicalGroupKey: resolvedGroupKeys.canonicalGroupKey,
+        sourceKey: resolvedGroupKeys.sourceKey || group.key,
+        name: localized(group.name, lang),
+        nameI18n: localizedPair(group.name),
+        minSelections: Number(relation.minSelections || 0),
+        maxSelections: relation.maxSelections === null || relation.maxSelections === undefined
+          ? null
+          : Number(relation.maxSelections),
+        isRequired: Boolean(relation.isRequired ?? Number(relation.minSelections || 0) > 0),
+        sortOrder: Number(relation.sortOrder || 0),
+        ui: normalizeGroupUiMetadata(group.ui),
+        optionSections: group.key === MENU_PROTEIN_GROUP_KEY ? buildProteinOptionSections(groupOptions, lang) : undefined,
+        options: groupOptions,
+      });
+    })
+    .filter(Boolean)
+    .filter((group) => group.options.length > 0 || group.isRequired)
+    .sort((left, right) => left.sortOrder - right.sortOrder);
+}
+
+function buildV3OptionFromNormalizedCatalogOption(option = {}, lang = "en", overrides = {}) {
+  const nameI18n = option.nameI18n || localizedPair(option.name);
+  const descriptionI18n = option.descriptionI18n || localizedPair(option.description);
+  const proteinFamilyKey = resolveProteinVisualFamilyKey(option) || option.proteinFamilyKey || "";
+
+  return sanitizeObject({
+    id: String(option.id || option.optionId || option._id || ""),
+    optionId: String(option.optionId || option.id || option._id || ""),
+    key: option.key || option.premiumKey || "",
+    name: typeof option.name === "string" ? option.name : localized(option.name, lang),
+    nameI18n,
+    description: typeof option.description === "string" ? option.description : localized(option.description, lang),
+    descriptionI18n,
+    imageUrl: option.imageUrl || "",
+    nutrition: buildNutritionPayload(option),
+    extraPriceHalala: Number(option.extraPriceHalala ?? option.extraFeeHalala ?? 0),
+    extraFeeHalala: Number(option.extraFeeHalala ?? option.extraPriceHalala ?? 0),
+    currency: option.currency || SYSTEM_CURRENCY,
+    proteinFamilyKey,
+    proteinFamilyNameI18n: proteinFamilyKey ? getProteinFamilyNameI18n(proteinFamilyKey) : undefined,
+    displayCategoryKey: option.displayCategoryKey || proteinFamilyKey || "",
+    isPremium: option.isPremium === undefined ? undefined : Boolean(option.isPremium),
+    premiumKey: option.premiumKey || option.key || null,
+    ruleTags: Array.isArray(option.ruleTags) ? option.ruleTags : [],
+    sortOrder: Number(option.sortOrder || 0),
+    ...overrides,
+  });
+}
+
+function applyV3PremiumMealCompatibilityOptions({ optionGroups, builderCatalog, lang }) {
+  const premiumOptions = (builderCatalog?.premiumProteins || [])
+    .map((option) => buildV3OptionFromNormalizedCatalogOption(option, lang, {
+      isPremium: true,
+      selectionType: MEAL_SELECTION_TYPES.PREMIUM_MEAL,
+    }))
+    .sort(sortByCatalogOrder);
+
+  return (optionGroups || []).map((group) => {
+    if (group.sourceKey !== MENU_PROTEIN_GROUP_KEY && group.key !== MENU_PROTEIN_GROUP_KEY) return group;
+    return sanitizeObject({
+      ...group,
+      options: premiumOptions,
+      optionSections: buildProteinOptionSections(premiumOptions, lang),
+      compatibilitySource: "canonical_menu_option_premium_filter",
+    });
+  });
+}
+
+async function buildCanonicalPlannerCatalogV3({ builderCatalog, context = {}, lang = "en" } = {}) {
+  const basicMealProduct = context.basicMealProduct || null;
+  const premiumLargeSaladProduct = context.premiumLargeSaladProduct || null;
+  const premiumLargeSaladPricing = context.premiumLargeSaladPricing || {};
+
+  const standardMealGroups = await buildV3ProductOptionGroups({
+    product: basicMealProduct,
+    lang,
+    optionFilter({ option, group }) {
+      if (group.key === MENU_PROTEIN_GROUP_KEY) return !isPremiumMealProtein(option);
+      if (group.key === MENU_CARB_GROUP_KEY) return isCustomerVisibleCarb(option);
+      return true;
+    },
+  });
+
+  const premiumMealRelationGroups = await buildV3ProductOptionGroups({
+    product: basicMealProduct,
+    lang,
+    optionFilter({ option, group }) {
+      if (group.key === MENU_PROTEIN_GROUP_KEY) return isPremiumMealProtein(option);
+      if (group.key === MENU_CARB_GROUP_KEY) return isCustomerVisibleCarb(option);
+      return true;
+    },
+  });
+  const premiumMealGroups = applyV3PremiumMealCompatibilityOptions({
+    optionGroups: premiumMealRelationGroups,
+    builderCatalog,
+    lang,
+  });
+
+  const premiumLargeSaladGroups = await buildV3ProductOptionGroups({
+    product: premiumLargeSaladProduct,
+    lang,
+    groupKeyResolver(group) {
+      const aliasKey = MENU_SALAD_GROUP_ALIASES[group.key] || group.key;
+      const canonicalGroupKey = normalizeMenuSaladGroupKey(aliasKey);
+      if (!canonicalGroupKey) return null;
+      if (SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEY_SET.has(canonicalGroupKey)) return null;
+      return {
+        key: group.key,
+        sourceKey: group.key,
+        canonicalGroupKey: canonicalGroupKey === group.key ? undefined : canonicalGroupKey,
+      };
+    },
+  });
+
+  const sandwichProducts = (context.sandwiches || [])
+    .map((product) => buildV3ProductPayload(product, lang, {
+      selectionType: MEAL_SELECTION_TYPES.SANDWICH,
+      action: { type: "direct_add", requiresBuilder: false },
+      optionGroups: [],
+    }))
+    .sort(sortByCatalogOrder);
+
+  const sections = [
+    {
+      id: `section:${MEAL_SELECTION_TYPES.STANDARD_MEAL}`,
+      key: MEAL_SELECTION_TYPES.STANDARD_MEAL,
+      type: "configurable_product",
+      name: lang === "ar" ? "وجبة عادية" : "Standard Meal",
+      nameI18n: { ar: "وجبة عادية", en: "Standard Meal" },
+      ui: normalizeUiMetadata({ cardVariant: "hero_builder_collection", layout: "vertical_hero_list" }),
+      products: basicMealProduct ? [
+        buildV3ProductPayload(basicMealProduct, lang, {
+          selectionType: MEAL_SELECTION_TYPES.STANDARD_MEAL,
+          action: { type: "open_builder", requiresBuilder: true },
+          optionGroups: standardMealGroups,
+        }),
+      ] : [],
+    },
+    {
+      id: `section:${MEAL_SELECTION_TYPES.PREMIUM_MEAL}`,
+      key: MEAL_SELECTION_TYPES.PREMIUM_MEAL,
+      type: "configurable_product",
+      name: lang === "ar" ? "وجبة مميزة" : "Premium Meal",
+      nameI18n: { ar: "وجبة مميزة", en: "Premium Meal" },
+      ui: normalizeUiMetadata({ cardVariant: "premium", layout: "vertical_hero_list" }),
+      products: basicMealProduct ? [
+        buildV3ProductPayload(basicMealProduct, lang, {
+          selectionType: MEAL_SELECTION_TYPES.PREMIUM_MEAL,
+          action: { type: "open_builder", requiresBuilder: true },
+          optionGroups: premiumMealGroups,
+        }),
+      ] : [],
+    },
+    {
+      id: `section:${MEAL_SELECTION_TYPES.SANDWICH}`,
+      key: MEAL_SELECTION_TYPES.SANDWICH,
+      type: "product_list",
+      name: lang === "ar" ? "ساندويتشات" : "Sandwiches",
+      nameI18n: { ar: "ساندويتشات", en: "Sandwiches" },
+      ui: normalizeUiMetadata({ cardVariant: "sandwich_card", layout: "vertical_compact_cards" }),
+      products: sandwichProducts,
+    },
+    {
+      id: `section:${MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD}`,
+      key: MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD,
+      type: "configurable_product",
+      name: lang === "ar" ? "سلطة كبيرة مميزة" : "Premium Large Salad",
+      nameI18n: { ar: "سلطة كبيرة مميزة", en: "Premium Large Salad" },
+      ui: normalizeUiMetadata({ cardVariant: "large_salad", layout: "vertical_hero_list" }),
+      products: premiumLargeSaladProduct && !premiumLargeSaladPricing.isCatalogUnavailable ? [
+        buildV3ProductPayload(premiumLargeSaladProduct, lang, {
+          selectionType: MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD,
+          premiumKey: PREMIUM_LARGE_SALAD_PREMIUM_KEY,
+          presetKey: PREMIUM_LARGE_SALAD_PRESET_KEY,
+          priceSource: premiumLargeSaladPricing.source || "",
+          pricing: {
+            priceHalala: premiumLargeSaladPricing.priceHalala,
+            extraFeeHalala: premiumLargeSaladPricing.extraFeeHalala,
+            currency: premiumLargeSaladPricing.currency || SYSTEM_CURRENCY,
+          },
+          action: { type: "open_builder", requiresBuilder: true },
+          optionGroups: premiumLargeSaladGroups,
+        }),
+      ] : [],
+    },
+  ];
+
+  const stablePayload = {
+    contractVersion: PLANNER_CATALOG_V3_VERSION,
+    currency: SYSTEM_CURRENCY,
+    sections,
+    rules: {
+      ...getMealPlannerRules(),
+      version: "meal_planner_rules.v4",
+    },
+  };
+
+  return sanitizeObject({
+    ...stablePayload,
+    catalogHash: `sha256:${buildV3CatalogHash(stablePayload)}`,
+    publishedVersionId: null,
+  });
+}
+
 async function enrichSandwichProductsWithCompatibilityMetadata(products = []) {
   const ids = (products || []).map((product) => product && product._id).filter(Boolean);
   if (!ids.length) return products || [];
@@ -808,9 +1154,9 @@ async function buildSubscriptionBuilderCatalogV2({ builderCatalog, context = {},
   });
 }
 
-async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = true } = {}) {
+async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = true, includeV3 = false } = {}) {
   const coldSandwichCategory = await MenuCategory.findOne(activeCatalogQuery({ key: "cold_sandwiches" })).lean();
-  const [proteinGroupData, carbGroupData, sandwichRows, premiumLargeSaladPricing] = await Promise.all([
+  const [proteinGroupData, carbGroupData, sandwichRows, basicMealProduct, premiumLargeSaladPricing] = await Promise.all([
     getGroupOptionsWithGroup(MENU_PROTEIN_GROUP_KEY),
     getGroupOptionsWithGroup(MENU_CARB_GROUP_KEY),
     coldSandwichCategory
@@ -822,6 +1168,11 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
       .sort({ sortOrder: 1, createdAt: -1 })
       .lean()
       : [],
+    MenuProduct.findOne(activeCatalogQuery({
+      key: "basic_meal",
+      itemType: "basic_meal",
+      ...availableForChannelQuery("subscription"),
+    })).lean(),
     resolvePremiumLargeSaladPricing(),
   ]);
   const sandwichCatalogItemsById = await loadCatalogItemsByIdForDocs(sandwichRows);
@@ -962,8 +1313,20 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
       },
     })
     : null;
+  const plannerCatalog = includeV3
+    ? await buildCanonicalPlannerCatalogV3({
+      builderCatalog,
+      lang,
+      context: {
+        basicMealProduct,
+        sandwiches,
+        premiumLargeSaladProduct,
+        premiumLargeSaladPricing,
+      },
+    })
+    : null;
 
-  return { builderCatalog, builderCatalogV2 };
+  return { builderCatalog, builderCatalogV2, plannerCatalog };
 }
 
 async function getSubscriptionBuilderCatalog({ lang = "en" } = {}) {
@@ -971,11 +1334,12 @@ async function getSubscriptionBuilderCatalog({ lang = "en" } = {}) {
   return builderCatalog;
 }
 
-async function getSubscriptionBuilderCatalogWithV2({ lang = "en" } = {}) {
-  return buildSubscriptionBuilderCatalogBundle({ lang });
+async function getSubscriptionBuilderCatalogWithV2({ lang = "en", includeV3 = false } = {}) {
+  return buildSubscriptionBuilderCatalogBundle({ lang, includeV3 });
 }
 
 module.exports = {
+  buildCanonicalPlannerCatalogV3,
   buildSubscriptionBuilderCatalogV2,
   getSubscriptionBuilderCatalog,
   getSubscriptionBuilderCatalogWithV2,
