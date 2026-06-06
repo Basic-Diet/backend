@@ -1142,7 +1142,7 @@ async function getOptionDetail(id, options = {}) {
 function normalizeCategoryPayload(body = {}, existing = null) {
   if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
   assertImmutableKey(body, existing, "key");
-  const hasUi = body.ui !== undefined;
+  const hasUi = body.ui !== undefined && body.ui !== null;
   if (
     hasUi
     && (
@@ -1177,7 +1177,7 @@ function normalizeProductPayload(body = {}, existing = null) {
   if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
   assertImmutableKey(body, existing, "key");
   assertImmutableCatalogItemLink(body, existing);
-  const hasUi = body.ui !== undefined;
+  const hasUi = body.ui !== undefined && body.ui !== null;
   if (
     hasUi
     && (

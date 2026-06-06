@@ -889,6 +889,13 @@ async function seedViaDashboard(api) {
       assert.strictEqual(res.body.data.key, "spicy_bowls");
 
       res = await api.patch(`/api/dashboard/menu/categories/${generatedCategory.id}`).set(adminHeaders).send({
+        name: { en: "Renamed Bowls", ar: "أطباق جديدة" },
+        ui: null,
+      });
+      expectStatus(res, 200, "category update accepts omitted dashboard ui fields");
+      assert.strictEqual(res.body.data.ui.cardVariant, "addon_collection");
+
+      res = await api.patch(`/api/dashboard/menu/categories/${generatedCategory.id}`).set(adminHeaders).send({
         key: "changed_key",
         name: { en: "Renamed Bowls", ar: "أطباق جديدة" },
       });
@@ -905,6 +912,18 @@ async function seedViaDashboard(api) {
       });
       expectStatus(res, 200, "rename generated product");
       assert.strictEqual(res.body.data.key, "spicy_chicken");
+
+      res = await api.patch(`/api/dashboard/menu/products/${generatedProduct.id}`).set(adminHeaders).send({
+        name: { en: "Renamed Spicy Chicken", ar: "دجاج حار جديد" },
+        ui: null,
+      });
+      expectStatus(res, 200, "product update accepts omitted dashboard ui fields");
+      assert.deepStrictEqual(res.body.data.ui, {
+        cardVariant: "premium",
+        badge: "New",
+        ctaLabel: "Customize",
+        imageRatio: "wide",
+      });
 
       res = await api.patch(`/api/dashboard/menu/products/${generatedProduct.id}`).set(adminHeaders).send({
         key: "changed_product_key",
