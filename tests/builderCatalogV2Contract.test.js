@@ -85,12 +85,13 @@ function allV2Groups(catalog) {
 function assertDefaultTopLevelCompatibility(data) {
   assert.deepStrictEqual(
     Object.keys(data).sort(),
-    ["addonCatalog", "builderCatalog", "builderCatalogV2"].sort(),
-    "default meal-planner-menu response must not gain hidden legacy or renamed fields"
+    ["addonCatalog", "builderCatalog", "builderCatalogV2", "plannerCatalog"].sort(),
+    "default meal-planner-menu response exposes canonical planner catalog plus compatibility fields"
   );
   assertObject(data.builderCatalog, "data.builderCatalog");
   assertObject(data.addonCatalog, "data.addonCatalog");
   assertObject(data.builderCatalogV2, "data.builderCatalogV2");
+  assertObject(data.plannerCatalog, "data.plannerCatalog");
   assert.strictEqual(Object.prototype.hasOwnProperty.call(data, "regularMeals"), false, "regularMeals is includeLegacy-only");
   assert.strictEqual(Object.prototype.hasOwnProperty.call(data, "premiumMeals"), false, "premiumMeals is includeLegacy-only");
   assert.strictEqual(Object.prototype.hasOwnProperty.call(data, "addons"), false, "addons is includeLegacy-only");
@@ -238,11 +239,8 @@ function assertPlannerCatalogV3(catalog) {
   assert.strictEqual(premiumProduct.selectionType, "premium_meal", "plannerCatalog premium selectionType");
   const premiumProteinGroup = groupByKey(premiumProduct, "proteins");
   assertObject(premiumProteinGroup, "plannerCatalog premium proteins group");
-  assert.strictEqual(
-    premiumProteinGroup.compatibilitySource,
-    "canonical_menu_option_premium_filter",
-    "plannerCatalog documents current premium relation compatibility adapter"
-  );
+  assertArray(premiumProteinGroup.options, "plannerCatalog premium relation proteins");
+  assert(premiumProteinGroup.options.some((option) => option.isPremium === true), "plannerCatalog premium proteins are relation-driven");
 
   const sandwichSection = sectionByKey(catalog, "sandwich");
   assertObject(sandwichSection, "plannerCatalog sandwich section");
@@ -282,6 +280,48 @@ async function enrichContractFixtureMetadata() {
         selectionType: "standard_meal",
         extraPriceHalala: 0,
         extraFeeHalala: 0,
+      },
+    }
+  );
+  await MenuOption.updateOne(
+    { groupId: proteinsGroup._id, "name.en": "Steak" },
+    {
+      $set: {
+        key: "beef_steak",
+        displayCategoryKey: "premium",
+        proteinFamilyKey: "beef",
+        premiumKey: "beef_steak",
+        selectionType: "premium_meal",
+        extraPriceHalala: 2000,
+        extraFeeHalala: 2000,
+      },
+    }
+  );
+  await MenuOption.updateOne(
+    { groupId: proteinsGroup._id, "name.en": "Shrimp" },
+    {
+      $set: {
+        key: "shrimp",
+        displayCategoryKey: "premium",
+        proteinFamilyKey: "fish",
+        premiumKey: "shrimp",
+        selectionType: "premium_meal",
+        extraPriceHalala: 2000,
+        extraFeeHalala: 2000,
+      },
+    }
+  );
+  await MenuOption.updateOne(
+    { groupId: proteinsGroup._id, "name.en": "Salmon" },
+    {
+      $set: {
+        key: "salmon",
+        displayCategoryKey: "premium",
+        proteinFamilyKey: "fish",
+        premiumKey: "salmon",
+        selectionType: "premium_meal",
+        extraPriceHalala: 2000,
+        extraFeeHalala: 2000,
       },
     }
   );

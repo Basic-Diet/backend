@@ -52,6 +52,7 @@ async function updateDaySelectionForClient({
   const selections = Array.isArray(body.selections) ? body.selections : (Array.isArray(body.meals) ? body.meals : []);
   const premiumSelections = Array.isArray(body.premiumSelections) ? body.premiumSelections : [];
   const mealSlots = Array.isArray(body.mealSlots) ? body.mealSlots : undefined;
+  const contractVersion = body.contractVersion || body.plannerContractVersion || body.version;
   const requestedOneTimeAddonIds = body.addonsOneTime || body.oneTimeAddonSelections;
 
   try {
@@ -62,6 +63,7 @@ async function updateDaySelectionForClient({
       selections,
       premiumSelections,
       mealSlots,
+      contractVersion,
       requestedOneTimeAddonIds,
       lang,
       runtime,
@@ -129,6 +131,7 @@ async function validateDaySelectionForClient({
   subscriptionId,
   date,
   mealSlots,
+  contractVersion,
   requestedOneTimeAddonIds,
   userId,
   lang,
@@ -151,6 +154,7 @@ async function validateDaySelectionForClient({
       subscriptionId,
       date,
       mealSlots,
+      contractVersion,
       requestedOneTimeAddonIds,
     });
     return buildSuccessResult(200, shapeMealPlannerReadFields({

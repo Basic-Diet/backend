@@ -6,6 +6,10 @@ const { getRestaurantBusinessDate } = require("../restaurantHoursService");
 const { resolveMealsPerDay, applyDayWalletSelections } = require("../../utils/subscription/subscriptionDaySelectionSync");
 const { getMealPlannerRules, mapPaymentRequirement, buildMealSlotDraft } = require("./mealSlotPlannerService");
 const { applyCanonicalDraftPlanningToDay } = require("./subscriptionDayPlanningService");
+const {
+  isCanonicalPlannerRequest,
+  validateCanonicalMealSlots,
+} = require("./canonicalMealSlotPlannerService");
 const { assertSubscriptionDayModifiable } = require("./subscriptionDayModificationPolicyService");
 const {
   resolveAddonChoiceProductById,
@@ -451,7 +455,7 @@ async function validateSelectionDateRangeOrThrow(date, sub, endDateOverride) {
   }
 }
 
-async function performDaySelectionUpdate({ userId, subscriptionId, date, selections = [], premiumSelections = [], mealSlots, requestedOneTimeAddonIds, runtime }) {
+async function performDaySelectionUpdate({ userId, subscriptionId, date, selections = [], premiumSelections = [], mealSlots, contractVersion, requestedOneTimeAddonIds, runtime }) {
   const totalSelected = (selections || []).length + (premiumSelections || []).length;
 
   // 1. Fetch context (Lean)
@@ -500,12 +504,20 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
 
     // 2. Build Draft & Reconcile Addons (In-Memory)
     const planningDraftSubscription = buildPlanningDraftSubscriptionView(subForDraft, existingDay);
-    const draft = await buildMealSlotDraft({
-      mealSlots,
-      mealsPerDayLimit,
-      maxSlotCount: planningLimits.maxSlotCount,
-      subscription: planningDraftSubscription,
-    });
+    const useCanonicalPlanner = isCanonicalPlannerRequest({ contractVersion, mealSlots });
+    const draft = useCanonicalPlanner
+      ? await validateCanonicalMealSlots({
+        mealSlots,
+        mealsPerDayLimit,
+        maxSlotCount: planningLimits.maxSlotCount,
+        subscription: planningDraftSubscription,
+      })
+      : await buildMealSlotDraft({
+        mealSlots,
+        mealsPerDayLimit,
+        maxSlotCount: planningLimits.maxSlotCount,
+        subscription: planningDraftSubscription,
+      });
     
     if (!draft.valid) {
       throw {
@@ -743,6 +755,7 @@ async function performDaySelectionValidation({
   subscriptionId,
   date,
   mealSlots = [],
+  contractVersion,
   requestedOneTimeAddonIds,
 }) {
   const requestedSub = await Subscription.findById(subscriptionId);
@@ -768,12 +781,20 @@ async function performDaySelectionValidation({
   const planningLimits = await resolveMealSlotPlanningLimits(sub);
   const mealsPerDayLimit = planningLimits.requiredSlotCount;
   const planningDraftSubscription = buildPlanningDraftSubscriptionView(sub, day);
-  const draft = await buildMealSlotDraft({
-    mealSlots,
-    mealsPerDayLimit,
-    maxSlotCount: planningLimits.maxSlotCount,
-    subscription: planningDraftSubscription,
-  });
+  const useCanonicalPlanner = isCanonicalPlannerRequest({ contractVersion, mealSlots });
+  const draft = useCanonicalPlanner
+    ? await validateCanonicalMealSlots({
+      mealSlots,
+      mealsPerDayLimit,
+      maxSlotCount: planningLimits.maxSlotCount,
+      subscription: planningDraftSubscription,
+    })
+    : await buildMealSlotDraft({
+      mealSlots,
+      mealsPerDayLimit,
+      maxSlotCount: planningLimits.maxSlotCount,
+      subscription: planningDraftSubscription,
+    });
   if (!draft.valid) {
     throw { status: 422, code: draft.errorCode || "INVALID_MEAL_PLAN", message: draft.errorMessage || "Meal planner validation failed", slotErrors: draft.slotErrors, rules: getMealPlannerRules(), valid: false };
   }
@@ -847,13 +868,26 @@ async function performDayPlanningConfirmation({ userId, subscriptionId, date, ru
     const planningLimits = await resolveMealSlotPlanningLimits(subInSession);
     const requiredSlotCount = planningLimits.requiredSlotCount;
     const planningDraftSubscription = buildPlanningDraftSubscriptionView(subInSession, day);
-    const validatedDraft = await buildMealSlotDraft({
+    const useCanonicalPlanner = isCanonicalPlannerRequest({
+      contractVersion: day.mealSlots && day.mealSlots.some((slot) => slot && slot.contractVersion) ? "v3" : null,
       mealSlots: day.mealSlots,
-      mealsPerDayLimit: requiredSlotCount,
-      maxSlotCount: planningLimits.maxSlotCount,
-      subscription: planningDraftSubscription,
-      session,
     });
+    const validatedDraft = useCanonicalPlanner
+      ? await validateCanonicalMealSlots({
+        mealSlots: day.mealSlots,
+        mealsPerDayLimit: requiredSlotCount,
+        maxSlotCount: planningLimits.maxSlotCount,
+        subscription: planningDraftSubscription,
+        session,
+        forConfirmation: true,
+      })
+      : await buildMealSlotDraft({
+        mealSlots: day.mealSlots,
+        mealsPerDayLimit: requiredSlotCount,
+        maxSlotCount: planningLimits.maxSlotCount,
+        subscription: planningDraftSubscription,
+        session,
+      });
     if (!validatedDraft.valid) {
       throw {
         status: 422,
@@ -943,6 +977,7 @@ async function performDayPlanningConfirmation({ userId, subscriptionId, date, ru
         $set: {
           plannerState: "confirmed",
           planningState: "confirmed",
+          mealSlots: day.mealSlots,
           plannerMeta: day.plannerMeta,
           planningMeta: day.planningMeta,
           materializedMeals: day.materializedMeals,

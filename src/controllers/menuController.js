@@ -347,7 +347,9 @@ async function getSubscriptionMealPlannerMenu(req, res) {
   const lang = getRequestLang(req);
   const includeLegacy = String(req.query?.includeLegacy || "").toLowerCase() === "true";
   const requestedContractVersion = String(req.query?.contractVersion || req.query?.version || "").trim().toLowerCase();
-  const includeV3 = requestedContractVersion === "v3" || requestedContractVersion === "meal_planner_menu.v3";
+  const includeV3 = !requestedContractVersion
+    || requestedContractVersion === "v3"
+    || requestedContractVersion === "meal_planner_menu.v3";
   const [regularMeals, mealCategories, addons, mealPlannerCatalog] = await Promise.all([
     Meal.find({ type: "regular", isActive: true, availableForSubscription: { $ne: false }, categoryId: { $ne: null } })
       .sort({ sortOrder: 1, createdAt: -1 })

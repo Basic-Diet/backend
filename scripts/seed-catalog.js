@@ -23,7 +23,14 @@ const { publishMenu } = require("../src/services/orders/menuCatalogService");
 const { getOneTimeOrderMenu } = require("../src/services/orders/orderMenuService");
 const { pickupLocations, settings } = require("./fixtures/subscription-demo-data");
 const { seedSubscriptionPlans } = require("./seed-subscription-plans");
-const { CUSTOMER_VISIBLE_CARB_KEYS, STANDARD_MEAL_PROTEIN_KEYS } = require("../src/config/mealPlannerContract");
+const {
+  CUSTOMER_VISIBLE_CARB_KEYS,
+  PREMIUM_MEAL_PROTEIN_KEYS,
+  STANDARD_MEAL_PROTEIN_KEYS,
+  SUBSCRIPTION_COLD_SANDWICH_KEYS,
+  SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS,
+  SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS,
+} = require("../src/config/mealPlannerContract");
 
 const canonicalCatalogItems = [
   // Carbs
@@ -184,7 +191,7 @@ async function verifySeedReadContracts({ strict = true } = {}) {
     .find((product) => product.key === "water");
   check(directAddProduct?.action?.type === "direct_add", "publicMenuV2 water direct-add action missing");
 
-  const { builderCatalogV2 } = await getSubscriptionBuilderCatalogWithV2({ lang: "en" });
+  const { builderCatalogV2, plannerCatalog } = await getSubscriptionBuilderCatalogWithV2({ lang: "en", includeV3: true });
   check(builderCatalogV2, "Seeded subscription catalog did not produce builderCatalogV2");
   if (!builderCatalogV2) return false;
   check(builderCatalogV2.catalogVersion === "meal_planner_menu.v2", "builderCatalogV2 catalogVersion mismatch");
@@ -194,9 +201,52 @@ async function verifySeedReadContracts({ strict = true } = {}) {
       `builderCatalogV2 ${sectionKey} section missing`
     );
   }
+  check(plannerCatalog, "Seeded subscription catalog did not produce plannerCatalog");
+  check(plannerCatalog?.contractVersion === "meal_planner_menu.v3", "plannerCatalog contractVersion mismatch");
+  check(Array.isArray(plannerCatalog?.sections) && plannerCatalog.sections.length > 0, "plannerCatalog.sections is empty");
+  for (const sectionKey of ["standard_meal", "premium_meal", "sandwich", "premium_large_salad"]) {
+    check(
+      plannerCatalog.sections?.some((section) => section.key === sectionKey),
+      `plannerCatalog ${sectionKey} section missing`
+    );
+  }
+  const standardSection = plannerCatalog.sections?.find((section) => section.key === "standard_meal");
+  const standardProduct = standardSection?.products?.find((product) => product.key === "basic_meal");
+  check(standardProduct, "plannerCatalog standard_meal basic_meal product missing");
+  const standardProteinGroup = standardProduct?.optionGroups?.find((group) => group.sourceKey === "proteins" || group.key === "proteins");
+  const standardCarbGroup = standardProduct?.optionGroups?.find((group) => group.sourceKey === "carbs" || group.key === "carbs");
+  check(standardProteinGroup?.minSelections === 1 && standardProteinGroup?.maxSelections === 1, "plannerCatalog standard protein min/max mismatch");
+  check(Array.isArray(standardProteinGroup?.options) && standardProteinGroup.options.length > 0, "plannerCatalog standard protein options missing");
+  check(standardCarbGroup?.minSelections === 1 && standardCarbGroup?.maxSelections === 2, "plannerCatalog standard carb min/max mismatch");
+  check(Array.isArray(standardCarbGroup?.options) && standardCarbGroup.options.length > 0, "plannerCatalog standard carb options missing");
+  check(
+    standardCarbGroup?.options?.every((option) => CUSTOMER_VISIBLE_CARB_KEYS.includes(option.key)),
+    "plannerCatalog standard carb options include non-customer-visible carbs"
+  );
+
+  const premiumSection = plannerCatalog.sections?.find((section) => section.key === "premium_meal");
+  const premiumProduct = premiumSection?.products?.find((product) => product.key === "basic_meal");
+  const premiumProteinGroup = premiumProduct?.optionGroups?.find((group) => group.sourceKey === "proteins" || group.key === "proteins");
+  check(Array.isArray(premiumProteinGroup?.options) && premiumProteinGroup.options.length > 0, "plannerCatalog premium protein options missing");
+  check(
+    premiumProteinGroup?.options?.every((option) => PREMIUM_MEAL_PROTEIN_KEYS.includes(option.key)),
+    "plannerCatalog premium protein options do not match premium contract"
+  );
+  check(
+    premiumProteinGroup?.options?.every((option) => Number(option.extraPriceHalala || option.extraFeeHalala || 0) > 0),
+    "plannerCatalog premium protein relation prices missing"
+  );
+
+  const saladSection = plannerCatalog.sections?.find((section) => section.key === "premium_large_salad");
+  const saladProduct = saladSection?.products?.find((product) => product.key === "premium_large_salad");
+  check(saladProduct, "plannerCatalog premium_large_salad product missing");
+  check(
+    !(saladProduct?.optionGroups || []).some((group) => SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS.includes(group.key)),
+    "plannerCatalog premium_large_salad exposes excluded groups"
+  );
 
   console.log(strict
-    ? "Seed read-contract smoke checks passed: publicMenuV2 and builderCatalogV2."
+    ? "Seed read-contract smoke checks passed: publicMenuV2, builderCatalogV2, and plannerCatalog v3."
     : "Seed read-contract smoke checks completed in warning-only mode.");
   return true;
 }
@@ -337,19 +387,7 @@ const saladExtraProteinPriceOverrides = {
   extra_salmon_50g: 1000,
 };
 
-const subscriptionPremiumLargeSaladProteinKeys = [
-  "boiled_eggs",
-  "tuna",
-  "chicken_fajita",
-  "spicy_chicken",
-  "italian_spiced_chicken",
-  "chicken_tikka",
-  "asian_chicken",
-  "chicken_strips",
-  "grilled_chicken",
-  "mexican_chicken",
-  "fish_fillet",
-];
+const subscriptionPremiumLargeSaladProteinKeys = [...SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS];
 
 const standardMealProteinRelations = [
   "chicken",
@@ -378,11 +416,7 @@ const standardMealProteinRelations = [
   sortOrder: (index + 1) * 10,
 }));
 
-const premiumMealProteinKeys = [
-  "beef_steak",
-  "shrimp",
-  "salmon",
-];
+const premiumMealProteinKeys = [...PREMIUM_MEAL_PROTEIN_KEYS];
 
 const premiumMealProteinRelations = premiumMealProteinKeys.map((key, index) => ({
   key,
@@ -403,13 +437,8 @@ const premiumLargeSaladProteinRelations = subscriptionPremiumLargeSaladProteinKe
   sortOrder: (index + 1) * 10,
 }));
 
-// Canonical basic_meal protein allowlist — must match STANDARD_MEAL_PROTEIN_KEYS in mealPlannerContract.js
-const standardProteinOptionKeys = [
-  "chicken",
-  "beef",
-  "fish",
-  "eggs",
-];
+// Canonical one-time basic_meal protein allowlist comes from mealPlannerContract.
+const standardProteinOptionKeys = [...STANDARD_MEAL_PROTEIN_KEYS];
 
 const oneTimeMealProteinRelations = standardProteinOptionKeys.map((key, index) => ({
   key,
@@ -594,12 +623,12 @@ const productGroupAllowedOptionKeys = {
   },
   basic_meal: {
     carbs: [...CUSTOMER_VISIBLE_CARB_KEYS],
-    proteins: standardProteinOptionKeys,
+    proteins: [...standardProteinOptionKeys, ...PREMIUM_MEAL_PROTEIN_KEYS],
   },
   premium_large_salad: {
     ...customSaladAllowedOptions,
     proteins: premiumLargeSaladProteinRelations.map((row) => row.key),
-    extra_protein_50g: [],
+    ...Object.fromEntries(SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS.map((groupKey) => [groupKey, []])),
   },
   ...lightOptionAllowedOptions,
   ...Object.fromEntries(
@@ -621,6 +650,9 @@ const saladProductGroupOptionPriceOverrides = Object.fromEntries(
 );
 
 function resolveProductGroupOptionPriceHalala(productKey, groupKey, optionDef) {
+  if (productKey === "basic_meal" && groupKey === "proteins") {
+    return subscriptionProteinRelationByKey.get(optionDef.key)?.extraFeeHalala || 0;
+  }
   return saladProductGroupOptionPriceOverrides[productKey]?.[groupKey]?.[optionDef.key]
     ?? optionDef.extraPriceHalala
     ?? 0;
@@ -1181,11 +1213,14 @@ async function seedProducts({ catalogItemMap = new Map(), categoryMap, groupMap,
     );
     productMap.set(product.key, product);
 
+    const activeGroupIdsForProduct = [];
+
     if (Array.isArray(row.groups)) {
       for (let relationIndex = 0; relationIndex < row.groups.length; relationIndex += 1) {
         const [groupKey, minSelections, maxSelections, explicitRequired] = row.groups[relationIndex];
         const group = groupMap.get(groupKey);
         if (!group) throw new Error(`Missing option group ${groupKey} for ${row.key}`);
+        activeGroupIdsForProduct.push(group._id);
 
         await upsertByMode(
           ProductOptionGroup,
@@ -1255,6 +1290,26 @@ async function seedProducts({ catalogItemMap = new Map(), categoryMap, groupMap,
       }
     }
 
+    if (sync) {
+      const unavailable = { isActive: false, isVisible: false, isAvailable: false };
+      await Promise.all([
+        ProductOptionGroup.updateMany(
+          {
+            productId: product._id,
+            ...(activeGroupIdsForProduct.length ? { groupId: { $nin: activeGroupIdsForProduct } } : {}),
+          },
+          { $set: unavailable }
+        ),
+        ProductGroupOption.updateMany(
+          {
+            productId: product._id,
+            ...(activeGroupIdsForProduct.length ? { groupId: { $nin: activeGroupIdsForProduct } } : {}),
+          },
+          { $set: unavailable }
+        ),
+      ]);
+    }
+
     const hasExtraProtein = row.groups?.some(([groupKey]) => groupKey === "extra_protein_50g");
     const extraProteinGroup = groupMap.get("extra_protein_50g");
     if (sync && row.category === "meals" && !hasExtraProtein && extraProteinGroup) {
@@ -1270,16 +1325,7 @@ async function seedProducts({ catalogItemMap = new Map(), categoryMap, groupMap,
 }
 
 async function seedSandwichCompatibility(productMap, { sync = false } = {}) {
-  const subscriptionSandwichKeys = [
-    "turkey_cold_sandwich",
-    "boiled_egg_cold_sandwich",
-    "tuna_cold_sandwich",
-    "scrambled_egg_cold_sandwich",
-    "classic_halloumi_cold_sandwich",
-    "chicken_fajita_cold_sandwich",
-    "mexican_chicken_cold_sandwich",
-    "grilled_chicken_cold_sandwich",
-  ];
+  const subscriptionSandwichKeys = [...SUBSCRIPTION_COLD_SANDWICH_KEYS];
   const sandwichProducts = productRows.filter((row) => subscriptionSandwichKeys.includes(row.key));
   for (let index = 0; index < sandwichProducts.length; index += 1) {
     const row = sandwichProducts[index];

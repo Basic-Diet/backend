@@ -2304,6 +2304,7 @@ async function validateDaySelection(req, res) {
     subscriptionId: id,
     date,
     mealSlots: req.body && req.body.mealSlots,
+    contractVersion: req.body && (req.body.contractVersion || req.body.plannerContractVersion || req.body.version),
     requestedOneTimeAddonIds:
       req.body && req.body.addonsOneTime !== undefined
         ? req.body.addonsOneTime

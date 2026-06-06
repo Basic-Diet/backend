@@ -6,7 +6,11 @@ const MenuOption = require("../src/models/MenuOption");
 const CatalogItem = require("../src/models/CatalogItem");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
-const { CUSTOMER_VISIBLE_CARB_KEYS, STANDARD_MEAL_PROTEIN_KEYS } = require("../src/config/mealPlannerContract");
+const {
+  CUSTOMER_VISIBLE_CARB_KEYS,
+  PREMIUM_MEAL_PROTEIN_KEYS,
+  STANDARD_MEAL_PROTEIN_KEYS,
+} = require("../src/config/mealPlannerContract");
 
 describe("Seed Catalog: Empty DB and Idempotency Rules", () => {
   let replset;
@@ -56,7 +60,7 @@ describe("Seed Catalog: Empty DB and Idempotency Rules", () => {
       expect(riceOption.catalogItemId.toString()).toBe(riceItem._id.toString());
     });
 
-    it("Rule 5: basic_meal should strictly use standard proteins and customer visible carbs only", async () => {
+    it("Rule 5: basic_meal should use standard + premium planner proteins and customer visible carbs only", async () => {
       const basicMeal = await MenuProduct.findOne({ key: "basic_meal" });
       
       const pgos = await ProductGroupOption.find({ productId: basicMeal._id }).populate("groupId optionId");
@@ -64,7 +68,7 @@ describe("Seed Catalog: Empty DB and Idempotency Rules", () => {
       const proteinOptions = pgos.filter((pgo) => pgo.groupId.key === "proteins").map((pgo) => pgo.optionId.key);
       const carbOptions = pgos.filter((pgo) => pgo.groupId.key === "carbs").map((pgo) => pgo.optionId.key);
 
-      expect(proteinOptions.sort()).toEqual([...STANDARD_MEAL_PROTEIN_KEYS].sort());
+      expect(proteinOptions.sort()).toEqual([...STANDARD_MEAL_PROTEIN_KEYS, ...PREMIUM_MEAL_PROTEIN_KEYS].sort());
       expect(carbOptions.sort()).toEqual([...CUSTOMER_VISIBLE_CARB_KEYS].sort());
     });
 

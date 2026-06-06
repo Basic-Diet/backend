@@ -613,7 +613,7 @@ function buildV3OptionPayload({ option, relation, lang, overrides = {} }) {
     proteinFamilyKey,
     proteinFamilyNameI18n: proteinFamilyKey ? getProteinFamilyNameI18n(proteinFamilyKey) : undefined,
     displayCategoryKey: option.displayCategoryKey || proteinFamilyKey || "",
-    isPremium: overrides.isPremium === undefined ? Boolean(option.isPremium) : Boolean(overrides.isPremium),
+    isPremium: overrides.isPremium === undefined ? Boolean(option.isPremium || isPremiumMealProtein(option)) : Boolean(overrides.isPremium),
     premiumKey: option.premiumKey || option.key || null,
     ruleTags: Array.isArray(option.ruleTags) ? option.ruleTags : [],
     sortOrder: Number(relation?.sortOrder ?? option.sortOrder ?? 0),
@@ -771,11 +771,7 @@ async function buildCanonicalPlannerCatalogV3({ builderCatalog, context = {}, la
       return true;
     },
   });
-  const premiumMealGroups = applyV3PremiumMealCompatibilityOptions({
-    optionGroups: premiumMealRelationGroups,
-    builderCatalog,
-    lang,
-  });
+  const premiumMealGroups = premiumMealRelationGroups;
 
   const premiumLargeSaladGroups = await buildV3ProductOptionGroups({
     product: premiumLargeSaladProduct,

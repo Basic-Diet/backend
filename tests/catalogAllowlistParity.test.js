@@ -31,6 +31,16 @@ function extractConstStringArray(source, constName) {
   return [...match[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]);
 }
 
+function extractConstStringArrayOrSpread(source, constName, constantsByName = {}) {
+  const spreadMatch = source.match(new RegExp(`const\\s+${constName}\\s*=\\s*\\[\\s*\\.\\.\\.([A-Z0-9_]+)\\s*\\];`));
+  if (spreadMatch) {
+    const values = constantsByName[spreadMatch[1]];
+    assert(values, `Unknown spread constant ${spreadMatch[1]} for ${constName}`);
+    return [...values];
+  }
+  return extractConstStringArray(source, constName);
+}
+
 function extractConstArrayBody(source, constName, endPattern = "\\];") {
   const match = source.match(new RegExp(`const\\s+${constName}\\s*=\\s*\\[([\\s\\S]*?)${endPattern}`));
   assert(match, `Missing const array body ${constName}`);
@@ -70,29 +80,33 @@ function run() {
   const catalogServiceSource = read("src/services/catalog/CatalogService.js");
   const mealSlotPlannerSource = read("src/services/subscription/mealSlotPlannerService.js");
 
-  const seedPremiumLargeSaladProteins = extractConstStringArray(seedSource, "subscriptionPremiumLargeSaladProteinKeys");
+  const constantsByName = {
+    CUSTOMER_VISIBLE_CARB_KEYS,
+    PREMIUM_MEAL_PROTEIN_KEYS,
+    STANDARD_MEAL_PROTEIN_KEYS,
+    SUBSCRIPTION_COLD_SANDWICH_KEYS,
+    SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS,
+  };
+
+  const seedPremiumLargeSaladProteins = extractConstStringArrayOrSpread(seedSource, "subscriptionPremiumLargeSaladProteinKeys", constantsByName);
   assertSameSet(
     seedPremiumLargeSaladProteins,
     SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS,
     "seed premium large salad protein allowlist matches runtime contract"
   );
 
-  const premiumLargeSaladAllowedBlock = extractProductAllowedGroupBlock(seedSource, "premium_large_salad");
-  const seedExcludedGroups = [...premiumLargeSaladAllowedBlock.matchAll(/\b([a-z0-9_]+):\s*\[\s*\]/g)]
-    .map((match) => match[1]);
-  assertSameSet(
-    seedExcludedGroups,
-    SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS,
-    "seed premium large salad excluded groups match runtime contract"
+  assert(
+    seedSource.includes("SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS.map"),
+    "seed premium large salad excluded groups are derived from runtime contract"
   );
   assert(catalogServiceSource.includes("SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS"), "CatalogService uses excluded group contract");
   assert(mealSlotPlannerSource.includes("SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS"), "mealSlotPlannerService uses excluded group contract");
 
-  const seedStandardProteinKeys = extractConstStringArray(seedSource, "standardProteinOptionKeys");
+  const seedStandardProteinKeys = extractConstStringArrayOrSpread(seedSource, "standardProteinOptionKeys", constantsByName);
   assertSameSet(seedStandardProteinKeys, STANDARD_MEAL_PROTEIN_KEYS, "seed standard proteins match contract");
   assert(publicMenuSource.includes("STANDARD_MEAL_PROTEIN_KEYS"), "public menu serializer uses standard protein contract");
 
-  const seedPremiumMealProteins = extractConstStringArray(seedSource, "premiumMealProteinKeys");
+  const seedPremiumMealProteins = extractConstStringArrayOrSpread(seedSource, "premiumMealProteinKeys", constantsByName);
   assertSameSet(seedPremiumMealProteins, PREMIUM_MEAL_PROTEIN_KEYS, "seed premium meal proteins match contract");
 
   const seedCarbRows = extractConstArrayBody(seedSource, "carbRows");
@@ -101,7 +115,7 @@ function run() {
   assert(publicMenuSource.includes("CUSTOMER_VISIBLE_CARB_KEYS"), "public menu serializer uses customer-visible carb contract");
   assert(catalogServiceSource.includes("CUSTOMER_VISIBLE_CARB_KEYS"), "planner catalog uses customer-visible carb contract");
 
-  const seedSubscriptionSandwiches = extractConstStringArray(seedSource, "subscriptionSandwichKeys");
+  const seedSubscriptionSandwiches = extractConstStringArrayOrSpread(seedSource, "subscriptionSandwichKeys", constantsByName);
   assertSameSet(seedSubscriptionSandwiches, SUBSCRIPTION_COLD_SANDWICH_KEYS, "seed subscription sandwiches match contract");
   assert(catalogServiceSource.includes("SUBSCRIPTION_COLD_SANDWICH_KEYS"), "planner catalog uses subscription sandwich contract");
 

@@ -50,6 +50,31 @@ const MealSlotSchema = new mongoose.Schema(
       enum: ["standard_meal", "premium_meal", "premium_large_salad", "sandwich"],
       default: "standard_meal",
     },
+    contractVersion: { type: String, default: null, trim: true },
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: "MenuProduct", default: null },
+    productKey: { type: String, default: null, trim: true },
+    selectedOptions: {
+      type: [
+        {
+          groupId: { type: mongoose.Schema.Types.ObjectId, ref: "MenuOptionGroup", required: true },
+          groupKey: { type: String, required: true, trim: true },
+          canonicalGroupKey: { type: String, default: null, trim: true },
+          optionId: { type: mongoose.Schema.Types.ObjectId, ref: "MenuOption", required: true },
+          optionKey: { type: String, required: true, trim: true },
+          quantity: { type: Number, min: 1, default: 1 },
+          grams: { type: Number, min: 0, default: null },
+          unitPriceHalala: { type: Number, min: 0, default: 0 },
+          totalPriceHalala: { type: Number, min: 0, default: 0 },
+          extraWeightUnitGrams: { type: Number, min: 0, default: 0 },
+          extraWeightPriceHalala: { type: Number, min: 0, default: 0 },
+        },
+      ],
+      default: undefined,
+    },
+    pricingSnapshot: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    displaySnapshot: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    fulfillmentSnapshot: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    confirmationSnapshot: { type: mongoose.Schema.Types.Mixed, default: undefined },
     sandwichId: { type: mongoose.Schema.Types.ObjectId, ref: "Meal", default: null },
     carbs: {
       type: [
