@@ -127,6 +127,18 @@ async function main() {
     expectStatus(res, 201, "create sandwich product");
     const sandwichProduct = res.body.data;
 
+    res = await api.post("/api/dashboard/menu/products").set(adminHeaders).send({
+      categoryId: category.id,
+      key: `${TEST_KEY_TAG}_inactive_preview_product`,
+      name: { en: `${TEST_TAG} Inactive Preview`, ar: "Inactive Preview" },
+      itemType: "product",
+      pricingModel: "fixed",
+      priceHalala: 700,
+      isActive: false,
+    });
+    expectStatus(res, 201, "create inactive preview product");
+    const inactivePreviewProduct = res.body.data;
+
     res = await api.get(`/api/dashboard/menu/products?page=1&limit=10&categoryId=${category.id}`).set(adminHeaders);
     expectStatus(res, 200, "list products by categoryId");
     assert.strictEqual(res.body.status, true);
@@ -136,6 +148,7 @@ async function main() {
     assert(res.body.data.items.every((product) => String(product.categoryId) === String(category.id)), "all filtered products belong to requested category");
     assert(res.body.data.items.some((product) => product.id === directProduct.id), "filtered list includes direct product");
     assert(res.body.data.items.some((product) => product.id === customizableProduct.id), "filtered list includes weighted product");
+    assert(!res.body.data.items.some((product) => product.id === inactivePreviewProduct.id), "filtered list excludes inactive product by default");
     assert(!res.body.data.items.some((product) => product.id === targetProduct.id), "filtered list excludes target category product");
     assert(!res.body.data.items.some((product) => product.id === sandwichProduct.id), "filtered list excludes sandwich category product");
 
@@ -302,6 +315,40 @@ async function main() {
     res = await api.get("/api/dashboard/menu/options").set(adminHeaders);
     expectStatus(res, 200, "option list");
     assertNoDeprecatedOptionFields(res.body.data.find((row) => row.id === option.id), "option list item");
+
+    res = await api.get("/api/dashboard/menu/preview").set(adminHeaders);
+    expectStatus(res, 200, "dashboard preview");
+    assert.strictEqual(res.body.data.contractVersion, "dashboard_menu_preview.v1");
+    assert.strictEqual(res.body.data.includeInactive, false);
+    assert(Array.isArray(res.body.data.warnings), "preview exposes warnings array");
+    const previewCategory = res.body.data.categories.find((row) => row.id === category.id);
+    assert(previewCategory, "preview includes active category");
+    assert.strictEqual(previewCategory.categoryId, category.id);
+    assert.strictEqual(previewCategory.status.isActive, true);
+    const previewDirectProduct = previewCategory.products.find((row) => row.id === directProduct.id);
+    assert(previewDirectProduct, "preview includes linked direct product");
+    assert.strictEqual(previewDirectProduct.productId, directProduct.id);
+    assert.strictEqual(previewDirectProduct.categoryId, category.id);
+    assert.strictEqual(previewDirectProduct.isCustomizable, true);
+    assert.strictEqual(previewDirectProduct.status.isActive, true);
+    assert(!previewCategory.products.some((row) => row.id === inactivePreviewProduct.id), "default preview excludes inactive product");
+    const previewGroup = previewDirectProduct.optionGroups.find((row) => row.groupId === group.id);
+    assert(previewGroup, "preview includes product-specific option group");
+    assert.strictEqual(previewGroup.productGroupId !== undefined, true, "preview includes product group relation id");
+    assert.strictEqual(previewGroup.status.effective.isActive, true);
+    assert.strictEqual(previewGroup.options.length, 1, "preview includes only product-linked options");
+    assert.strictEqual(previewGroup.options[0].optionId, option.id);
+    assert.strictEqual(previewGroup.options[0].productOptionId !== undefined, true, "preview includes product option relation id");
+    assert.strictEqual(previewGroup.options[0].status.effective.isActive, true);
+    assert(!previewGroup.options.some((row) => row.optionId === String(inactiveOptionDoc._id)), "preview excludes unlinked global options");
+
+    res = await api.get("/api/dashboard/menu/preview?includeInactive=true").set(adminHeaders);
+    expectStatus(res, 200, "dashboard preview include inactive");
+    assert.strictEqual(res.body.data.includeInactive, true);
+    const inactivePreviewCategory = res.body.data.categories.find((row) => row.id === category.id);
+    const inactivePreviewRow = inactivePreviewCategory.products.find((row) => row.id === inactivePreviewProduct.id);
+    assert(inactivePreviewRow, "includeInactive preview includes inactive product");
+    assert.strictEqual(inactivePreviewRow.status.isActive, false);
 
     res = await api.get(`/api/dashboard/menu/categories/${category.id}?contractVersion=v2`).set(adminHeaders);
     expectStatus(res, 410, "category detail v2 is deprecated");

@@ -8,6 +8,8 @@ const router = Router();
 
 router.use(dashboardAuthMiddleware, dashboardRoleMiddleware(["admin", "superadmin"]));
 
+router.get("/preview", asyncHandler(controller.getPreview));
+
 router.get("/categories", asyncHandler(controller.listCategories));
 router.post("/categories", asyncHandler(controller.createCategory));
 router.patch("/categories/reorder", asyncHandler(controller.reorderCategories));

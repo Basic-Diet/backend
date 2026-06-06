@@ -74,6 +74,7 @@ const bulkAssignProductsToCategory = wrap(async (req, res) => send(res, await se
   req.body,
   actorFromRequest(req)
 )));
+const getPreview = wrap(async (req, res) => send(res, await service.getDashboardMenuPreview(listOptions(req))));
 
 const listProducts = wrap(async (req, res) => send(res, await service.listProducts(listOptions(req))));
 const createProduct = wrap(async (req, res) => send(res, await service.createProduct(req.body, actorFromRequest(req)), 201));
@@ -202,6 +203,7 @@ module.exports = {
   deleteCategory,
   reorderCategories,
   bulkAssignProductsToCategory,
+  getPreview,
   listProducts,
   createProduct,
   getProduct,

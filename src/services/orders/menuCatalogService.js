@@ -542,6 +542,78 @@ function serializePublicOption(relation, option, lang) {
   return payload;
 }
 
+function serializeStatus(doc = {}) {
+  return {
+    isActive: truthyByDefault(doc && doc.isActive),
+    isVisible: truthyByDefault(doc && doc.isVisible),
+    isAvailable: truthyByDefault(doc && doc.isAvailable),
+  };
+}
+
+function serializeEffectiveStatus(globalDoc = {}, relationDoc = {}) {
+  const global = serializeStatus(globalDoc);
+  const product = serializeStatus(relationDoc);
+  return {
+    global,
+    product,
+    effective: {
+      isActive: global.isActive && product.isActive,
+      isVisible: global.isVisible && product.isVisible,
+      isAvailable: global.isAvailable && product.isAvailable,
+    },
+  };
+}
+
+function serializeDashboardPreviewCategory(category, lang, products) {
+  return {
+    ...serializePublicCategory(category, lang, products),
+    categoryId: String(category._id),
+    status: serializeStatus(category),
+    isActive: truthyByDefault(category.isActive),
+    isVisible: truthyByDefault(category.isVisible),
+    isAvailable: truthyByDefault(category.isAvailable),
+  };
+}
+
+function serializeDashboardPreviewProduct(product, lang, optionGroups, categoryId = product.categoryId) {
+  return {
+    ...serializePublicProduct(product, lang, optionGroups, categoryId),
+    productId: String(product._id),
+    categoryId: String(categoryId),
+    status: serializeStatus(product),
+    isActive: truthyByDefault(product.isActive),
+    isVisible: truthyByDefault(product.isVisible),
+    isAvailable: truthyByDefault(product.isAvailable),
+    isCustomizable: Boolean(product.isCustomizable),
+  };
+}
+
+function serializeDashboardPreviewGroup(relation, group, options, lang) {
+  return {
+    ...serializePublicGroup(relation, group, options, lang),
+    productGroupId: String(relation._id),
+    groupId: String(group._id),
+    status: serializeEffectiveStatus(group, relation),
+    isActive: truthyByDefault(relation.isActive),
+    isVisible: truthyByDefault(relation.isVisible),
+    isAvailable: truthyByDefault(relation.isAvailable),
+  };
+}
+
+function serializeDashboardPreviewOption(relation, option, lang) {
+  return {
+    ...serializePublicOption(relation, option, lang),
+    productOptionId: String(relation._id),
+    optionId: String(option._id),
+    groupId: String(relation.groupId),
+    suggestedGroupId: option.groupId ? String(option.groupId) : null,
+    status: serializeEffectiveStatus(option, relation),
+    isActive: truthyByDefault(relation.isActive),
+    isVisible: truthyByDefault(relation.isVisible),
+    isAvailable: truthyByDefault(relation.isAvailable),
+  };
+}
+
 function isCustomerVisibleProduct(product, category) {
   if (HIDDEN_PUBLIC_PRODUCT_KEYS.has(product.key)) return false;
   if (category?.key === "carbs") return CUSTOMER_VISIBLE_CARB_KEY_SET.has(product.key);
@@ -676,6 +748,118 @@ async function getPublishedMenu({ lang = "en", branchId = "" } = {}) {
     vatIncluded: true,
     vatPercentage: Number(vatPercentageRaw || 0),
     itemTypes: PRODUCT_ITEM_TYPES,
+    categories: serializedCategories,
+  };
+}
+
+async function getDashboardMenuPreview({ lang = "en", includeInactive = false, branchId = "" } = {}) {
+  const showInactive = normalizeBoolean(includeInactive, "includeInactive", false);
+  const statusQuery = showInactive ? {} : {
+    isActive: true,
+    isVisible: { $ne: false },
+    isAvailable: { $ne: false },
+  };
+  const productQuery = {
+    ...statusQuery,
+    ...availableForChannelQuery("one_time"),
+  };
+  const optionQuery = {
+    ...statusQuery,
+    ...availableForChannelQuery("one_time"),
+  };
+  const categoryQuery = { ...statusQuery };
+  const relationQuery = { ...statusQuery };
+  if (branchId) {
+    const channelOr = productQuery.$or;
+    delete productQuery.$or;
+    productQuery.$and = [
+      { $or: channelOr },
+      { $or: [{ branchAvailability: { $size: 0 } }, { branchAvailability: branchId }] },
+    ];
+    categoryQuery.$or = [{ "availability.branchIds": { $size: 0 } }, { "availability.branchIds": branchId }];
+  }
+
+  const [categories, products, groupRelations, optionRelations, groups, options, vatPercentageRaw, validation] = await Promise.all([
+    MenuCategory.find(categoryQuery).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    MenuProduct.find(productQuery).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    ProductOptionGroup.find(relationQuery).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    ProductGroupOption.find(relationQuery).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    MenuOptionGroup.find(statusQuery).lean(),
+    MenuOption.find(optionQuery).lean(),
+    getSettingValue("vat_percentage", 0),
+    validateMenuCatalogInternal().catch((err) => ({
+      ok: false,
+      warnings: [`Preview validation failed: ${err.message || "unknown error"}`],
+      errors: [],
+    })),
+  ]);
+
+  const categoryIds = new Set(categories.map((category) => String(category._id)));
+  const categoriesById = new Map(categories.map((category) => [String(category._id), category]));
+  const categoriesByKey = new Map(categories.map((category) => [category.key, category]));
+  const productsById = new Map(
+    products
+      .filter((product) => categoryIds.has(String(product.categoryId)))
+      .map((product) => [String(product._id), product])
+  );
+  const groupsById = new Map(groups.map((group) => [String(group._id), group]));
+  const optionsById = new Map(options.map((option) => [String(option._id), option]));
+  const optionRelationsByProductGroup = new Map();
+  const productsByCategory = new Map();
+
+  optionRelations.forEach((relation) => {
+    const key = `${relation.productId}:${relation.groupId}`;
+    if (!optionRelationsByProductGroup.has(key)) optionRelationsByProductGroup.set(key, []);
+    optionRelationsByProductGroup.get(key).push(relation);
+  });
+
+  groupRelations.forEach((relation) => {
+    const product = productsById.get(String(relation.productId));
+    const group = groupsById.get(String(relation.groupId));
+    if (!product || !group) return;
+    const optionRows = (optionRelationsByProductGroup.get(`${relation.productId}:${relation.groupId}`) || [])
+      .map((optionRelation) => {
+        const option = optionsById.get(String(optionRelation.optionId));
+        if (!option) return null;
+        return serializeDashboardPreviewOption(optionRelation, option, lang);
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const serializedGroup = serializeDashboardPreviewGroup(relation, group, optionRows, lang);
+    if (!product._publicGroups) product._publicGroups = [];
+    product._publicGroups.push(serializedGroup);
+  });
+
+  productsById.forEach((product) => {
+    const category = resolvePublicProductCategory(product, categoriesById, categoriesByKey);
+    if (!category || String(product.categoryId) !== String(category._id)) return;
+    product._publicCategoryKey = category.key;
+    const categoryId = String(category._id);
+    if (!productsByCategory.has(categoryId)) productsByCategory.set(categoryId, []);
+    const groupsForProduct = Array.isArray(product._publicGroups)
+      ? product._publicGroups.sort((a, b) => a.sortOrder - b.sortOrder)
+      : [];
+    productsByCategory.get(categoryId).push(serializeDashboardPreviewProduct(product, lang, groupsForProduct, category._id));
+  });
+
+  const serializedCategories = categories
+    .map((category) => {
+      const rows = (productsByCategory.get(String(category._id)) || [])
+        .sort(sortPublicProducts);
+      return serializeDashboardPreviewCategory(category, lang, rows);
+    })
+    .filter((category) => showInactive || category.products.length > 0);
+
+  return {
+    contractVersion: "dashboard_menu_preview.v1",
+    source: "one_time_order",
+    fulfillmentMethod: "pickup",
+    currency: SYSTEM_CURRENCY,
+    vatIncluded: true,
+    vatPercentage: Number(vatPercentageRaw || 0),
+    itemTypes: PRODUCT_ITEM_TYPES,
+    includeInactive: showInactive,
+    warnings: [...(validation.warnings || []), ...(validation.errors || [])],
     categories: serializedCategories,
   };
 }
@@ -2773,6 +2957,7 @@ module.exports = {
   MenuNotFoundError,
   MenuValidationError,
   getPublishedMenu,
+  getDashboardMenuPreview,
   hasPublishedMenuCatalog,
   listCategories: (options) => listModel(MenuCategory, options),
   listProducts,
