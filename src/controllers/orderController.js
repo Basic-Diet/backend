@@ -49,6 +49,10 @@ const TERMINAL_PAYMENT_FAILURE_STATUSES = new Set(["failed", "canceled", "expire
 
 async function getOrderMenu(req, res) {
   const lang = getRequestLang(req);
+  const isDashboard = req.auth && req.auth.authContext === "dashboard";
+  if (req.query && String(req.query.includeInactive || "").toLowerCase() === "true" && !isDashboard) {
+    return errorResponse(res, 403, "FORBIDDEN", "includeInactive is only available to dashboard users");
+  }
   const menu = await getOneTimeOrderMenu({
     lang,
     fulfillmentMethod: req.query && req.query.fulfillmentMethod,

@@ -10,6 +10,8 @@ const { createApp } = require("../src/app");
 const MenuProduct = require("../src/models/MenuProduct");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
+const User = require("../src/models/User");
+const { issueAppAccessToken, issueGuestAccessToken } = require("../src/services/appTokenService");
 const { dashboardAuth } = require("./helpers/dashboardAuthHelper");
 
 const TEST_TAG = `dashboard-menu-product-centered-${Date.now()}`;
@@ -58,9 +60,60 @@ async function main() {
   const app = createApp();
   const api = request(app);
   ({ headers: adminHeaders } = await dashboardAuth("admin", TEST_TAG));
+  const { headers: superadminHeaders } = await dashboardAuth("superadmin", TEST_TAG);
+  const { headers: kitchenHeaders } = await dashboardAuth("kitchen", TEST_TAG);
+  const clientUser = await User.create({
+    phone: `+1555${Date.now().toString().slice(-7)}`,
+    phoneE164: `+1555${Date.now().toString().slice(-7)}`,
+    role: "client",
+    isActive: true,
+  });
+  const appHeaders = {
+    Authorization: `Bearer ${issueAppAccessToken(clientUser)}`,
+    "Accept-Language": "en",
+  };
+  const guestHeaders = {
+    Authorization: `Bearer ${issueGuestAccessToken()}`,
+    "Accept-Language": "en",
+  };
 
   try {
-    let res = await api.post("/api/dashboard/menu/categories").set(adminHeaders).send({
+    let res = await api.get("/api/orders/menu?includePublicV2=true");
+    expectStatus(res, 200, "orders menu public access");
+    assert.strictEqual(res.body.status, true);
+
+    res = await api.get("/api/orders/menu?includePublicV2=true").set(adminHeaders);
+    expectStatus(res, 200, "orders menu dashboard admin access");
+    assert.strictEqual(res.body.status, true);
+
+    res = await api.get("/api/orders/menu?includePublicV2=true").set(superadminHeaders);
+    expectStatus(res, 200, "orders menu dashboard superadmin access");
+    assert.strictEqual(res.body.status, true);
+
+    res = await api.get("/api/orders/menu?includePublicV2=true").set(kitchenHeaders);
+    expectStatus(res, 403, "orders menu dashboard kitchen forbidden");
+    assert.strictEqual(res.body.error.code, "FORBIDDEN");
+
+    res = await api.get("/api/orders/menu?includePublicV2=true").set({ Authorization: "Bearer invalid-token" });
+    expectStatus(res, 401, "orders menu invalid token rejected");
+    assert.strictEqual(res.body.error.code, "TOKEN_INVALID");
+
+    res = await api.get("/api/orders/menu?includePublicV2=true").set(appHeaders);
+    expectStatus(res, 200, "orders menu app client access");
+    assert.strictEqual(res.body.status, true);
+
+    res = await api.get("/api/orders/menu?includePublicV2=true").set(guestHeaders);
+    expectStatus(res, 200, "orders menu guest access");
+    assert.strictEqual(res.body.status, true);
+
+    res = await api.get("/api/orders/menu?includePublicV2=true&includeInactive=true");
+    expectStatus(res, 403, "orders menu includeInactive public forbidden");
+    assert.strictEqual(res.body.error.code, "FORBIDDEN");
+
+    res = await api.get("/api/orders/menu?includePublicV2=true&includeInactive=true").set(adminHeaders);
+    expectStatus(res, 200, "orders menu includeInactive dashboard accepted");
+
+    res = await api.post("/api/dashboard/menu/categories").set(adminHeaders).send({
       key: `${TEST_KEY_TAG}_primary`,
       name: { en: `${TEST_TAG} Primary`, ar: "Primary" },
     });

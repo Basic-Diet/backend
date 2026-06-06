@@ -3,13 +3,15 @@ const controller = require("../controllers/orderController");
 const customSaladController = require("../controllers/customSaladController");
 const customMealController = require("../controllers/customMealController");
 const { authMiddleware } = require("../middleware/auth");
-const optionalAuthMiddleware = require("../middleware/optionalAuth");
+const optionalMenuAccessAuth = require("../middleware/menuAccessAuth");
 const { checkoutLimiter } = require("../middleware/rateLimit");
 const asyncHandler = require("../middleware/asyncHandler");
 
 const router = Router();
 
-router.get("/menu", optionalAuthMiddleware, asyncHandler(controller.getOrderMenu));
+// Shared by public/mobile menu rendering and dashboard order-menu preview.
+// Accepts no auth, app/guest auth, or dashboard_access auth for allowed dashboard roles.
+router.get("/menu", optionalMenuAccessAuth, asyncHandler(controller.getOrderMenu));
 
 router.use(authMiddleware);
 
