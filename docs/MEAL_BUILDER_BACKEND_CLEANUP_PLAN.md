@@ -81,6 +81,8 @@ No-body `POST /api/dashboard/meal-builder/draft` creates exactly:
 
 Storage still keeps internal compatibility fields such as `sectionType`, `sourceKind`, `productContextId`, `sourceGroupId`, and `sourceCategoryId`.
 
+The old Dashboard visual draft with five top-level sections (`Standard Proteins`, `Carbs`, `Premium Proteins`, `Sandwiches`, `Premium Large Salad`) is legacy. It is not a publish-ready v3 template and must not pass readiness as canonical. Hydrated draft reads auto-migrate that legacy shape to the seven-section template when safe; explicit validation of the old shape reports `MEAL_BUILDER_LEGACY_VISUAL_TEMPLATE` and `ready=false`.
+
 ## Picker And Validation Rules
 
 - Meal Builder item selection must use `GET /api/dashboard/meal-builder/pickers/:sectionKey`.

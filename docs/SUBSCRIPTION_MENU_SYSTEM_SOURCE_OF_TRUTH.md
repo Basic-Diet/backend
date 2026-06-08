@@ -21,6 +21,7 @@ This is not a claim of full production readiness. Production readiness still dep
 - Dashboard readiness is exposed through `GET /api/dashboard/health/meal-planner`.
 - Flutter stale catalog refresh behavior is driven by explicit planner error codes and refresh hints.
 - Dashboard-authored Meal Builder draft/published config is the canonical planning source.
+- Dashboard Meal Builder v3 uses exactly seven canonical visual sections in order: `premium`, `sandwich`, `chicken`, `beef`, `fish`, `eggs`, `carbs`. The old five-section Dashboard shape is legacy and is either migrated on hydrated draft read or rejected by validation with `ready=false`.
 - `/api/subscriptions/meal-planner-menu?lang=ar` is the Flutter endpoint and must expose `plannerCatalog.contractVersion=meal_planner_menu.v3`.
 - When a published Meal Builder config exists, `/api/subscriptions/meal-planner-menu` compiles it into the canonical `plannerCatalog.sections[].products[].optionGroups[].options[]` shape. `builderCatalog` and `builderCatalogV2` are read-only compatibility fields.
 - Published Meal Builder config gates v3 day selections only after a config exists; without one, existing planner fallback behavior remains.
@@ -51,6 +52,7 @@ Canonical builder contract:
 - Flutter reads `plannerCatalog v3` from `/api/subscriptions/meal-planner-menu`; `/api/subscriptions/meal-builder` remains a published-layout read model.
 - No-body `POST /api/dashboard/meal-builder/draft` creates the visual default sections: `premium`, `sandwich`, `chicken`, `beef`, `fish`, `eggs`, and `carbs`.
 - Builder sections expose canonical public `type/source` metadata while storing internal `sectionType/sourceKind` compatibility fields.
+- `premium_large_salad` appears inside the `premium` visual section but continues to compile and validate as `selectionType=premium_large_salad` with the subscription salad protein allowlist.
 - Meal Builder selection UI must use `/api/dashboard/meal-builder/pickers/:sectionKey`; global Dashboard menu list endpoints are catalog-management APIs only.
 - Stale builder membership errors are `PLANNER_BUILDER_PRODUCT_NOT_INCLUDED`, `PLANNER_BUILDER_GROUP_NOT_INCLUDED`, and `PLANNER_BUILDER_OPTION_NOT_INCLUDED`.
 

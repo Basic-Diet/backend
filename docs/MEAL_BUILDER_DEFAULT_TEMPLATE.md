@@ -50,6 +50,8 @@ The visual family template requested here is now the Dashboard Create Draft defa
 - sandwiches
 - premium large salad
 
+That five-section shape is legacy for Dashboard Meal Builder v3. It must not be returned as the current hydrated Dashboard draft with `ready=true`. When the backend detects a persisted legacy five-section draft during `GET /api/dashboard/meal-builder/draft/hydrated`, it rebuilds the current draft into the canonical seven-section visual template when catalog references can be resolved. Validation of a submitted legacy five-section payload returns `ready=false` with `MEAL_BUILDER_LEGACY_VISUAL_TEMPLATE`.
+
 The intended template below uses visual sections:
 
 - `premium`

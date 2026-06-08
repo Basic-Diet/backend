@@ -15,6 +15,7 @@ const MenuOptionGroup = require("../src/models/MenuOptionGroup");
 const MenuProduct = require("../src/models/MenuProduct");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
+const MealBuilderConfig = require("../src/models/MealBuilderConfig");
 
 let mongoServer;
 
@@ -135,6 +136,11 @@ async function seedCatalog() {
   });
 
   return {
+    basicMeal,
+    premiumLargeSalad,
+    proteinsGroup,
+    carbsGroup,
+    sandwichCategory,
     chicken: proteins.find((option) => option.key === "chicken"),
     sandwich,
   };
@@ -154,6 +160,69 @@ async function main() {
     assert.strictEqual(res.body.data.errors[0].code, "MEAL_BUILDER_DRAFT_MISSING");
 
     const fixture = await seedCatalog();
+
+    const legacySections = [
+      {
+        sectionType: "option_group",
+        productContextId: String(fixture.basicMeal._id),
+        sourceGroupId: String(fixture.proteinsGroup._id),
+        selectedOptionIds: [String(fixture.chicken._id)],
+        selectionType: "standard_meal",
+        titleOverride: { en: "Standard Proteins", ar: "Standard Proteins" },
+        sortOrder: 1,
+      },
+      {
+        sectionType: "option_group",
+        productContextId: String(fixture.basicMeal._id),
+        sourceGroupId: String(fixture.carbsGroup._id),
+        selectionType: "standard_meal",
+        titleOverride: { en: "Carbs", ar: "Carbs" },
+        sortOrder: 2,
+      },
+      {
+        sectionType: "option_group",
+        productContextId: String(fixture.basicMeal._id),
+        sourceGroupId: String(fixture.proteinsGroup._id),
+        selectionType: "premium_meal",
+        titleOverride: { en: "Premium Proteins", ar: "Premium Proteins" },
+        sortOrder: 3,
+      },
+      {
+        sectionType: "product_category",
+        sourceCategoryId: String(fixture.sandwichCategory._id),
+        selectedProductIds: [String(fixture.sandwich._id)],
+        selectionType: "sandwich",
+        titleOverride: { en: "Sandwiches", ar: "Sandwiches" },
+        sortOrder: 4,
+      },
+      {
+        sectionType: "product_list",
+        selectedProductIds: [String(fixture.premiumLargeSalad._id)],
+        selectionType: "premium_large_salad",
+        titleOverride: { en: "Premium Large Salad", ar: "Premium Large Salad" },
+        sortOrder: 5,
+      },
+    ];
+
+    res = await api.post("/api/dashboard/meal-builder/validate").set(headers).send({ sections: legacySections });
+    expectStatus(res, 200, "validate legacy five-section draft");
+    assert.strictEqual(res.body.data.ready, false);
+    assert(res.body.data.errors.some((error) => error.code === "MEAL_BUILDER_LEGACY_VISUAL_TEMPLATE"), JSON.stringify(res.body.data.errors));
+
+    await MealBuilderConfig.create({
+      status: "draft",
+      isCurrent: true,
+      contractVersion: "subscription_meal_builder.v1",
+      source: "dashboard",
+      sections: legacySections,
+    });
+
+    res = await api.get("/api/dashboard/meal-builder/draft/hydrated").set(headers);
+    expectStatus(res, 200, "hydrate legacy five-section draft");
+    assert.deepStrictEqual(res.body.data.sections.map((section) => section.key), ["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"]);
+    assert(res.body.data.warnings.some((warning) => warning.code === "MEAL_BUILDER_LEGACY_DRAFT_MIGRATED"), JSON.stringify(res.body.data.warnings));
+    assert.strictEqual(res.body.data.validation.summary.migratedFromLegacyTemplate, true);
+
     res = await api.post("/api/dashboard/meal-builder/draft").set(headers).send({});
     expectStatus(res, 201, "create default draft");
     const sections = res.body.data.sections;

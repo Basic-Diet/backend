@@ -391,6 +391,72 @@ function canonicalSectionRules(section = {}) {
   return sectionRules(section);
 }
 
+function canonicalSectionKeys(sections = []) {
+  return sections.map((section) => String(section.key || "").trim());
+}
+
+function looksLikeLegacyFiveSectionDraft(sections = []) {
+  if (!Array.isArray(sections) || sections.length !== 5) return false;
+  const keys = canonicalSectionKeys(sections);
+  if (keys.some(Boolean)) return false;
+  const titles = sections.map((section) => String(section.titleOverride?.en || section.title?.en || "").trim().toLowerCase());
+  return [
+    "standard proteins",
+    "carbs",
+    "premium proteins",
+    "sandwiches",
+    "premium large salad",
+  ].every((title) => titles.includes(title));
+}
+
+function addLegacyVisualDraftShapeIssues(sections, errors) {
+  if (!looksLikeLegacyFiveSectionDraft(sections)) return;
+  addCheck(
+    errors,
+    "error",
+    "MEAL_BUILDER_LEGACY_VISUAL_TEMPLATE",
+    "Legacy 5-section Meal Builder draft must be migrated to the canonical v3 visual template",
+    {
+      expectedSectionKeys: VISUAL_TEMPLATE_ORDER,
+      actualSectionCount: sections.length,
+    }
+  );
+}
+
+async function migrateLegacyDraftToCanonicalTemplate(draft) {
+  const sections = normalizeSections(draft?.sections || []);
+  if (!looksLikeLegacyFiveSectionDraft(sections)) {
+    return { draft, migrated: false, warnings: [] };
+  }
+
+  const canonicalSections = await buildDefaultVisualTemplateSections();
+  const updated = await MealBuilderConfig.findOneAndUpdate(
+    { _id: draft._id, status: "draft", isCurrent: true },
+    {
+      $set: {
+        sections: canonicalSections,
+        contractVersion: CONTRACT_VERSION,
+        source: draft.source || "dashboard",
+        notes: draft.notes || "",
+      },
+    },
+    { new: true }
+  ).lean();
+
+  return {
+    draft: updated || { ...draft, sections: canonicalSections },
+    migrated: true,
+    warnings: [
+      statusIssue(
+        "warning",
+        "MEAL_BUILDER_LEGACY_DRAFT_MIGRATED",
+        "Legacy 5-section Meal Builder draft was migrated to the canonical v3 visual template.",
+        { previousSectionCount: sections.length, sectionKeys: VISUAL_TEMPLATE_ORDER }
+      ),
+    ],
+  };
+}
+
 function serializeSection(section = {}) {
   return {
     id: section._id ? String(section._id) : undefined,
@@ -918,7 +984,9 @@ function paginateRows(rows, pagination) {
 }
 
 async function getHydratedDraft({ lang = "en" } = {}) {
-  const draft = await getCurrentDraftConfig();
+  const initialDraft = await getCurrentDraftConfig();
+  const migration = await migrateLegacyDraftToCanonicalTemplate(initialDraft);
+  const draft = migration.draft;
   if (!draft) {
     return {
       contractVersion: HYDRATED_DRAFT_VERSION,
@@ -947,9 +1015,17 @@ async function getHydratedDraft({ lang = "en" } = {}) {
     },
     ready: validation.ready,
     errors: validation.errors || [],
-    warnings: validation.warnings || [],
+    warnings: [...(migration.warnings || []), ...(validation.warnings || [])],
     sections: hydratedSections,
-    validation,
+    validation: {
+      ...validation,
+      warnings: [...(migration.warnings || []), ...(validation.warnings || [])],
+      checks: [...(validation.errors || []), ...(migration.warnings || []), ...(validation.warnings || [])],
+      summary: {
+        ...(validation.summary || {}),
+        migratedFromLegacyTemplate: migration.migrated === true,
+      },
+    },
   };
 }
 
@@ -2122,6 +2198,7 @@ async function validateConfigObject(configOrPayload = {}) {
 }
 
 function validateVisualTemplateSections(sections, warnings, errors) {
+  addLegacyVisualDraftShapeIssues(sections, errors);
   const visualSections = sections.filter((section) => section.key && VISUAL_TEMPLATE_ORDER.includes(section.key));
   if (!visualSections.length) return;
 
