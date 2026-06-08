@@ -147,7 +147,17 @@ New Flutter endpoint:
 
 - `GET /api/subscriptions/meal-builder`
 
-The Flutter endpoint returns the current published `subscription_meal_builder.v1` layout with `revisionHash`, `publishedAt`, ordered sections, and option/product items. If no builder config is published it returns `MEAL_BUILDER_NOT_PUBLISHED`; existing `/api/subscriptions/meal-planner-menu` behavior is unchanged and remains the compatibility/planner catalog endpoint.
+The Flutter endpoint returns the current published `subscription_meal_builder.v1` layout with `revisionHash`, `publishedAt`, ordered sections, and option/product items. If no builder config is published it returns `MEAL_BUILDER_NOT_PUBLISHED`. `/api/subscriptions/meal-planner-menu` remains the compatibility/planner catalog endpoint and compiles a published builder into canonical `plannerCatalog.sections[].products[].optionGroups[].options[]` when one exists.
+
+When Dashboard creates a draft without explicit sections, the backend initializes the default visual family template in this order:
+
+- `premium`
+- `sandwich`
+- `chicken`
+- `beef`
+- `fish`
+- `eggs`
+- `carbs`
 
 Meal Builder sections reference existing catalog rows only:
 

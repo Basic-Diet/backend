@@ -22,6 +22,7 @@ This is not a claim of full production readiness. Production readiness still dep
 - Flutter stale catalog refresh behavior is driven by explicit planner error codes and refresh hints.
 - Dashboard-authored Meal Builder layout is exposed through `GET /api/subscriptions/meal-builder`.
 - `/api/subscriptions/meal-planner-menu` remains the compatibility/planner catalog endpoint.
+- When a published Meal Builder config exists, `/api/subscriptions/meal-planner-menu` compiles it into the canonical `plannerCatalog.sections[].products[].optionGroups[].options[]` shape.
 - Published Meal Builder config gates v3 day selections only after a config exists; without one, existing planner fallback behavior remains.
 - Meal Builder premium metadata is display-only. Premium balance/payment authority remains in canonical v3 day validation and unified day payment.
 
@@ -48,6 +49,8 @@ Canonical builder contract:
 
 - Dashboard draft/publish routes live under `/api/dashboard/meal-builder`.
 - Flutter reads only the current published layout from `/api/subscriptions/meal-builder`.
+- Flutter can continue using `plannerCatalog`; published builder config is compiled into `plannerCatalog` when available.
+- No-body `POST /api/dashboard/meal-builder/draft` creates the visual default sections: `premium`, `sandwich`, `chicken`, `beef`, `fish`, `eggs`, and `carbs`.
 - Builder sections reference existing `MenuOptionGroup`, `MenuOption`, `MenuCategory`, `MenuProduct`, and product-option relation rows.
 - Supported section types are `option_group`, `product_category`, and `product_list`.
 - Stale builder membership errors are `PLANNER_BUILDER_PRODUCT_NOT_INCLUDED`, `PLANNER_BUILDER_GROUP_NOT_INCLUDED`, and `PLANNER_BUILDER_OPTION_NOT_INCLUDED`.

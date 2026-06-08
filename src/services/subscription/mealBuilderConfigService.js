@@ -10,12 +10,18 @@ const ProductGroupOption = require("../../models/ProductGroupOption");
 const ProductOptionGroup = require("../../models/ProductOptionGroup");
 const { pickLang } = require("../../utils/i18n");
 const {
+  CUSTOMER_VISIBLE_CARB_KEYS,
   MEAL_SELECTION_TYPES,
   PREMIUM_MEAL_PROTEIN_KEYS,
   PREMIUM_LARGE_SALAD_PREMIUM_KEY,
+  PROTEIN_DISPLAY_GROUPS,
+  STANDARD_CARB_RULES,
   SUBSCRIPTION_COLD_SANDWICH_KEYS,
   SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS,
   SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS,
+  SYSTEM_CURRENCY,
+  getMealPlannerRules,
+  resolveProteinVisualFamilyKey,
 } = require("../../config/mealPlannerContract");
 const {
   isLinkedDocGloballyAvailable,
@@ -26,9 +32,16 @@ const { resolvePremiumLargeSaladPricing } = require("../catalog/premiumLargeSala
 const CONTRACT_VERSION = "subscription_meal_builder.v1";
 const SECTION_TYPES = new Set(["option_group", "product_category", "product_list"]);
 const INCLUDE_MODES = new Set(["all", "selected"]);
+const SOURCE_KINDS = new Set(["", "visual_family", "configurable_product", "product_list", "premium_visual"]);
 const PREMIUM_PROTEIN_KEYS = new Set(PREMIUM_MEAL_PROTEIN_KEYS);
 const SALAD_ALLOWED_PROTEIN_KEYS = new Set(SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS);
 const SALAD_EXCLUDED_GROUP_KEYS = new Set(SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS);
+const VISUAL_TEMPLATE_ORDER = Object.freeze(["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"]);
+const VISUAL_PROTEIN_FAMILY_KEYS = new Set(["chicken", "beef", "fish", "eggs"]);
+const VISUAL_PROTEIN_FAMILY_DEFINITIONS = new Map(PROTEIN_DISPLAY_GROUPS.map((group) => [group.key, group]));
+const PREMIUM_SECTION_TITLE = Object.freeze({ ar: "مميز", en: "Premium" });
+const SANDWICH_SECTION_TITLE = Object.freeze({ ar: "ساندوتشات", en: "Sandwiches" });
+const CARBS_SECTION_TITLE = Object.freeze({ ar: "نشويات", en: "Carbs" });
 
 class MealBuilderError extends Error {
   constructor(message, code = "MEAL_BUILDER_ERROR", status = 400, details) {
@@ -63,6 +76,11 @@ function localized(value) {
     ar: value.ar === undefined || value.ar === null ? "" : String(value.ar).trim(),
     en: value.en === undefined || value.en === null ? "" : String(value.en).trim(),
   };
+}
+
+function plainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return JSON.parse(JSON.stringify(value));
 }
 
 function normalizeBoolean(value, fallback = false) {
@@ -100,13 +118,19 @@ function normalizeSection(section = {}, index = 0) {
   if (!SECTION_TYPES.has(sectionType)) {
     throw new MealBuilderError("Unsupported meal builder section type", "MEAL_BUILDER_INVALID_SECTION_TYPE", 400, { sectionType, index });
   }
+  const sourceKind = String(section.sourceKind || "").trim();
+  if (!SOURCE_KINDS.has(sourceKind)) {
+    throw new MealBuilderError("Unsupported meal builder sourceKind", "MEAL_BUILDER_INVALID_SOURCE_KIND", 400, { sourceKind, index });
+  }
   const includeMode = String(section.includeMode || "selected").trim();
   if (!INCLUDE_MODES.has(includeMode)) {
     throw new MealBuilderError("Unsupported meal builder includeMode", "MEAL_BUILDER_INVALID_INCLUDE_MODE", 400, { includeMode, index });
   }
 
   const normalized = {
+    key: String(section.key || section.sectionKey || "").trim(),
     sectionType,
+    sourceKind,
     titleOverride: localized(section.titleOverride || section.title),
     productContextId: objectIdOrNull(section.productContextId),
     sourceGroupId: objectIdOrNull(section.sourceGroupId),
@@ -122,6 +146,8 @@ function normalizeSection(section = {}, index = 0) {
     multiSelect: normalizeBoolean(section.multiSelect, false),
     visible: normalizeBoolean(section.visible, true),
     availableFor: normalizeAvailableFor(section.availableFor),
+    metadata: plainObject(section.metadata),
+    rules: plainObject(section.rules),
   };
 
   if (normalized.maxSelections !== null && normalized.maxSelections < normalized.minSelections) {
@@ -181,6 +207,8 @@ function baseConfigPayload(config) {
     contractVersion: CONTRACT_VERSION,
     sections: normalizeSections(config.sections || []).map((section) => ({
       sectionType: section.sectionType,
+      key: section.key || "",
+      sourceKind: section.sourceKind || "",
       titleOverride: section.titleOverride || {},
       productContextId: section.productContextId ? String(section.productContextId) : null,
       sourceGroupId: section.sourceGroupId ? String(section.sourceGroupId) : null,
@@ -196,6 +224,8 @@ function baseConfigPayload(config) {
       multiSelect: Boolean(section.multiSelect),
       visible: section.visible !== false,
       availableFor: section.availableFor || ["subscription"],
+      metadata: plainObject(section.metadata),
+      rules: plainObject(section.rules),
     })),
   };
 }
@@ -252,11 +282,15 @@ function serializeConfig(config) {
     sections: normalizeSections(config.sections || []).map((section) => ({
       id: section._id ? String(section._id) : undefined,
       ...section,
+      key: section.key || "",
+      sourceKind: section.sourceKind || "",
       productContextId: section.productContextId ? String(section.productContextId) : null,
       sourceGroupId: section.sourceGroupId ? String(section.sourceGroupId) : null,
       sourceCategoryId: section.sourceCategoryId ? String(section.sourceCategoryId) : null,
       selectedOptionIds: (section.selectedOptionIds || []).map(String),
       selectedProductIds: (section.selectedProductIds || []).map(String),
+      metadata: plainObject(section.metadata),
+      rules: plainObject(section.rules),
     })),
     createdAt: config.createdAt,
     updatedAt: config.updatedAt,
@@ -268,8 +302,7 @@ async function createDraft({ sections, actor = {}, notes = "" } = {}) {
   if (sections) {
     normalizedSections = normalizeSections(sections);
   } else {
-    const published = await getCurrentPublishedConfig();
-    normalizedSections = published ? normalizeSections(published.sections || []) : await buildDefaultSeedSections();
+    normalizedSections = await buildDefaultVisualTemplateSections();
   }
 
   await MealBuilderConfig.updateMany({ status: "draft", isCurrent: true }, { $set: { isCurrent: false } });
@@ -351,6 +384,222 @@ function readyDocForSeed(doc, catalogItemsById) {
 
 function positivePremiumPrice(option, relation) {
   return Number(relation?.extraPriceHalala ?? option?.extraPriceHalala ?? option?.extraFeeHalala ?? 0) > 0;
+}
+
+function optionKey(option = {}) {
+  return String(option.key || option.premiumKey || "").trim().toLowerCase();
+}
+
+function optionSort(left, right, relationByOptionId = new Map()) {
+  const leftRelation = relationByOptionId.get(String(left._id));
+  const rightRelation = relationByOptionId.get(String(right._id));
+  return Number(leftRelation?.sortOrder ?? left.sortOrder ?? 0) - Number(rightRelation?.sortOrder ?? right.sortOrder ?? 0);
+}
+
+async function buildDefaultVisualTemplateSections({ returnDetails = false } = {}) {
+  const warnings = [];
+  const errors = [];
+  const [basicMeal, saladProduct, proteinsGroup, carbsGroup, sandwichCategory] = await Promise.all([
+    MenuProduct.findOne({ key: "basic_meal" }).lean(),
+    MenuProduct.findOne({ key: "premium_large_salad" }).lean(),
+    MenuOptionGroup.findOne({ key: "proteins" }).lean(),
+    MenuOptionGroup.findOne({ key: "carbs" }).lean(),
+    MenuCategory.findOne({ key: "cold_sandwiches" }).lean(),
+  ]);
+
+  let proteinOptions = [];
+  let carbOptions = [];
+  let relationByOptionId = new Map();
+  let sandwichProductIds = [];
+  const sections = [];
+
+  if (basicMeal) {
+    const relationRows = await ProductGroupOption.find({ productId: basicMeal._id }).sort({ sortOrder: 1, createdAt: -1 }).lean();
+    relationByOptionId = new Map(relationRows.map((row) => [String(row.optionId), row]));
+    const relatedOptionIds = relationRows.map((row) => row.optionId);
+    const relatedOptions = await MenuOption.find({ _id: { $in: relatedOptionIds } }).lean();
+    const catalogItemsById = await loadCatalogItemsByIdForDocs([basicMeal], relatedOptions);
+    const optionsById = new Map(relatedOptions.map((option) => [String(option._id), option]));
+
+    if (proteinsGroup) {
+      const proteinGroupRelation = await ProductOptionGroup.findOne({ productId: basicMeal._id, groupId: proteinsGroup._id }).lean();
+      proteinOptions = relationRows
+        .filter((row) => String(row.groupId) === String(proteinsGroup._id))
+        .map((row) => optionsById.get(String(row.optionId)))
+        .filter((option) => option && relationReady(relationByOptionId.get(String(option._id))) && relationReady(proteinGroupRelation) && readyDocForSeed(option, catalogItemsById))
+        .sort((a, b) => optionSort(a, b, relationByOptionId));
+    }
+
+    if (carbsGroup) {
+      const carbGroupRelation = await ProductOptionGroup.findOne({ productId: basicMeal._id, groupId: carbsGroup._id }).lean();
+      carbOptions = relationRows
+        .filter((row) => String(row.groupId) === String(carbsGroup._id))
+        .map((row) => optionsById.get(String(row.optionId)))
+        .filter((option) => option && relationReady(relationByOptionId.get(String(option._id))) && relationReady(carbGroupRelation) && readyDocForSeed(option, catalogItemsById))
+        .filter((option) => CUSTOMER_VISIBLE_CARB_KEYS.includes(optionKey(option)))
+        .sort((a, b) => optionSort(a, b, relationByOptionId));
+    }
+  }
+
+  if (sandwichCategory) {
+    const sandwichProducts = await MenuProduct.find({
+      categoryId: sandwichCategory._id,
+      itemType: "cold_sandwich",
+      key: { $in: SUBSCRIPTION_COLD_SANDWICH_KEYS },
+    }).sort({ sortOrder: 1, createdAt: -1 }).lean();
+    const sandwichCatalogItemsById = await loadCatalogItemsByIdForDocs(sandwichProducts);
+    sandwichProductIds = sandwichProducts
+      .filter((product) => readyDocForSeed(product, sandwichCatalogItemsById))
+      .map((product) => product._id);
+  }
+
+  const premiumProteinOptions = proteinOptions
+    .filter((option) => isPremiumProtein(option) && PREMIUM_MEAL_PROTEIN_KEYS.includes(optionKey(option)) && positivePremiumPrice(option, relationByOptionId.get(String(option._id))));
+  const premiumSelectedProductIds = [];
+  if (saladProduct) {
+    const saladCatalogItemsById = await loadCatalogItemsByIdForDocs([saladProduct]);
+    if (readyDocForSeed(saladProduct, saladCatalogItemsById)) premiumSelectedProductIds.push(saladProduct._id);
+  }
+
+  if (basicMeal && proteinsGroup) {
+    sections.push({
+      key: "premium",
+      sectionType: "option_group",
+      sourceKind: "premium_visual",
+      productContextId: basicMeal._id,
+      sourceGroupId: proteinsGroup._id,
+      selectedOptionIds: premiumProteinOptions.map((option) => option._id),
+      selectedProductIds: premiumSelectedProductIds,
+      selectionType: MEAL_SELECTION_TYPES.PREMIUM_MEAL,
+      titleOverride: PREMIUM_SECTION_TITLE,
+      required: true,
+      minSelections: 1,
+      maxSelections: 1,
+      multiSelect: false,
+      visible: true,
+      availableFor: ["subscription"],
+      metadata: {
+        visualRole: "premium",
+        includedProductKeys: ["premium_large_salad"],
+        optionKeys: PREMIUM_MEAL_PROTEIN_KEYS,
+      },
+      rules: {
+        premiumLargeSaladSelectionType: MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD,
+        excludedGroupKeys: [...SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS],
+      },
+      sortOrder: 1,
+    });
+  } else {
+    errors.push({ level: "error", code: "MEAL_BUILDER_DEFAULT_PREMIUM_SOURCE_MISSING", message: "Premium visual section requires basic_meal and proteins group" });
+  }
+
+  if (sandwichCategory) {
+    sections.push({
+      key: "sandwich",
+      sectionType: "product_category",
+      sourceKind: "product_list",
+      sourceCategoryId: sandwichCategory._id,
+      includeMode: "selected",
+      selectedProductIds: sandwichProductIds,
+      selectionType: MEAL_SELECTION_TYPES.SANDWICH,
+      titleOverride: SANDWICH_SECTION_TITLE,
+      required: false,
+      minSelections: 0,
+      maxSelections: 1,
+      multiSelect: false,
+      visible: true,
+      availableFor: ["subscription"],
+      metadata: {
+        requiresBuilder: false,
+        treatAsFullMeal: true,
+      },
+      rules: {
+        carbsRequired: false,
+      },
+      sortOrder: 2,
+    });
+  } else {
+    errors.push({ level: "error", code: "MEAL_BUILDER_DEFAULT_SANDWICH_SOURCE_MISSING", message: "Sandwich visual section requires cold_sandwiches category" });
+  }
+
+  for (const familyKey of ["chicken", "beef", "fish", "eggs"]) {
+    const family = VISUAL_PROTEIN_FAMILY_DEFINITIONS.get(familyKey);
+    const familyOptions = proteinOptions
+      .filter((option) => !isPremiumProtein(option) && resolveProteinVisualFamilyKey(option) === familyKey);
+    if (!familyOptions.length) {
+      warnings.push({
+        level: "warning",
+        code: "MEAL_BUILDER_DEFAULT_PROTEIN_FAMILY_EMPTY",
+        message: "Protein visual family has no active options",
+        sectionKey: familyKey,
+      });
+    }
+    if (basicMeal && proteinsGroup) {
+      sections.push({
+        key: familyKey,
+        sectionType: "option_group",
+        sourceKind: "visual_family",
+        productContextId: basicMeal._id,
+        sourceGroupId: proteinsGroup._id,
+        selectedOptionIds: familyOptions.map((option) => option._id),
+        selectionType: MEAL_SELECTION_TYPES.STANDARD_MEAL,
+        titleOverride: family ? family.name : { ar: familyKey, en: familyKey },
+        required: true,
+        minSelections: 1,
+        maxSelections: 1,
+        multiSelect: false,
+        visible: true,
+        availableFor: ["subscription"],
+        metadata: {
+          visualRole: "protein_family",
+          proteinFamilyKey: familyKey,
+        },
+        rules: familyKey === "beef" ? {
+          ruleKey: "beef_daily_limit",
+          maxSlotsPerDay: 1,
+          unit: "slots",
+        } : {},
+        sortOrder: VISUAL_TEMPLATE_ORDER.indexOf(familyKey) + 1,
+      });
+    }
+  }
+
+  if (basicMeal && carbsGroup) {
+    sections.push({
+      key: "carbs",
+      sectionType: "option_group",
+      sourceKind: "visual_family",
+      productContextId: basicMeal._id,
+      sourceGroupId: carbsGroup._id,
+      selectedOptionIds: carbOptions.map((option) => option._id),
+      selectionType: MEAL_SELECTION_TYPES.STANDARD_MEAL,
+      titleOverride: CARBS_SECTION_TITLE,
+      required: true,
+      minSelections: 1,
+      maxSelections: STANDARD_CARB_RULES.maxTypes,
+      multiSelect: true,
+      visible: true,
+      availableFor: ["subscription"],
+      metadata: {
+        visualRole: "carbs",
+        appliesTo: ["configurable_plate_meal"],
+        excludesSelectionTypes: [MEAL_SELECTION_TYPES.SANDWICH],
+      },
+      rules: {
+        ruleKey: "carb_split",
+        maxTypes: STANDARD_CARB_RULES.maxTypes,
+        maxTotalGrams: STANDARD_CARB_RULES.maxTotalGrams,
+        unit: STANDARD_CARB_RULES.unit,
+      },
+      sortOrder: 7,
+    });
+  } else {
+    errors.push({ level: "error", code: "MEAL_BUILDER_DEFAULT_CARBS_SOURCE_MISSING", message: "Carbs visual section requires basic_meal and carbs group" });
+  }
+
+  const normalized = normalizeSections(sections);
+  if (returnDetails) return { sections: normalized, warnings, errors };
+  return normalized;
 }
 
 async function buildDefaultSeedSections({ returnDetails = false } = {}) {
@@ -614,13 +863,9 @@ async function resolveDocsForSections(sections = []) {
   }
 
   const relationProductIds = [...productsById.keys()];
-  const relationGroupIds = [...groupIds];
   const [groupRelations, optionRelations] = await Promise.all([
     ProductOptionGroup.find({ productId: { $in: relationProductIds } }).lean(),
-    ProductGroupOption.find({
-      productId: { $in: relationProductIds },
-      ...(relationGroupIds.length ? { groupId: { $in: relationGroupIds } } : {}),
-    }).lean(),
+    ProductGroupOption.find({ productId: { $in: relationProductIds } }).lean(),
   ]);
   const relationOptionIds = optionRelations.map((row) => String(row.optionId));
   const relationGroupIdsFromRows = optionRelations.map((row) => String(row.groupId));
@@ -718,6 +963,35 @@ async function validateConfigObject(configOrPayload = {}) {
           selectionType: section.selectionType,
         });
       }
+      if (section.key === "premium") {
+        const exposedPremiumKeys = new Set(
+          optionRows
+            .map(({ option }) => optionIdentity(option))
+            .filter(Boolean)
+        );
+        for (const premiumKey of PREMIUM_MEAL_PROTEIN_KEYS) {
+          if (!exposedPremiumKeys.has(premiumKey)) {
+            addCheck(errors, "error", "MEAL_BUILDER_PREMIUM_OPTION_MISSING", "Premium visual section is missing a required premium option", {
+              sectionKey: section.key,
+              optionKey: premiumKey,
+            });
+          }
+        }
+        const premiumProducts = (section.selectedProductIds || [])
+          .map((id) => docs.productsById.get(String(id)))
+          .filter(Boolean);
+        if (!premiumProducts.some((product) => product.key === "premium_large_salad")) {
+          addCheck(errors, "error", "MEAL_BUILDER_PREMIUM_LARGE_SALAD_MISSING", "Premium visual section must include premium_large_salad", {
+            sectionKey: section.key,
+          });
+        }
+        for (const premiumProduct of premiumProducts) {
+          validateProductForBuilder(premiumProduct, docs.catalogItemsById, errors, { sectionType: section.sectionType, sectionKey: section.key });
+          if (premiumProduct.key === "premium_large_salad") {
+            validatePremiumLargeSaladProductRelations(premiumProduct, docs, optionRelationByProductGroupOption, errors);
+          }
+        }
+      }
     } else {
       if (section.sectionType === "product_category") {
         const category = docs.categoriesById.get(String(section.sourceCategoryId));
@@ -741,6 +1015,8 @@ async function validateConfigObject(configOrPayload = {}) {
     }
   }
 
+  validateVisualTemplateSections(sections, warnings, errors);
+
   const status = errors.length ? "error" : warnings.length ? "warning" : "ok";
   checks.push(...errors, ...warnings);
   return {
@@ -756,6 +1032,59 @@ async function validateConfigObject(configOrPayload = {}) {
       published: configOrPayload.status === "published",
     },
   };
+}
+
+function validateVisualTemplateSections(sections, warnings, errors) {
+  const visualSections = sections.filter((section) => section.key && VISUAL_TEMPLATE_ORDER.includes(section.key));
+  if (!visualSections.length) return;
+
+  const byKey = new Map(visualSections.map((section) => [section.key, section]));
+  for (const [index, key] of VISUAL_TEMPLATE_ORDER.entries()) {
+    const section = byKey.get(key);
+    if (!section) {
+      addCheck(errors, "error", "MEAL_BUILDER_VISUAL_SECTION_MISSING", "Default visual template section is missing", { sectionKey: key });
+      continue;
+    }
+    if (Number(section.sortOrder || 0) !== index + 1) {
+      addCheck(warnings, "warning", "MEAL_BUILDER_VISUAL_SECTION_ORDER_CHANGED", "Default visual template section order differs from canonical order", {
+        sectionKey: key,
+        expectedSortOrder: index + 1,
+        actualSortOrder: Number(section.sortOrder || 0),
+      });
+    }
+  }
+
+  const sandwich = byKey.get("sandwich");
+  if (sandwich) {
+    if (sandwich.selectionType !== MEAL_SELECTION_TYPES.SANDWICH) {
+      addCheck(errors, "error", "MEAL_BUILDER_SANDWICH_SELECTION_TYPE_INVALID", "Sandwich section must use selectionType=sandwich", { sectionKey: "sandwich" });
+    }
+    if (sandwich.metadata?.requiresBuilder !== false || sandwich.metadata?.treatAsFullMeal !== true || sandwich.rules?.carbsRequired !== false) {
+      addCheck(warnings, "warning", "MEAL_BUILDER_SANDWICH_METADATA_INCOMPLETE", "Sandwich section should be marked as full meal without carbs", { sectionKey: "sandwich" });
+    }
+  }
+
+  const beef = byKey.get("beef");
+  if (beef && (beef.rules?.ruleKey !== "beef_daily_limit" || Number(beef.rules?.maxSlotsPerDay || 0) !== 1)) {
+    addCheck(warnings, "warning", "MEAL_BUILDER_BEEF_DAILY_LIMIT_RULE_MISSING", "Beef section should expose beef_daily_limit metadata", { sectionKey: "beef" });
+  }
+
+  const carbs = byKey.get("carbs");
+  if (carbs) {
+    if (carbs.selectionType !== MEAL_SELECTION_TYPES.STANDARD_MEAL) {
+      addCheck(errors, "error", "MEAL_BUILDER_CARBS_SELECTION_TYPE_INVALID", "Carbs section must apply to standard configurable meals", { sectionKey: "carbs" });
+    }
+    if (Number(carbs.maxSelections || 0) !== STANDARD_CARB_RULES.maxTypes || Number(carbs.rules?.maxTotalGrams || 0) !== STANDARD_CARB_RULES.maxTotalGrams) {
+      addCheck(errors, "error", "MEAL_BUILDER_CARBS_RULE_INVALID", "Carbs section must enforce max 2 types and 300 grams", { sectionKey: "carbs" });
+    }
+  }
+
+  for (const familyKey of VISUAL_PROTEIN_FAMILY_KEYS) {
+    const section = byKey.get(familyKey);
+    if (section && !(section.selectedOptionIds || []).length) {
+      addCheck(warnings, "warning", "MEAL_BUILDER_PROTEIN_FAMILY_EMPTY", "Protein family section has no selected options", { sectionKey: familyKey });
+    }
+  }
 }
 
 function validateProductForBuilder(product, catalogItemsById, errors, details = {}) {
@@ -862,7 +1191,7 @@ async function buildPublishedContract({ config = null, lang = "en", includeUnava
   for (const section of sections) {
     if (section.visible === false || !section.availableFor.includes("subscription")) continue;
     if (section.sectionType === "option_group") {
-      const payload = buildOptionGroupSection(section, docs, lang, includeUnavailable, membership);
+      const payload = buildOptionGroupSection(section, docs, lang, includeUnavailable, membership, premiumLargeSaladPricing);
       if (payload && (includeUnavailable || payload.items.length)) payloadSections.push(payload);
     } else {
       const payload = buildProductSection(section, docs, lang, includeUnavailable, membership, premiumLargeSaladPricing);
@@ -930,7 +1259,9 @@ function buildSectionBase(section, titleSource, lang) {
   };
   return {
     id: section._id ? String(section._id) : `section:${section.sectionType}:${section.sortOrder}`,
+    key: section.key || "",
     sectionType: section.sectionType,
+    sourceKind: section.sourceKind || "",
     title: pickLang(titleI18n, lang),
     titleI18n,
     sortOrder: Number(section.sortOrder || 0),
@@ -939,10 +1270,12 @@ function buildSectionBase(section, titleSource, lang) {
     maxSelections: section.maxSelections === null || section.maxSelections === undefined ? null : Number(section.maxSelections),
     multiSelect: Boolean(section.multiSelect),
     selectionType: section.selectionType || "",
+    metadata: plainObject(section.metadata),
+    rules: plainObject(section.rules),
   };
 }
 
-function buildOptionGroupSection(section, docs, lang, includeUnavailable, membership) {
+function buildOptionGroupSection(section, docs, lang, includeUnavailable, membership, premiumLargeSaladPricing = {}) {
   const product = docs.productsById.get(String(section.productContextId));
   const group = docs.groupsById.get(String(section.sourceGroupId));
   if (!product || !group) return null;
@@ -965,10 +1298,43 @@ function buildOptionGroupSection(section, docs, lang, includeUnavailable, member
   });
   addMembership(membership, section.selectionType, product._id, group._id);
 
+  if (section.key === "premium") {
+    const premiumProducts = (section.selectedProductIds || [])
+      .map((id) => docs.productsById.get(String(id)))
+      .filter(Boolean)
+      .filter((selectedProduct) => includeUnavailable || customerReady(selectedProduct, docs.catalogItemsById))
+      .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+    for (const selectedProduct of premiumProducts) {
+      const resolvedSelectionType = selectedProduct.key === "premium_large_salad"
+        ? MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD
+        : productSelectionType({ selectionType: "" }, selectedProduct);
+      addMembership(membership, resolvedSelectionType, selectedProduct._id);
+      items.push(buildProductItem({
+        product: selectedProduct,
+        selectionType: resolvedSelectionType,
+        docs,
+        lang,
+        membership,
+        premiumLargeSaladPricing,
+        includeUnavailable,
+      }));
+    }
+  }
+
   return {
     ...buildSectionBase(section, group, lang),
     productContextId: String(product._id),
     productKey: product.key || "",
+    productContext: {
+      id: String(product._id),
+      key: product.key || "",
+      name: pickLang(product.name, lang),
+      nameI18n: product.name || {},
+      itemType: product.itemType || "product",
+      pricingModel: product.pricingModel || "",
+      priceHalala: Number(product.priceHalala || 0),
+      currency: product.currency || SYSTEM_CURRENCY,
+    },
     sourceGroupId: String(group._id),
     groupKey: group.key || "",
     items,
@@ -1023,6 +1389,7 @@ function buildOptionItem({ option, relation, group, product, selectionType, lang
 
 function buildProductItem({ product, selectionType, docs, lang, membership, premiumLargeSaladPricing, includeUnavailable }) {
   const isPremiumSalad = selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD;
+  const isSandwich = selectionType === MEAL_SELECTION_TYPES.SANDWICH;
   const optionGroups = buildProductOptionGroups({ product, selectionType, docs, lang, membership, includeUnavailable });
   const priceHalala = isPremiumSalad
     ? Number(premiumLargeSaladPricing.priceHalala ?? product.priceHalala ?? 0)
@@ -1042,6 +1409,11 @@ function buildProductItem({ product, selectionType, docs, lang, membership, prem
     priceHalala,
     premiumPriceHalala: isPremiumSalad ? Number(premiumLargeSaladPricing.extraFeeHalala ?? priceHalala) : 0,
     requiresPremiumBalance: isPremiumSalad,
+    action: {
+      type: isSandwich ? "direct_add" : "open_builder",
+      requiresBuilder: !isSandwich,
+      treatAsFullMeal: isSandwich || undefined,
+    },
     available: true,
     optionGroups,
     sortOrder: Number(product.sortOrder || 0),
@@ -1085,6 +1457,146 @@ function buildProductOptionGroups({ product, selectionType, docs, lang, membersh
   }).filter(Boolean);
 }
 
+function plannerOptionFromBuilderItem(item = {}) {
+  return {
+    id: item.id,
+    optionId: item.id,
+    key: item.key || "",
+    name: item.name || "",
+    nameI18n: item.nameI18n || {},
+    imageUrl: item.imageUrl || "",
+    selectionType: item.selectionType || "",
+    isPremium: item.isPremium === true,
+    premiumKey: item.premiumKey || undefined,
+    premiumKind: item.premiumKind || undefined,
+    extraPriceHalala: Number(item.priceHalala || item.extraPriceHalala || 0),
+    extraFeeHalala: Number(item.premiumPriceHalala || item.extraFeeHalala || 0),
+    sortOrder: Number(item.sortOrder || 0),
+  };
+}
+
+function plannerGroupFromOptionSection(section = {}) {
+  const optionItems = (section.items || []).filter((item) => item.type === "option");
+  return {
+    id: section.sourceGroupId,
+    groupId: section.sourceGroupId,
+    key: section.groupKey || "",
+    sourceKey: section.groupKey || "",
+    name: section.title || "",
+    nameI18n: section.titleI18n || {},
+    minSelections: Number(section.minSelections || 0),
+    maxSelections: section.maxSelections === null || section.maxSelections === undefined ? null : Number(section.maxSelections),
+    required: Boolean(section.required),
+    isRequired: Boolean(section.required),
+    sortOrder: Number(section.sortOrder || 0),
+    options: optionItems.map(plannerOptionFromBuilderItem),
+  };
+}
+
+function plannerProductFromContext(section = {}) {
+  const context = section.productContext || {};
+  return {
+    id: section.productContextId,
+    productId: section.productContextId,
+    key: section.productKey || context.key || "",
+    name: context.name || "",
+    nameI18n: context.nameI18n || {},
+    itemType: context.itemType || "product",
+    selectionType: section.selectionType || "",
+    pricing: {
+      model: context.pricingModel || "",
+      basePriceHalala: Number(context.priceHalala || 0),
+      currency: context.currency || SYSTEM_CURRENCY,
+    },
+    action: { type: "open_builder", requiresBuilder: true },
+    optionGroups: [plannerGroupFromOptionSection(section)].filter((group) => group.options.length),
+  };
+}
+
+function plannerProductFromBuilderProduct(item = {}) {
+  return {
+    id: item.id,
+    productId: item.id,
+    key: item.key || "",
+    name: item.name || "",
+    nameI18n: item.nameI18n || {},
+    imageUrl: item.imageUrl || "",
+    itemType: item.itemType || "product",
+    selectionType: item.selectionType || "",
+    premiumKey: item.premiumKey || undefined,
+    premiumKind: item.premiumKind || undefined,
+    pricing: {
+      priceHalala: Number(item.priceHalala || 0),
+      extraFeeHalala: Number(item.premiumPriceHalala || 0),
+      currency: SYSTEM_CURRENCY,
+    },
+    action: item.action || { type: "open_builder", requiresBuilder: true },
+    optionGroups: (item.optionGroups || []).map((group) => ({
+      id: group.id || group.groupId,
+      groupId: group.groupId || group.id,
+      key: group.key || "",
+      sourceKey: group.key || "",
+      name: group.name || "",
+      nameI18n: group.nameI18n || {},
+      minSelections: Number(group.minSelections || 0),
+      maxSelections: group.maxSelections === null || group.maxSelections === undefined ? null : Number(group.maxSelections),
+      required: Boolean(group.required),
+      isRequired: Boolean(group.required),
+      sortOrder: Number(group.sortOrder || 0),
+      options: (group.options || group.items || []).map(plannerOptionFromBuilderItem),
+    })),
+    sortOrder: Number(item.sortOrder || 0),
+  };
+}
+
+function plannerSectionFromBuilderSection(section = {}) {
+  const productItems = (section.items || []).filter((item) => item.type === "product");
+  const products = [];
+  if (section.sectionType === "option_group") {
+    const contextProduct = plannerProductFromContext(section);
+    if (contextProduct.optionGroups.length) products.push(contextProduct);
+  }
+  products.push(...productItems.map(plannerProductFromBuilderProduct));
+
+  return {
+    id: `section:${section.key || section.selectionType || section.sortOrder}`,
+    key: section.key || section.selectionType || "",
+    type: section.sectionType === "product_category" || section.sectionType === "product_list" ? "product_list" : "configurable_product",
+    name: section.title || "",
+    nameI18n: section.titleI18n || {},
+    sortOrder: Number(section.sortOrder || 0),
+    ui: section.metadata || {},
+    rules: section.rules || {},
+    products,
+  };
+}
+
+async function buildPlannerCatalogFromPublishedBuilder({ lang = "en", config = null } = {}) {
+  const published = config || await getCurrentPublishedConfig();
+  if (!published) return null;
+  const contract = await buildPublishedContract({ config: published, lang });
+  const sections = (contract.sections || [])
+    .map(plannerSectionFromBuilderSection)
+    .filter((section) => section.products.length)
+    .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+  const stablePayload = {
+    contractVersion: "meal_planner_menu.v3",
+    currency: SYSTEM_CURRENCY,
+    sections,
+    rules: {
+      ...getMealPlannerRules(),
+      source: "meal_builder_config",
+      builderRevisionHash: contract.revisionHash,
+    },
+  };
+  return {
+    ...stablePayload,
+    catalogHash: stableHash(stablePayload),
+    publishedVersionId: null,
+    builderRevisionHash: contract.revisionHash,
+  };
+}
+
 async function buildPublishedMembership() {
   const published = await getCurrentPublishedConfig();
   if (!published) return { hasPublishedConfig: false, membership: createEmptyMembership(), revisionHash: null };
@@ -1112,22 +1624,35 @@ function isOptionIncluded(membership, selectionType, productId, groupId, optionI
 }
 
 async function getReadinessReport() {
-  const published = await getCurrentPublishedConfig();
+  const [draft, published] = await Promise.all([getCurrentDraftConfig(), getCurrentPublishedConfig()]);
   if (!published) {
+    const errors = [{ level: "error", code: "MEAL_BUILDER_NOT_PUBLISHED", message: "No published Meal Builder config exists" }];
+    if (!draft) errors.unshift({ level: "error", code: "MEAL_BUILDER_DRAFT_NOT_FOUND", message: "No current Meal Builder draft exists" });
     return {
       status: "error",
       ready: false,
-      errors: [{ level: "error", code: "MEAL_BUILDER_NOT_PUBLISHED", message: "No published Meal Builder config exists" }],
+      errors,
       warnings: [],
-      checks: [{ level: "error", code: "MEAL_BUILDER_NOT_PUBLISHED", message: "No published Meal Builder config exists" }],
-      summary: { published: false, sections: 0, errors: 1, warnings: 0 },
+      checks: errors,
+      summary: { draft: Boolean(draft), published: false, sections: 0, errors: errors.length, warnings: 0 },
     };
   }
   const validation = await validateConfigObject(published);
+  const errors = [...validation.errors];
+  if (!draft) {
+    errors.unshift({ level: "error", code: "MEAL_BUILDER_DRAFT_NOT_FOUND", message: "No current Meal Builder draft exists" });
+  }
+  const ready = validation.ready && Boolean(draft);
+  const status = errors.length ? "error" : validation.status;
   return {
     ...validation,
+    status,
+    ready,
+    errors,
+    checks: [...errors, ...validation.warnings],
     summary: {
       ...validation.summary,
+      draft: Boolean(draft),
       published: true,
       revisionHash: published.revisionHash || "",
       route: "/api/dashboard/meal-builder/readiness",
@@ -1143,6 +1668,8 @@ module.exports = {
   CONTRACT_VERSION,
   MealBuilderError,
   buildDefaultSeedSections,
+  buildDefaultVisualTemplateSections,
+  buildPlannerCatalogFromPublishedBuilder,
   buildPublishedContract,
   buildPublishedMembership,
   computeRevisionHash,

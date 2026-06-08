@@ -1309,7 +1309,7 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
       },
     })
     : null;
-  const plannerCatalog = includeV3
+  let plannerCatalog = includeV3
     ? await buildCanonicalPlannerCatalogV3({
       builderCatalog,
       lang,
@@ -1321,6 +1321,17 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
       },
     })
     : null;
+  if (includeV3) {
+    try {
+      const mealBuilderConfigService = require("../subscription/mealBuilderConfigService");
+      const publishedBuilderPlannerCatalog = await mealBuilderConfigService.buildPlannerCatalogFromPublishedBuilder({ lang });
+      if (publishedBuilderPlannerCatalog) plannerCatalog = publishedBuilderPlannerCatalog;
+    } catch (err) {
+      if (err && err.code !== "MEAL_BUILDER_NOT_PUBLISHED") {
+        console.warn("[CatalogService] Unable to build plannerCatalog from published Meal Builder:", err.message);
+      }
+    }
+  }
 
   return { builderCatalog, builderCatalogV2, plannerCatalog };
 }

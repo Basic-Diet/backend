@@ -10,10 +10,17 @@ const LocalizedStringSchema = new mongoose.Schema(
 
 const MealBuilderSectionSchema = new mongoose.Schema(
   {
+    key: { type: String, default: "", trim: true, index: true },
     sectionType: {
       type: String,
       enum: ["option_group", "product_category", "product_list"],
       required: true,
+    },
+    sourceKind: {
+      type: String,
+      enum: ["", "visual_family", "configurable_product", "product_list", "premium_visual"],
+      default: "",
+      trim: true,
     },
     titleOverride: { type: LocalizedStringSchema, default: () => ({}) },
     productContextId: { type: mongoose.Schema.Types.ObjectId, ref: "MenuProduct", default: null },
@@ -34,6 +41,8 @@ const MealBuilderSectionSchema = new mongoose.Schema(
       enum: ["subscription"],
       default: ["subscription"],
     },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+    rules: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
   },
   { _id: true }
 );
