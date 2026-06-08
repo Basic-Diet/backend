@@ -16,6 +16,7 @@ const {
   PREMIUM_LARGE_SALAD_PREMIUM_KEY,
   PROTEIN_DISPLAY_GROUPS,
   STANDARD_CARB_RULES,
+  STANDARD_MEAL_EXTENDED_PROTEIN_KEYS,
   SUBSCRIPTION_COLD_SANDWICH_KEYS,
   SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS,
   SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS,
@@ -710,6 +711,7 @@ function serializeHydratedOption({
   excludePremium = false,
   requirePositivePremiumPrice = false,
   requireCustomerVisibleCarb = false,
+  allowUnlinkedCandidate = false,
 } = {}) {
   if (!option) {
     const errors = [statusIssue("error", "MISSING_OPTION", "Selected option no longer exists")];
@@ -774,13 +776,19 @@ function serializeHydratedOption({
     && docStatus.published
     && docStatus.subscriptionEnabled
     && docStatus.catalogItemAvailable;
-  const eligible = available && relStatus.relationReady && errors.length === 0;
+  const addableUnlinkedCandidate = allowUnlinkedCandidate
+    && !selected
+    && available
+    && !relStatus.relationReady
+    && errors.length === 0;
+  const eligible = available && errors.length === 0 && (relStatus.relationReady || addableUnlinkedCandidate);
   if (selected) reasonCodes.unshift("SELECTED");
   if (eligible) reasonCodes.push("ELIGIBLE");
 
   let state = "invalid";
   if (selected) state = "selected";
   else if (!available) state = "unavailable";
+  else if (addableUnlinkedCandidate) state = "addable";
   else if (!relStatus.linked) state = "not_linked";
   else if (eligible) state = "eligible";
 
@@ -968,6 +976,12 @@ function isCanonicalStandardProteinForPicker(option = {}, sectionKey = "") {
   if (!key || NON_PROTEIN_PICKER_OPTION_KEYS.has(key) || key.startsWith("extra_")) return false;
   if (isPremiumProtein(option)) return false;
   return optionFamilyKey(option) === sectionKey;
+}
+
+function standardProteinKeysForFamily(sectionKey = "") {
+  return STANDARD_MEAL_EXTENDED_PROTEIN_KEYS
+    .filter((key) => !PREMIUM_PROTEIN_KEYS.has(key))
+    .filter((key) => resolveProteinVisualFamilyKey({ key }) === sectionKey);
 }
 
 function paginateRows(rows, pagination) {
@@ -1199,8 +1213,22 @@ async function buildOptionPicker({ sectionKey, section, context, lang, q, pagina
   const selectedSet = new Set(selectedOptionIds);
   const group = context.group;
   const product = context.product;
-  const query = group ? { groupId: group._id } : {};
-  const candidateOptions = group ? await MenuOption.find(query).sort({ sortOrder: 1, createdAt: -1 }).lean() : [];
+  const familyKeys = VISUAL_PROTEIN_FAMILY_KEYS.has(sectionKey) ? standardProteinKeysForFamily(sectionKey) : [];
+  const query = group
+    ? (
+        familyKeys.length
+          ? {
+              $or: [
+                { groupId: group._id },
+                { key: { $in: familyKeys } },
+                { proteinFamilyKey: sectionKey },
+                { displayCategoryKey: sectionKey },
+              ],
+            }
+          : { groupId: group._id }
+      )
+    : (familyKeys.length ? { key: { $in: familyKeys } } : {});
+  const candidateOptions = await MenuOption.find(query).sort({ sortOrder: 1, createdAt: -1 }).lean();
   const docs = await buildPickerDocs({
     product,
     group,
@@ -1235,6 +1263,7 @@ async function buildOptionPicker({ sectionKey, section, context, lang, q, pagina
       expectedFamilyKey: VISUAL_PROTEIN_FAMILY_KEYS.has(sectionKey) ? sectionKey : "",
       excludePremium: VISUAL_PROTEIN_FAMILY_KEYS.has(sectionKey),
       requireCustomerVisibleCarb: sectionKey === "carbs",
+      allowUnlinkedCandidate: VISUAL_PROTEIN_FAMILY_KEYS.has(sectionKey) || sectionKey === "carbs",
     }))
     .filter((candidate) => shouldIncludeCandidate(candidate, pickerOptions))
     .sort((a, b) => Number(a.relation?.sortOrder ?? 0) - Number(b.relation?.sortOrder ?? 0) || String(a.key).localeCompare(String(b.key)));
@@ -2336,9 +2365,9 @@ function resolveSectionProducts(section, docs) {
 }
 
 function productSelectionType(section, product) {
-  if (section.selectionType) return section.selectionType;
-  if (product && product.itemType === "cold_sandwich") return MEAL_SELECTION_TYPES.SANDWICH;
   if (product && product.key === "premium_large_salad") return MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD;
+  if (product && product.itemType === "cold_sandwich") return MEAL_SELECTION_TYPES.SANDWICH;
+  if (section.selectionType) return section.selectionType;
   return "";
 }
 

@@ -251,6 +251,7 @@ async function main() {
     assert(premium.items.some((item) => item.key === "shrimp"), "premium hydrates shrimp");
     assert(premium.items.some((item) => item.key === "salmon"), "premium hydrates salmon");
     assert(premium.items.some((item) => item.key === "premium_large_salad"), "premium hydrates salad");
+    assert.strictEqual(premium.items.find((item) => item.key === "premium_large_salad").selectionType, "premium_large_salad");
 
     const carbs = res.body.data.sections.find((section) => section.key === "carbs");
     assert.strictEqual(carbs.type, "option_group");

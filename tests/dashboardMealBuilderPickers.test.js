@@ -15,6 +15,7 @@ const MenuOptionGroup = require("../src/models/MenuOptionGroup");
 const MenuProduct = require("../src/models/MenuProduct");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
+const MealBuilderConfig = require("../src/models/MealBuilderConfig");
 
 let mongoServer;
 
@@ -78,89 +79,50 @@ async function seedCatalog() {
       publishedAt: now,
     }),
   ]);
+  const proteinRows = [
+    { key: "chicken", family: "chicken" },
+    { key: "chicken_fajita", family: "chicken" },
+    { key: "spicy_chicken", family: "chicken" },
+    { key: "italian_spiced_chicken", family: "chicken" },
+    { key: "chicken_tikka", family: "chicken" },
+    { key: "asian_chicken", family: "chicken" },
+    { key: "chicken_strips", family: "chicken" },
+    { key: "grilled_chicken", family: "chicken" },
+    { key: "mexican_chicken", family: "chicken" },
+    { key: "hidden_chicken", family: "chicken", isActive: false },
+    { key: "ranch", family: "chicken" },
+    { key: "mango", family: "chicken" },
+    { key: "cashew", family: "chicken" },
+    { key: "tomato", family: "chicken" },
+    { key: "extra_chicken_50g", family: "chicken" },
+    { key: "extra_protein_50g", family: "chicken" },
+    { key: "beef", family: "beef" },
+    { key: "meatballs", family: "beef" },
+    { key: "beef_stroganoff", family: "beef" },
+    { key: "fish", family: "fish" },
+    { key: "tuna", family: "fish" },
+    { key: "fish_fillet", family: "fish" },
+    { key: "eggs", family: "eggs" },
+    { key: "boiled_eggs", family: "eggs" },
+    { key: "beef_steak", family: "beef", premium: true, price: 3000 },
+    { key: "shrimp", family: "fish", premium: true, price: 3000 },
+  ];
+  const proteinOptions = await Promise.all(proteinRows.map((row, index) => MenuOption.create({
+    groupId: proteinsGroup._id,
+    key: row.key,
+    premiumKey: row.premium ? row.key : "",
+    name: { en: row.key, ar: row.key },
+    proteinFamilyKey: row.family,
+    displayCategoryKey: row.premium ? "premium" : row.family,
+    extraPriceHalala: row.price || 0,
+    availableFor: ["subscription"],
+    availableForSubscription: true,
+    isActive: row.isActive === false ? false : true,
+    publishedAt: now,
+    sortOrder: index + 1,
+  })));
   const options = await Promise.all([
-    MenuOption.create({
-      groupId: proteinsGroup._id,
-      key: "grilled_chicken",
-      name: { en: "Grilled Chicken", ar: "Grilled Chicken" },
-      proteinFamilyKey: "chicken",
-      displayCategoryKey: "chicken",
-      availableFor: ["subscription"],
-      availableForSubscription: true,
-      publishedAt: now,
-      sortOrder: 1,
-    }),
-    MenuOption.create({
-      groupId: proteinsGroup._id,
-      key: "chicken_curry",
-      name: { en: "Chicken Curry", ar: "Chicken Curry" },
-      proteinFamilyKey: "chicken",
-      displayCategoryKey: "chicken",
-      availableFor: ["subscription"],
-      availableForSubscription: true,
-      publishedAt: now,
-      sortOrder: 2,
-    }),
-    MenuOption.create({
-      groupId: proteinsGroup._id,
-      key: "hidden_chicken",
-      name: { en: "Hidden Chicken", ar: "Hidden Chicken" },
-      proteinFamilyKey: "chicken",
-      displayCategoryKey: "chicken",
-      availableFor: ["subscription"],
-      availableForSubscription: true,
-      isActive: false,
-      publishedAt: now,
-      sortOrder: 3,
-    }),
-    MenuOption.create({
-      groupId: proteinsGroup._id,
-      key: "extra_chicken_50g",
-      name: { en: "Extra Chicken", ar: "Extra Chicken" },
-      proteinFamilyKey: "chicken",
-      displayCategoryKey: "chicken",
-      availableFor: ["subscription"],
-      availableForSubscription: true,
-      publishedAt: now,
-      sortOrder: 4,
-    }),
-    MenuOption.create({
-      groupId: proteinsGroup._id,
-      key: "beef",
-      name: { en: "Beef", ar: "Beef" },
-      proteinFamilyKey: "beef",
-      displayCategoryKey: "beef",
-      availableFor: ["subscription"],
-      availableForSubscription: true,
-      publishedAt: now,
-      sortOrder: 5,
-    }),
-    MenuOption.create({
-      groupId: proteinsGroup._id,
-      key: "beef_steak",
-      premiumKey: "beef_steak",
-      name: { en: "Beef Steak", ar: "Beef Steak" },
-      proteinFamilyKey: "beef",
-      displayCategoryKey: "premium",
-      extraPriceHalala: 3000,
-      availableFor: ["subscription"],
-      availableForSubscription: true,
-      publishedAt: now,
-      sortOrder: 6,
-    }),
-    MenuOption.create({
-      groupId: proteinsGroup._id,
-      key: "shrimp",
-      premiumKey: "shrimp",
-      name: { en: "Shrimp", ar: "Shrimp" },
-      proteinFamilyKey: "fish",
-      displayCategoryKey: "premium",
-      extraPriceHalala: 3000,
-      availableFor: ["subscription"],
-      availableForSubscription: true,
-      publishedAt: now,
-      sortOrder: 7,
-    }),
+    ...proteinOptions,
     MenuOption.create({
       groupId: carbsGroup._id,
       key: "white_rice",
@@ -184,7 +146,7 @@ async function seedCatalog() {
 
   await ProductOptionGroup.create({ productId: basicMeal._id, groupId: proteinsGroup._id, minSelections: 1, maxSelections: 1, isRequired: true, sortOrder: 1 });
   await ProductOptionGroup.create({ productId: basicMeal._id, groupId: carbsGroup._id, minSelections: 1, maxSelections: 2, isRequired: true, sortOrder: 2 });
-  for (const key of ["grilled_chicken", "hidden_chicken", "extra_chicken_50g", "beef", "beef_steak", "shrimp"]) {
+  for (const key of ["chicken", "grilled_chicken", "hidden_chicken", "extra_chicken_50g", "beef", "fish", "eggs", "beef_steak", "shrimp"]) {
     await ProductGroupOption.create({
       productId: basicMeal._id,
       groupId: proteinsGroup._id,
@@ -196,6 +158,24 @@ async function seedCatalog() {
   await ProductGroupOption.create({ productId: basicMeal._id, groupId: carbsGroup._id, optionId: byKey.get("white_rice")._id, sortOrder: 1 });
   await ProductOptionGroup.create({ productId: premiumLargeSalad._id, groupId: proteinsGroup._id, minSelections: 1, maxSelections: 1, isRequired: true, sortOrder: 1 });
   await ProductGroupOption.create({ productId: premiumLargeSalad._id, groupId: proteinsGroup._id, optionId: byKey.get("grilled_chicken")._id, sortOrder: 1 });
+
+  await MealBuilderConfig.create({
+    status: "draft",
+    isCurrent: true,
+    contractVersion: "subscription_meal_builder.v1",
+    source: "dashboard",
+    sections: [{
+      key: "chicken",
+      sectionType: "option_group",
+      sourceKind: "visual_family",
+      productContextId: basicMeal._id,
+      sourceGroupId: proteinsGroup._id,
+      selectedOptionIds: [byKey.get("chicken")._id],
+      selectionType: "standard_meal",
+      titleOverride: { en: "Chicken", ar: "Chicken" },
+      sortOrder: 30,
+    }],
+  });
 
   return { sandwich };
 }
@@ -218,17 +198,42 @@ async function main() {
     res = await api.get("/api/dashboard/meal-builder/pickers/chicken").set(headers);
     expectStatus(res, 200, "chicken picker");
     let keys = res.body.data.candidates.map((item) => item.key);
-    assert(keys.includes("grilled_chicken"), "linked chicken returned");
-    assert(keys.includes("chicken_curry"), "not-linked chicken returned by default");
+    const expectedChickenKeys = [
+      "chicken",
+      "chicken_fajita",
+      "spicy_chicken",
+      "italian_spiced_chicken",
+      "chicken_tikka",
+      "asian_chicken",
+      "chicken_strips",
+      "grilled_chicken",
+      "mexican_chicken",
+    ];
+    assert(res.body.data.meta.total >= 9, JSON.stringify(res.body.data.meta));
+    for (const key of expectedChickenKeys) {
+      assert(keys.includes(key), `chicken picker returns ${key}`);
+    }
+    assert.strictEqual(res.body.data.candidates.find((item) => item.key === "chicken").selected, true);
+    for (const key of expectedChickenKeys.filter((item) => item !== "chicken")) {
+      const candidate = res.body.data.candidates.find((item) => item.key === key);
+      assert.strictEqual(candidate.selected, false, `${key} selected=false`);
+      assert.strictEqual(candidate.eligible, true, `${key} eligible=true: ${JSON.stringify(candidate)}`);
+    }
     assert(!keys.includes("hidden_chicken"), "inactive chicken hidden by default");
+    assert(!keys.includes("ranch"), "ranch excluded from chicken picker");
+    assert(!keys.includes("mango"), "mango excluded from chicken picker");
+    assert(!keys.includes("cashew"), "cashew excluded from chicken picker");
+    assert(!keys.includes("tomato"), "tomato excluded from chicken picker");
     assert(!keys.includes("extra_chicken_50g"), "extra chicken add-on excluded from chicken picker");
+    assert(!keys.includes("extra_protein_50g"), "extra protein add-on excluded from chicken picker");
     assert(!keys.includes("beef"), "beef excluded from chicken picker");
     const linked = res.body.data.candidates.find((item) => item.key === "grilled_chicken");
     assert.strictEqual(linked.state, "eligible");
     assert.strictEqual(linked.linked, true);
-    const notLinked = res.body.data.candidates.find((item) => item.key === "chicken_curry");
-    assert.strictEqual(notLinked.state, "not_linked");
-    assert(notLinked.reasonCodes.includes("NOT_LINKED_TO_PRODUCT_GROUP"), JSON.stringify(notLinked));
+    const addable = res.body.data.candidates.find((item) => item.key === "chicken_fajita");
+    assert.strictEqual(addable.state, "addable");
+    assert.strictEqual(addable.linked, false);
+    assert(addable.reasonCodes.includes("NOT_LINKED_TO_PRODUCT_GROUP"), JSON.stringify(addable));
 
     res = await api.get("/api/dashboard/meal-builder/pickers/chicken?includeUnavailable=true").set(headers);
     expectStatus(res, 200, "chicken picker with unavailable");
@@ -240,8 +245,24 @@ async function main() {
     expectStatus(res, 200, "beef picker");
     keys = res.body.data.candidates.map((item) => item.key);
     assert(keys.includes("beef"), "beef returned");
+    assert(keys.includes("meatballs"), "meatballs returned");
+    assert(keys.includes("beef_stroganoff"), "beef stroganoff returned");
     assert(!keys.includes("grilled_chicken"), "chicken excluded from beef picker");
     assert(!keys.includes("beef_steak"), "premium beef excluded from standard beef picker");
+
+    res = await api.get("/api/dashboard/meal-builder/pickers/fish").set(headers);
+    expectStatus(res, 200, "fish picker");
+    keys = res.body.data.candidates.map((item) => item.key);
+    assert(keys.includes("fish"), "fish returned");
+    assert(keys.includes("tuna"), "tuna returned");
+    assert(keys.includes("fish_fillet"), "fish fillet returned");
+    assert(!keys.includes("shrimp"), "premium shrimp excluded from standard fish picker");
+
+    res = await api.get("/api/dashboard/meal-builder/pickers/eggs").set(headers);
+    expectStatus(res, 200, "eggs picker");
+    keys = res.body.data.candidates.map((item) => item.key);
+    assert(keys.includes("eggs"), "eggs returned");
+    assert(keys.includes("boiled_eggs"), "boiled eggs returned");
 
     res = await api.get("/api/dashboard/meal-builder/pickers/carbs").set(headers);
     expectStatus(res, 200, "carbs picker");
@@ -263,6 +284,7 @@ async function main() {
     assert(keys.includes("shrimp"), "premium includes shrimp");
     assert(keys.includes("salmon"), "premium includes missing salmon placeholder");
     assert(keys.includes("premium_large_salad"), "premium includes salad product");
+    assert.strictEqual(res.body.data.candidates.find((item) => item.key === "premium_large_salad").selectionType, "premium_large_salad");
     const missingSalmon = res.body.data.candidates.find((item) => item.key === "salmon");
     assert.strictEqual(missingSalmon.type, "missing_option");
     assert(missingSalmon.reasonCodes.includes("PREMIUM_REQUIRED_KEY"), JSON.stringify(missingSalmon));
