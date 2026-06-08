@@ -7,6 +7,7 @@ const mongoose = require("mongoose");
 const { seedCatalog } = require("./seed-catalog");
 const { seedSubscriptionPlans } = require("./seed-subscription-plans");
 const { bootstrapDefaultAccounts } = require("./seed-default-accounts");
+const { seedMealBuilderConfig } = require("./seed-meal-builder");
 
 
 function isTruthy(value) {
@@ -20,6 +21,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     reset: argv.includes("--reset"),
     includeAccounts: isTruthy(process.env.ALLOW_ACCOUNT_BOOTSTRAP),
     accountSync: isTruthy(process.env.ACCOUNT_BOOTSTRAP_SYNC),
+    includeMealBuilder: isTruthy(process.env.MEAL_BUILDER_BOOTSTRAP),
+    mealBuilderSync: argv.includes("--sync") && isTruthy(process.env.MEAL_BUILDER_BOOTSTRAP_SYNC),
   };
 }
 
@@ -43,6 +46,10 @@ function printDryRunPlan(args, log = console) {
   log.log(`[bootstrap:dry-run] catalog/menu seed: yes${args.reset ? " with guarded reset" : ""}`);
   log.log("[bootstrap:dry-run] subscription plans seed: yes");
   log.log("[bootstrap:dry-run] subscription addons/settings/pickup locations: handled by catalog seed");
+  log.log(`[bootstrap:dry-run] meal builder seed: ${args.includeMealBuilder ? "yes" : "no"}`);
+  if (args.includeMealBuilder) {
+    log.log(`[bootstrap:dry-run] meal builder mode=${args.mealBuilderSync ? "sync-bootstrap-owned" : "create-missing-only"}`);
+  }
   log.log(`[bootstrap:dry-run] default dashboard/mobile accounts: ${args.includeAccounts ? "yes" : "no"}`);
   if (args.includeAccounts) {
     log.log(`[bootstrap:dry-run] account mode=${args.accountSync ? "sync" : "create-missing-only"}`);
@@ -73,6 +80,15 @@ async function runBootstrap(options = {}) {
       sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
       cleanupFlatPlans: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
     });
+    if (args.includeMealBuilder) {
+      await seedMealBuilderConfig({
+        sync: args.sync && isTruthy(process.env.MEAL_BUILDER_BOOTSTRAP_SYNC),
+        dryRun: false,
+        log: console,
+      });
+    } else {
+      console.log("Meal Builder bootstrap skipped. Set MEAL_BUILDER_BOOTSTRAP=true to enable it.");
+    }
   } finally {
     await mongoose.disconnect();
   }

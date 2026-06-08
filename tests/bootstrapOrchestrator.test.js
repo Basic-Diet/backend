@@ -22,15 +22,24 @@ async function run() {
 
   const originalAllowAccounts = process.env.ALLOW_ACCOUNT_BOOTSTRAP;
   const originalAccountSync = process.env.ACCOUNT_BOOTSTRAP_SYNC;
+  const originalMealBuilder = process.env.MEAL_BUILDER_BOOTSTRAP;
+  const originalMealBuilderSync = process.env.MEAL_BUILDER_BOOTSTRAP_SYNC;
   const originalReset = process.env.ALLOW_CATALOG_RESET;
   const originalNodeEnv = process.env.NODE_ENV;
 
   try {
     process.env.ALLOW_ACCOUNT_BOOTSTRAP = "true";
     process.env.ACCOUNT_BOOTSTRAP_SYNC = "true";
+    process.env.MEAL_BUILDER_BOOTSTRAP = "true";
+    process.env.MEAL_BUILDER_BOOTSTRAP_SYNC = "true";
     const withAccounts = parseArgs(["--dry-run"]);
     assert.strictEqual(withAccounts.includeAccounts, true);
     assert.strictEqual(withAccounts.accountSync, true);
+    assert.strictEqual(withAccounts.includeMealBuilder, true);
+    assert.strictEqual(withAccounts.mealBuilderSync, false);
+
+    const withMealBuilderSync = parseArgs(["--dry-run", "--sync"]);
+    assert.strictEqual(withMealBuilderSync.mealBuilderSync, true);
 
     const messages = [];
     const result = await runBootstrap({
@@ -39,6 +48,8 @@ async function run() {
     });
     assert.strictEqual(result.dryRun, true);
     assert(messages.some((message) => message.includes("No database writes")));
+    assert(messages.some((message) => message.includes("meal builder seed: yes")));
+    assert(messages.some((message) => message.includes("meal builder mode=create-missing-only")));
     assert(messages.some((message) => message.includes("default dashboard/mobile accounts: yes")));
 
     delete process.env.ALLOW_CATALOG_RESET;
@@ -56,6 +67,8 @@ async function run() {
   } finally {
     restoreEnv("ALLOW_ACCOUNT_BOOTSTRAP", originalAllowAccounts);
     restoreEnv("ACCOUNT_BOOTSTRAP_SYNC", originalAccountSync);
+    restoreEnv("MEAL_BUILDER_BOOTSTRAP", originalMealBuilder);
+    restoreEnv("MEAL_BUILDER_BOOTSTRAP_SYNC", originalMealBuilderSync);
     restoreEnv("ALLOW_CATALOG_RESET", originalReset);
     restoreEnv("NODE_ENV", originalNodeEnv);
   }

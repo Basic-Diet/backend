@@ -129,3 +129,59 @@ Stable backend codes include:
 The backend now has a focused dashboard-to-Flutter integration test covering Dashboard readiness, Flutter menu reads, daily add-on reads, pure v3 save, unified payment create, payment verify, confirmation, and final day read.
 
 Needs backend contract hardening: none currently blocking Dashboard/Flutter contract review. Production checks remain separate.
+
+## Dashboard Meal Builder With Premium Upgrade Support
+
+The backend now exposes an additive Dashboard-managed Subscription Meal Builder without replacing the existing planner catalog.
+
+New Dashboard endpoints:
+
+- `GET /api/dashboard/meal-builder`
+- `POST /api/dashboard/meal-builder/draft`
+- `PUT /api/dashboard/meal-builder/draft`
+- `POST /api/dashboard/meal-builder/validate`
+- `POST /api/dashboard/meal-builder/publish`
+- `GET /api/dashboard/meal-builder/readiness`
+
+New Flutter endpoint:
+
+- `GET /api/subscriptions/meal-builder`
+
+The Flutter endpoint returns the current published `subscription_meal_builder.v1` layout with `revisionHash`, `publishedAt`, ordered sections, and option/product items. If no builder config is published it returns `MEAL_BUILDER_NOT_PUBLISHED`; existing `/api/subscriptions/meal-planner-menu` behavior is unchanged and remains the compatibility/planner catalog endpoint.
+
+Meal Builder sections reference existing catalog rows only:
+
+- `option_group` references a `MenuProduct` context, `MenuOptionGroup`, and optional selected `MenuOption` ids.
+- `product_category` references a `MenuCategory` and can include all or selected products.
+- `product_list` references selected `MenuProduct` ids.
+
+Premium upgrade behavior remains backend-owned. Premium proteins and premium large salad expose display metadata in the builder response, but day planning still uses canonical v3 validation, `premiumBalance`, `premiumSource`, `premiumExtraFeeHalala`, `paymentRequirement`, `plannerRevisionHash`, and unified day payment create/verify. The builder cannot make premium proteins or premium large salad free.
+
+Builder publish/readiness validation checks active/visible/available/published state, subscription channel eligibility, linked `CatalogItem` availability, product-option relations, premium protein split rules, premium large salad allowed proteins, and `extra_protein_50g` exclusion.
+
+When a published builder exists, day selection validation also rejects stale selections not included in that published layout with refreshable errors:
+
+- `PLANNER_BUILDER_PRODUCT_NOT_INCLUDED`
+- `PLANNER_BUILDER_GROUP_NOT_INCLUDED`
+- `PLANNER_BUILDER_OPTION_NOT_INCLUDED`
+
+Focused tests:
+
+```bash
+NODE_ENV=test node tests/dashboardMealBuilderComposer.test.js
+NODE_ENV=test node tests/subscriptionMealBuilderContract.test.js
+NODE_ENV=test node tests/subscriptionMealBuilderValidation.test.js
+```
+
+## Meal Builder Seed / Bootstrap
+
+Initial Dashboard Meal Builder data is opt-in during bootstrap:
+
+```bash
+MEAL_BUILDER_BOOTSTRAP=true npm run bootstrap:data -- --dry-run
+NODE_ENV=test MEAL_BUILDER_BOOTSTRAP=true MEAL_BUILDER_BOOTSTRAP_SYNC=true BOOTSTRAP_SYNC=true npm run bootstrap:data -- --sync
+```
+
+The seed runs after catalog and plan bootstrap and creates a current draft plus current published `MealBuilderConfig` only when missing. Sync updates only bootstrap-owned configs marked with `source: "bootstrap"`, `createdBySystem: true`, and `bootstrapKey: "initial_subscription_meal_builder"`.
+
+Default seeded sections are standard proteins, carbs, premium proteins, cold sandwiches, and premium large salad when the catalog supports them. Premium proteins and premium large salad remain display-only premium upgrades; canonical v3 validation and unified day payment still own premium balance, fees, and payment requirements. Missing optional premium large salad data produces a warning, while disallowed salad proteins or `extra_protein_50g` prevent publishing an unsafe seed.

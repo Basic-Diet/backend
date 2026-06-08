@@ -30,6 +30,7 @@ const {
   isLinkedDocGloballyAvailable,
   loadCatalogItemsByIdForDocs,
 } = require("../catalog/catalogAvailabilityService");
+const mealBuilderConfigService = require("./mealBuilderConfigService");
 
 const CANONICAL_PLANNER_CONTRACT_VERSION = "meal_planner_menu.v3";
 const MENU_PROTEIN_GROUP_KEY = "proteins";
@@ -107,6 +108,19 @@ function buildSlotError({
     optionId: optionId ? String(optionId) : undefined,
     hint: stale ? "Refresh planner catalog and retry." : undefined,
   };
+}
+
+function buildBuilderMembershipError({ slotIndex, field, code, message, productId, groupId = null, optionId = null }) {
+  return buildSlotError({
+    slotIndex,
+    field,
+    code,
+    message,
+    productId,
+    groupId,
+    optionId,
+    stale: true,
+  });
 }
 
 function buildCanonicalValidationFailure(slotErrors) {
@@ -370,6 +384,18 @@ async function validateCanonicalMealSlots({
   const premiumLargeSaladPricing = slots.some((slot) => slot?.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD)
     ? await resolvePremiumLargeSaladPricing({ session })
     : { extraFeeHalala: 0, priceHalala: 0 };
+  let builderMembership;
+  try {
+    builderMembership = await mealBuilderConfigService.buildPublishedMembership();
+  } catch (_err) {
+    return buildCanonicalValidationFailure([buildBuilderMembershipError({
+      slotIndex: null,
+      field: "mealBuilder",
+      code: "PLANNER_BUILDER_CONFIG_UNAVAILABLE",
+      message: "Published Meal Builder config is unavailable",
+      productId: null,
+    })]);
+  }
 
   for (let slotArrayIndex = 0; slotArrayIndex < slots.length; slotArrayIndex += 1) {
     const slot = slots[slotArrayIndex] || {};
@@ -439,6 +465,19 @@ async function validateCanonicalMealSlots({
     error = validateProductSelectionType({ product, selectionType, slotIndex });
     if (error) {
       slotErrors.push(error);
+      continue;
+    }
+    if (
+      builderMembership.hasPublishedConfig
+      && !mealBuilderConfigService.isProductIncluded(builderMembership.membership, selectionType, productId)
+    ) {
+      slotErrors.push(buildBuilderMembershipError({
+        slotIndex,
+        field: `mealSlots[${slotArrayIndex}].productId`,
+        code: "PLANNER_BUILDER_PRODUCT_NOT_INCLUDED",
+        message: "Product is not included in the published Meal Builder",
+        productId,
+      }));
       continue;
     }
 
@@ -540,6 +579,21 @@ async function validateCanonicalMealSlots({
         slotErrors.push(error);
         continue;
       }
+      if (
+        builderMembership.hasPublishedConfig
+        && !mealBuilderConfigService.isGroupIncluded(builderMembership.membership, selectionType, productId, groupId)
+      ) {
+        slotErrors.push(buildBuilderMembershipError({
+          slotIndex,
+          field: selectedOptionField(slotArrayIndex, optionIndex, "groupId"),
+          code: "PLANNER_BUILDER_GROUP_NOT_INCLUDED",
+          message: "Option group is not included in the published Meal Builder for this product",
+          productId,
+          groupId,
+          optionId,
+        }));
+        continue;
+      }
 
       const rawOption = rawOptionRowsById.get(optionId);
       error = validateCatalogDocState({ doc: rawOption, slotIndex, field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"), entity: "OPTION", id: optionId });
@@ -592,6 +646,21 @@ async function validateCanonicalMealSlots({
       error = validateRelationState({ relation: optionRelation, slotIndex, field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"), productId, groupId, optionId, entity: "OPTION" });
       if (error) {
         slotErrors.push(error);
+        continue;
+      }
+      if (
+        builderMembership.hasPublishedConfig
+        && !mealBuilderConfigService.isOptionIncluded(builderMembership.membership, selectionType, productId, groupId, optionId)
+      ) {
+        slotErrors.push(buildBuilderMembershipError({
+          slotIndex,
+          field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"),
+          code: "PLANNER_BUILDER_OPTION_NOT_INCLUDED",
+          message: "Option is not included in the published Meal Builder for this product group",
+          productId,
+          groupId,
+          optionId,
+        }));
         continue;
       }
 

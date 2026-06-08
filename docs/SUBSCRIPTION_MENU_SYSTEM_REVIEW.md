@@ -43,3 +43,49 @@ The broad suite and backend validator should still be run before merge/deploy:
 npm test
 npm run validate:backend
 ```
+
+## Dashboard Meal Builder With Premium Upgrade Support
+
+Status: additive backend implementation added.
+
+Evidence:
+
+- `src/models/MealBuilderConfig.js`
+- `src/services/subscription/mealBuilderConfigService.js`
+- `src/routes/dashboardMealBuilder.js`
+- `src/controllers/dashboard/mealBuilderController.js`
+- `src/controllers/mealBuilderController.js`
+- `tests/dashboardMealBuilderComposer.test.js`
+- `tests/subscriptionMealBuilderContract.test.js`
+- `tests/subscriptionMealBuilderValidation.test.js`
+
+Contract decision:
+
+- Flutter uses `GET /api/subscriptions/meal-builder` for the published Dashboard-authored layout.
+- `/api/subscriptions/meal-planner-menu` remains unchanged for existing clients.
+- No published builder config means `/meal-builder` returns `MEAL_BUILDER_NOT_PUBLISHED`; current v3 planner validation keeps legacy fallback behavior until a config is published.
+
+Premium review:
+
+- Premium display fields are derived from existing catalog and planner rules.
+- Canonical v3 validation remains the authority for premium proteins, premium large salad, balance consumption, payment requirement, and unified day payment.
+- Premium large salad allowlist and `extra_protein_50g` rejection remain enforced.
+
+## Meal Builder Seed / Bootstrap Review
+
+Status: opt-in bootstrap support added.
+
+Evidence:
+
+- `scripts/bootstrap/seed-meal-builder.js`
+- `scripts/bootstrap/index.js`
+- `tests/seedMealBuilderConfig.test.js`
+- `tests/bootstrapOrchestrator.test.js`
+
+Bootstrap behavior:
+
+- `MEAL_BUILDER_BOOTSTRAP=true` enables the seed after catalog/plans.
+- Default mode creates missing draft/published configs and skips existing admin configs.
+- Sync mode requires `MEAL_BUILDER_BOOTSTRAP_SYNC=true` plus `--sync` and updates only bootstrap-owned configs.
+- Premium proteins require existing premium keys and positive pricing.
+- Premium large salad uses existing pricing service and refuses disallowed proteins or `extra_protein_50g`.
