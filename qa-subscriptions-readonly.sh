@@ -302,17 +302,23 @@ function getMealRows(gramsRow) {
 for (const lang of ["ar", "en"]) {
   const json = readJson(`meal_planner_${lang}`);
   const data = getData(json) || {};
-  const sections = data.plannerCatalog?.sections;
+  const sections = data.builderCatalog?.sections;
 
   if (!sections) {
-    fail(`meal planner ${lang} missing data.plannerCatalog.sections`);
+    fail(`meal planner ${lang} missing data.builderCatalog.sections`);
     continue;
   }
 
-  if (data.plannerCatalog.contractVersion === "meal_planner_menu.v3") {
-    pass(`meal planner ${lang} uses plannerCatalog v3`);
+  if (data.plannerCatalog === undefined && data.builderCatalogV2 === undefined) {
+    pass(`meal planner ${lang} normal response omits plannerCatalog and builderCatalogV2`);
   } else {
-    fail(`meal planner ${lang} plannerCatalog contractVersion is ${data.plannerCatalog.contractVersion}`);
+    fail(`meal planner ${lang} normal response exposes deprecated plannerCatalog/builderCatalogV2`);
+  }
+
+  if (data.builderCatalog.contractVersion === "meal_planner_menu.v3") {
+    pass(`meal planner ${lang} uses builderCatalog v3`);
+  } else {
+    fail(`meal planner ${lang} builderCatalog contractVersion is ${data.builderCatalog.contractVersion}`);
   }
 
   const requiredSections = ["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"];

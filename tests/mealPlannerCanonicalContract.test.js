@@ -127,12 +127,19 @@ async function run() {
   try {
     // 1. Verify Menu
     console.log('Verifying Menu Catalog...');
-    const menuRes = await request('GET', '/api/subscriptions/meal-planner-menu', null, token);
+    const menuRes = await request('GET', '/api/subscriptions/meal-planner-menu?lang=ar', null, token);
     assertEqual(menuRes.status, 200, 'Menu status', menuRes.body);
     assertTrue(menuRes.body.status, 'Menu status true');
     assertTrue(!!menuRes.body.data.builderCatalog, 'Missing builderCatalog');
-    assertTrue(!!menuRes.body.data.builderCatalog.sandwiches, 'Missing sandwiches');
-    assertTrue(!!menuRes.body.data.builderCatalog.premiumLargeSalad, 'Missing premiumLargeSalad');
+    assertEqual(menuRes.body.data.builderCatalog.contractVersion, 'meal_planner_menu.v3', 'builderCatalog v3 contractVersion', menuRes.body);
+    assertTrue(Array.isArray(menuRes.body.data.builderCatalog.sections), 'builderCatalog.sections should be array');
+    assertEqual(menuRes.body.data.plannerCatalog, undefined, 'normal response hides plannerCatalog', menuRes.body);
+    assertEqual(menuRes.body.data.builderCatalogV2, undefined, 'normal response hides builderCatalogV2', menuRes.body);
+    assertEqual(menuRes.body.data.builderCatalog.categories, undefined, 'builderCatalog hides legacy categories', menuRes.body);
+    assertEqual(menuRes.body.data.builderCatalog.proteins, undefined, 'builderCatalog hides legacy proteins', menuRes.body);
+    assertEqual(menuRes.body.data.builderCatalog.carbs, undefined, 'builderCatalog hides legacy carbs', menuRes.body);
+    assertEqual(menuRes.body.data.builderCatalog.premiumProteins, undefined, 'builderCatalog hides legacy premiumProteins', menuRes.body);
+    assertEqual(menuRes.body.data.builderCatalog.premiumLargeSalad, undefined, 'builderCatalog hides legacy premiumLargeSalad', menuRes.body);
     assertTrue(!!menuRes.body.data.addonCatalog, 'Missing addonCatalog');
     assertTrue(Array.isArray(menuRes.body.data.addonCatalog.items), 'addonCatalog.items should be array');
 

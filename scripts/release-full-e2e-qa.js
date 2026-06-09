@@ -416,47 +416,49 @@ async function mealPlannerContract() {
   const passed = recordResponse("Meal planner catalog", endpoint, "Canonical planner menu responds", response, (res) => res.ok && dataOf(res));
   if (!passed) return null;
   const data = dataOf(response);
-  const v1 = data.builderCatalog || {};
+  const v3 = data.builderCatalog || {};
   const addon = data.addonCatalog || {};
-  for (const field of ["proteins", "premiumProteins", "carbs", "sandwiches"]) {
-    if (!Array.isArray(v1[field])) addFinding("UX/API Contract", "high", "Meal planner catalog", `builderCatalog.${field} is missing.`);
+  if (data.plannerCatalog !== undefined) addFinding("UX/API Contract", "high", "Meal planner catalog", "Normal response exposes deprecated plannerCatalog.");
+  if (data.builderCatalogV2 !== undefined) addFinding("UX/API Contract", "high", "Meal planner catalog", "Normal response exposes deprecated builderCatalogV2.");
+  for (const field of ["categories", "proteins", "carbs", "premiumProteins", "premiumLargeSalad"]) {
+    if (v3[field] !== undefined) addFinding("UX/API Contract", "high", "Meal planner catalog", `builderCatalog.${field} legacy field is still exposed.`);
   }
-  if (!v1.premiumLargeSalad) addFinding("UX/API Contract", "high", "Meal planner catalog", "builderCatalog.premiumLargeSalad is missing.");
+  if (v3.contractVersion !== "meal_planner_menu.v3") addFinding("UX/API Contract", "high", "Meal planner catalog", "builderCatalog.contractVersion is not meal_planner_menu.v3.");
+  const sections = asArray(v3.sections);
+  if (!sections.length) addFinding("UX/API Contract", "high", "Meal planner catalog", "builderCatalog.sections is missing.");
   if (!addon || typeof addon !== "object") addFinding("UX/API Contract", "high", "Meal planner catalog", "addonCatalog is missing.");
-  const v2 = data.builderCatalogV2 || {};
-  const sections = asArray(v2.sections);
-  if (v2.catalogVersion !== "meal_planner_menu.v2") addFinding("UX/API Contract", "high", "Meal planner catalog", "builderCatalogV2.catalogVersion is not meal_planner_menu.v2.");
-  for (const key of ["standard_meal", "premium_meal", "sandwich", "premium_large_salad"]) {
-    if (!sections.find((section) => section.key === key || section.selectionType === key)) addFinding("UX/API Contract", "high", "Meal planner catalog", `builderCatalogV2 section ${key} is missing.`);
+  for (const key of ["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"]) {
+    if (!sections.find((section) => section.key === key || section.selectionType === key)) addFinding("UX/API Contract", "high", "Meal planner catalog", `builderCatalog v3 section ${key} is missing.`);
   }
-  const standardKeys = new Set(asArray(v1.proteins).map((item) => item.proteinFamilyKey || item.key));
+  const standardKeys = new Set(["chicken", "beef", "fish", "eggs"].flatMap((sectionKey) => {
+    const section = sections.find((item) => item.key === sectionKey);
+    return asArray(section && section.products).flatMap((product) => asArray(product.optionGroups).flatMap((group) => asArray(group.options).map(keyOf)));
+  }));
   for (const premium of PREMIUM_KEYS) {
-    if (standardKeys.has(premium)) addFinding("Business Logic", "high", "Meal planner catalog", `Standard protein list contains premium key ${premium}.`);
+    if (standardKeys.has(premium)) addFinding("Business Logic", "high", "Meal planner catalog", `Standard protein sections contain premium key ${premium}.`);
   }
-  for (const option of asArray(v1.premiumProteins)) {
-    if (!idOf(option) || !keyOf(option) || !option.premiumKey) addFinding("UX/API Contract", "high", "Meal planner catalog", "A premium protein has incomplete id/key/premiumKey identity.");
+  const premiumSection = sections.find((section) => section.key === "premium");
+  const premiumText = JSON.stringify(premiumSection || {});
+  for (const key of [...PREMIUM_KEYS, "premium_large_salad"]) {
+    if (!premiumText.includes(key)) addFinding("UX/API Contract", "high", "Meal planner catalog", `Premium section is missing ${key}.`);
   }
-  const saladGroups = asArray(v1.premiumLargeSalad && v1.premiumLargeSalad.groups);
-  const saladSection = sections.find((section) => section.key === "premium_large_salad" || section.selectionType === "premium_large_salad");
-  const saladProduct = catalogFirst(saladSection && saladSection.products);
-  const v2SaladGroups = asArray(saladProduct && saladProduct.optionGroups);
-  for (const key of ["leafy_greens", "vegetables", "protein", "cheese_nuts", "fruits", "sauce"]) {
-    const group = saladGroups.find((item) => item.key === key);
-    const v2Group = v2SaladGroups.find((item) => item.key === key);
-    if (!group) {
-      addFinding("Business Logic", "high", "Meal planner catalog", `Premium large salad V1 group ${key} is missing.`);
-    }
-    if (!v2Group || !asArray(v2Group.options).length) {
-      addFinding("Business Logic", "high", "Meal planner catalog", `Premium large salad V2 group ${key} is missing or has no options.`);
+  const saladProduct = asArray(premiumSection && premiumSection.products).find((product) => product.key === "premium_large_salad");
+  const saladGroups = asArray(saladProduct && saladProduct.optionGroups);
+  for (const key of ["leafy_greens", "vegetables", "proteins", "cheese_nuts", "fruits", "sauces"]) {
+    if (!saladGroups.find((item) => item.key === key || item.sourceKey === key || item.canonicalGroupKey === key)) {
+      addFinding("Business Logic", "high", "Meal planner catalog", `Premium large salad group ${key} is missing.`);
     }
   }
-  if (saladGroups.length && saladGroups.some((group) => !Array.isArray(group.options))) {
-    addFinding("UX/API Contract", "warning", "Meal planner catalog", "Premium large salad V1 groups expose rules while selectable rows live in premiumLargeSalad.ingredients. V2 optionGroups are populated; legacy clients must use the documented split shape.");
+  if (!saladProduct || saladProduct.action?.requiresBuilder !== true || !saladGroups.length) {
+    addFinding("Business Logic", "high", "Meal planner catalog", "Premium large salad is not configurable in builderCatalog v3.");
   }
-  if (!saladProduct || saladProduct.isVirtual !== false || !idOf(saladProduct)) {
-    addFinding("Business Logic", "high", "Meal planner catalog", "Premium large salad V2 does not preserve a real MenuProduct id.");
+  const sandwichSection = sections.find((section) => section.key === "sandwich");
+  for (const product of asArray(sandwichSection && sandwichSection.products)) {
+    if (product.action?.type !== "direct_add" || product.action?.requiresBuilder !== false) {
+      addFinding("Business Logic", "high", "Meal planner catalog", `Sandwich ${keyOf(product) || idOf(product)} is not direct-add.`);
+    }
   }
-  addResult("Meal planner catalog", endpoint, "V1/V2 contract inspected", FINDINGS.some((finding) => finding.area === "Meal planner catalog" && ["critical", "high"].includes(finding.severity)) ? "FAIL" : "PASS", response.status);
+  addResult("Meal planner catalog", endpoint, "builderCatalog v3 contract inspected", FINDINGS.some((finding) => finding.area === "Meal planner catalog" && ["critical", "high"].includes(finding.severity)) ? "FAIL" : "PASS", response.status);
   return data;
 }
 
@@ -466,10 +468,19 @@ function catalogFirst(items, predicate = () => true) {
 
 function plannerPayloads(catalog) {
   const builder = catalog && catalog.builderCatalog || {};
-  const standard = catalogFirst(builder.proteins, (item) => item.isPremium !== true);
-  const premium = catalogFirst(builder.premiumProteins, (item) => item.premiumKey === "shrimp") || catalogFirst(builder.premiumProteins);
-  const carb = catalogFirst(builder.carbs);
-  const sandwich = catalogFirst(builder.sandwiches);
+  const sections = asArray(builder.sections);
+  const optionsInSection = (sectionKey) => {
+    const section = sections.find((item) => item.key === sectionKey);
+    return asArray(section && section.products).flatMap((product) => (
+      asArray(product.optionGroups).flatMap((group) => asArray(group.options))
+    ));
+  };
+  const standard = catalogFirst(optionsInSection("chicken"), (item) => item.isPremium !== true);
+  const premium = catalogFirst(optionsInSection("premium"), (item) => item.premiumKey === "shrimp" || keyOf(item) === "shrimp")
+    || catalogFirst(optionsInSection("premium"));
+  const carb = catalogFirst(optionsInSection("carbs"));
+  const sandwichSection = sections.find((item) => item.key === "sandwich");
+  const sandwich = catalogFirst(sandwichSection && sandwichSection.products);
   const carbs = carb ? [{ carbId: idOf(carb), grams: 150 }] : [];
   const slot = (selectionType, extra) => ({ slotIndex: 1, slotKey: "slot_1", selectionType, ...extra });
   const payloads = {

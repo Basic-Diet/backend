@@ -70,11 +70,9 @@ router.get("/menu", asyncHandler(menuController.getSubscriptionMenu));
  *                   status: true
  *                   data:
  *                     builderCatalog:
- *                       proteins: []
- *                       premiumProteins: []
- *                       carbs: []
- *                       sandwiches: []
- *                       premiumLargeSalad: {}
+ *                       contractVersion: meal_planner_menu.v3
+ *                       currency: SAR
+ *                       sections: []
  *                     addonCatalog:
  *                       items: []
  *                       byCategory: {}

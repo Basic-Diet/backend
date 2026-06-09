@@ -358,10 +358,11 @@ async function getSubscriptionMealPlannerMenu(req, res) {
     Addon.find({ isActive: true, kind: "item", billingMode: "flat_once" }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
     getMealPlannerCatalog({ lang, includeV3 }),
   ]);
-  const builderCatalog = mealPlannerCatalog?.builderCatalog || mealPlannerCatalog || {};
+  const legacyBuilderCatalog = mealPlannerCatalog?.builderCatalog || mealPlannerCatalog || {};
   const builderCatalogV2 = mealPlannerCatalog?.builderCatalogV2 || null;
   const plannerCatalog = mealPlannerCatalog?.plannerCatalog || null;
-  const premiumMeals = mapBuilderPremiumProteinsToLegacyRows(builderCatalog);
+  const appBuilderCatalog = plannerCatalog || {};
+  const premiumMeals = mapBuilderPremiumProteinsToLegacyRows(legacyBuilderCatalog);
   const mealCatalog = buildSubscriptionMealCatalog({
     lang,
     regularMeals,
@@ -372,17 +373,18 @@ async function getSubscriptionMealPlannerMenu(req, res) {
   const legacyPlannerAddons = mealCatalog?.mealPlanner?.addons || { items: [], totalCount: 0 };
 
   const data = {
-    builderCatalog,
+    builderCatalog: appBuilderCatalog,
     addonCatalog: buildAddonCatalogFromLegacyPlannerAddons(legacyPlannerAddons),
   };
-  if (builderCatalogV2) {
+  if (includeLegacy && builderCatalogV2) {
     data.builderCatalogV2 = builderCatalogV2;
   }
-  if (plannerCatalog) {
+  if (includeLegacy && plannerCatalog) {
     data.plannerCatalog = plannerCatalog;
   }
 
   if (includeLegacy) {
+    data.legacyBuilderCatalog = legacyBuilderCatalog;
     data.currency = mealCatalog.currency;
     data.regularMeals = mealCatalog.mealPlanner.regularMeals;
     data.premiumMeals = mealCatalog.mealPlanner.premiumMeals;

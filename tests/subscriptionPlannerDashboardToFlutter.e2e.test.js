@@ -266,11 +266,26 @@ async function run() {
 
     const menuRes = await api.get("/api/subscriptions/meal-planner-menu?lang=ar").set(appHeaders);
     assert.strictEqual(menuRes.status, 200, `meal planner menu: ${JSON.stringify(menuRes.body)}`);
-    assert(menuRes.body.data?.plannerCatalog, "meal planner menu returns plannerCatalog");
-    const plannerOnlyData = { plannerCatalog: menuRes.body.data.plannerCatalog };
-    assert.strictEqual(plannerOnlyData.builderCatalog, undefined, "flutter planner payload does not require builderCatalog");
-    assert.strictEqual(plannerOnlyData.builderCatalogV2, undefined, "flutter planner payload does not require builderCatalogV2");
-    const plannerSectionsByKey = new Map(plannerOnlyData.plannerCatalog.sections.map((section) => [section.key, section]));
+    assert(menuRes.body.data?.builderCatalog, "meal planner menu returns builderCatalog");
+    assert.strictEqual(menuRes.body.data.builderCatalog.contractVersion, "meal_planner_menu.v3");
+    assert.strictEqual(menuRes.body.data.plannerCatalog, undefined, "flutter planner payload does not use plannerCatalog");
+    assert.strictEqual(menuRes.body.data.builderCatalogV2, undefined, "flutter planner payload does not use builderCatalogV2");
+    for (const key of ["categories", "proteins", "carbs", "premiumProteins", "premiumLargeSalad"]) {
+      assert.strictEqual(menuRes.body.data.builderCatalog[key], undefined, `flutter planner payload omits legacy ${key}`);
+    }
+    for (const section of menuRes.body.data.builderCatalog.sections) {
+      if (section.nameI18n?.ar) assert.strictEqual(section.name, section.nameI18n.ar, `section ${section.key} uses Arabic label`);
+      for (const product of section.products || []) {
+        if (product.nameI18n?.ar) assert.strictEqual(product.name, product.nameI18n.ar, `product ${product.key} uses Arabic label`);
+        for (const group of product.optionGroups || []) {
+          if (group.nameI18n?.ar) assert.strictEqual(group.name, group.nameI18n.ar, `group ${group.key} uses Arabic label`);
+          for (const option of group.options || []) {
+            if (option.nameI18n?.ar) assert.strictEqual(option.name, option.nameI18n.ar, `option ${option.key} uses Arabic label`);
+          }
+        }
+      }
+    }
+    const plannerSectionsByKey = new Map(menuRes.body.data.builderCatalog.sections.map((section) => [section.key, section]));
     const premiumSaladProduct = (plannerSectionsByKey.get("premium_large_salad")?.products || [])
       .concat(plannerSectionsByKey.get("premium")?.products || [])
       .find((product) => product.key === "premium_large_salad");
