@@ -8,6 +8,10 @@ const {
   buildPickupPayload,
   buildPlanPayload,
 } = require("../src/services/dashboard/opsPayloadService");
+const {
+  CONTRACT_VERSION,
+  normalizeKitchenQueueResponse,
+} = require("../src/services/dashboard/kitchenQueueContractService");
 
 function run() {
   const subscription = {
@@ -158,6 +162,99 @@ function run() {
   assert.strictEqual(orderKitchenDetails.mealSlots[0].quantity, 2);
   assert.strictEqual(orderKitchenDetails.mealSlots[0].proteinName, "Chicken");
   assert.strictEqual(orderKitchenDetails.mealSlots[0].sauce[0].optionKey, "garlic");
+
+  const cleanResponse = normalizeKitchenQueueResponse({
+    date: "2026-06-12",
+    businessDate: "2026-06-12",
+    items: [{
+      id: "day1",
+      entityId: "day1",
+      entityType: "subscription_day",
+      subscriptionDayId: "day1",
+      subscriptionId: "sub1",
+      user: { id: "user1", name: "Sara", phone: "+966500000000" },
+      date: "2026-06-12",
+      status: "ready_for_pickup",
+      fulfillmentType: "branch_pickup",
+      plan,
+      kitchenDetails,
+      paymentValidity: paidValidity,
+      pickup,
+      delivery,
+      mealSlots: day.mealSlots,
+      materializedMeals: [{ operationalSku: "internal-heavy-sku" }],
+      allowedActions: [{ id: "fulfill", method: "POST", endpoint: "/actions/fulfill" }],
+      timestamps: { createdAt: "2026-06-12T08:00:00.000Z", updatedAt: "2026-06-12T08:30:00.000Z" },
+    }],
+  });
+  assert.strictEqual(cleanResponse.contractVersion, CONTRACT_VERSION);
+  assert.strictEqual(cleanResponse.contractVersion, "dashboard_kitchen_queue.v2");
+  assert.strictEqual(cleanResponse.count, 1);
+  const cleanItem = cleanResponse.items[0];
+  assert(cleanItem.ids, "clean item includes ids section");
+  assert(cleanItem.customer, "clean item includes customer section");
+  assert(cleanItem.source, "clean item includes source section");
+  assert(cleanItem.subscription, "clean item includes subscription section");
+  assert(cleanItem.orderSummary, "clean item includes orderSummary section");
+  assert(cleanItem.kitchen, "clean item includes kitchen section");
+  assert(cleanItem.fulfillment, "clean item includes fulfillment section");
+  assert(cleanItem.payment, "clean item includes payment section");
+  assert(cleanItem.actions, "clean item includes actions section");
+  assert.strictEqual(cleanItem.subscription.plan.proteinGrams, 200);
+  assert.strictEqual(cleanItem.subscription.plan.portionSize, "200g");
+  assert.strictEqual(cleanItem.kitchen.meals[0].protein.grams, 200);
+  assert.strictEqual(cleanItem.orderSummary.mealCount, 1);
+  assert.strictEqual(cleanItem.kitchen.meals.length, 1);
+  assert.strictEqual(cleanItem.orderSummary.hasPremium, true);
+  assert.strictEqual(cleanItem.orderSummary.hasAddons, true);
+  assert.strictEqual(cleanItem.kitchen.addons.length, 1);
+  assert.strictEqual(cleanItem.kitchen.addons[0].name, "Protein Bar");
+  assert.strictEqual(cleanItem.payment.canFulfill, true);
+  assert.strictEqual(cleanItem.actions.canFulfill, true);
+  assert.strictEqual(cleanItem.fulfillment.delivery.deliveryId, "delivery1");
+  assert.strictEqual(cleanItem.fulfillment.delivery.status, "out_for_delivery");
+  assert.strictEqual(cleanItem.fulfillment.pickup.pickupRequestId, "pickup1");
+  assert.strictEqual(cleanItem.fulfillment.pickup.mealCount, 3);
+  assert.strictEqual(cleanItem.raw, undefined);
+  assert.strictEqual(cleanItem.mealSlots, undefined);
+  assert.strictEqual(cleanItem.materializedMeals, undefined);
+
+  const rawResponse = normalizeKitchenQueueResponse({
+    date: "2026-06-12",
+    items: [{ entityId: "day1", entityType: "subscription_day", kitchenDetails, paymentValidity: paidValidity, mealSlots: day.mealSlots }],
+  }, { includeRaw: true });
+  assert(Array.isArray(rawResponse.items[0].raw.mealSlots), "includeRaw attaches legacy internals under raw only");
+
+  const pendingClean = normalizeKitchenQueueResponse({
+    date: "2026-06-12",
+    items: [{
+      entityId: "pendingDay",
+      entityType: "subscription_day",
+      date: "2026-06-12",
+      status: "ready_for_pickup",
+      kitchenDetails,
+      paymentValidity: pendingValidity,
+      allowedActions: [{ id: "fulfill" }],
+    }],
+  }).items[0];
+  assert.strictEqual(pendingClean.payment.pendingUnpaid, true);
+  assert.strictEqual(pendingClean.payment.canFulfill, false);
+  assert.strictEqual(pendingClean.actions.canFulfill, false);
+
+  const supersededClean = normalizeKitchenQueueResponse({
+    date: "2026-06-12",
+    items: [{
+      entityId: "supersededDay",
+      entityType: "subscription_day",
+      date: "2026-06-12",
+      status: "ready_for_pickup",
+      kitchenDetails,
+      paymentValidity: supersededValidity,
+      allowedActions: [{ id: "fulfill" }],
+    }],
+  }).items[0];
+  assert.strictEqual(supersededClean.payment.superseded, true);
+  assert.strictEqual(supersededClean.payment.canFulfill, false);
 
   console.log("✅ ops payload service exposes plan, kitchen details, payment, delivery, and pickup fields");
 }

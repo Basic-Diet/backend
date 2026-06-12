@@ -222,6 +222,77 @@ These are non-breaking additions if appended to existing DTOs/rows without remov
 - Pickup reservation: `SubscriptionPickupRequest`.
 - Manual deduction: `ActivityLog` with action `manual_subscription_meal_deduction`.
 
+## Kitchen Queue Response Cleanup Result
+
+Cleanup date: 2026-06-13  
+Backend path confirmed: `/home/hema/Projects/basicdiet145`
+
+### Files Changed
+
+- `src/controllers/dashboard/opsBoardController.js`
+- `src/services/dashboard/kitchenQueueContractService.js`
+- `tests/opsPayloadService.test.js`
+- `docs/KITCHEN_QUEUE_DASHBOARD_RESPONSE_CONTRACT.md`
+- `docs/KITCHEN_DELIVERY_MANUAL_DEDUCTION_BACKEND_AUDIT.md`
+
+### Endpoints Affected
+
+- `GET /api/dashboard/kitchen/queue`
+- `GET /api/dashboard/kitchen/queue/:dayId`
+
+Courier and pickup queue endpoints keep the legacy board DTO unless separately changed.
+
+### Response Fields Added / Organized
+
+The kitchen queue default response now returns:
+
+- `contractVersion: "dashboard_kitchen_queue.v2"`
+- `date`, `businessDate`, `count`, `filters`
+- `items[].ids`
+- `items[].customer`
+- `items[].source`
+- `items[].subscription.plan`
+- `items[].orderSummary`
+- `items[].kitchen.meals`
+- `items[].kitchen.addons`
+- `items[].fulfillment.delivery`
+- `items[].fulfillment.pickup`
+- `items[].payment`
+- `items[].actions`
+- `items[].timestamps`
+
+The response preserves lightweight compatibility aliases such as `entityId`, `entityType`, `subscriptionDayId`, `status`, and `allowedActions`. Heavy legacy/internal data is excluded from the default response.
+
+### Clean Mode
+
+Default kitchen queue response is clean v2.
+
+- Use `includeRaw=true` to attach the legacy DTO under `items[].raw`.
+- Use `view=legacy` to return the pre-v2 board DTO.
+
+### Tests Run
+
+Passed:
+
+- `NODE_ENV=test node tests/opsPayloadService.test.js`
+- `NODE_ENV=test node tests/kitchen_operations_mapper.test.js`
+- `NODE_ENV=test node tests/subscriptionFulfillmentPolicy.test.js`
+- `NODE_ENV=test node tests/subscriptionDateLockPermissionsHardening.test.js`
+- `NODE_ENV=test node tests/subscriptionPlannerPaymentLifecycle.test.js`
+- `npm run test:subscriptions`
+- `NODE_ENV=test node -e "require('./src/controllers/dashboard/opsBoardController'); require('./src/services/dashboard/kitchenQueueContractService')"`
+
+DB-backed tests could not run locally because MongoDB was unavailable:
+
+- Attempted `MONGO_URI=mongodb://localhost:27017/basicdiet_test NODE_ENV=test node tests/dashboardKitchenQueueActions.test.js`
+- Result: `MongooseServerSelectionError: connect ECONNREFUSED 127.0.0.1:27017`
+
+### Remaining Risks
+
+- Action endpoints still rely on existing transition validators; dashboard must handle action rejection even when an action appears in the allowed list.
+- One-time order protein grams may be `null` when the order item did not capture grams in its selections.
+- The v2 clean response intentionally hides raw snapshots by default. Internal debugging should use `includeRaw=true` or `view=legacy`.
+
 ## Critical Backend Rules
 
 | # | Rule | Status | Evidence / Gap |

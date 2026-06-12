@@ -11,7 +11,7 @@ const router = Router();
 router.get(
   "/search",
   dashboardAuthMiddleware,
-  dashboardRoleMiddleware(["admin", "cashier"]),
+  dashboardRoleMiddleware(["admin"]),
   asyncHandler(controller.searchByPhone)
 );
 

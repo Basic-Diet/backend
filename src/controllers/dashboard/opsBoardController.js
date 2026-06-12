@@ -24,6 +24,11 @@ const {
   buildPickupPayload,
   buildPlanPayload,
 } = require("../../services/dashboard/opsPayloadService");
+const {
+  isTruthyQuery,
+  normalizeKitchenQueueItem,
+  normalizeKitchenQueueResponse,
+} = require("../../services/dashboard/kitchenQueueContractService");
 // Settlement on read is DISABLED — see pastSubscriptionDaySettlementService.js
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -383,7 +388,7 @@ async function queryBoardDays(req, { screen }) {
   }
   items = items.filter((item) => matchesSearch(item, q));
 
-  return { date, items, filters: { status: statuses, method, q: q || null, zoneId: req.query.zoneId || null, branchId: req.query.branchId || null } };
+  return { date, businessDate, items, filters: { status: statuses, method, q: q || null, zoneId: req.query.zoneId || null, branchId: req.query.branchId || null } };
 }
 
 async function queue(req, res) {
@@ -400,6 +405,12 @@ async function queue(req, res) {
   }
 
   const data = await queryBoardDays(req, { screen });
+  if (screen === "kitchen" && String(req.query.view || "").trim().toLowerCase() !== "legacy") {
+    return res.status(200).json({
+      status: true,
+      data: normalizeKitchenQueueResponse(data, { includeRaw: isTruthyQuery(req.query.includeRaw) }),
+    });
+  }
   return res.status(200).json({ status: true, data });
 }
 
@@ -429,9 +440,12 @@ async function queueDetail(req, res) {
       .lean();
     if (!pickupRequest) return errorResponse(res, 404, "NOT_FOUND", "Subscription day not found");
     const subscription = pickupRequest.subscriptionId || {};
+    const detail = mapPickupRequest(pickupRequest, subscription, subscription.userId || null, getRequestLang(req), req.dashboardUserRole);
     return res.status(200).json({
       status: true,
-      data: mapPickupRequest(pickupRequest, subscription, subscription.userId || null, getRequestLang(req), req.dashboardUserRole),
+      data: req.params.screen === "kitchen" && String(req.query.view || "").trim().toLowerCase() !== "legacy"
+        ? normalizeKitchenQueueItem(detail, { includeRaw: isTruthyQuery(req.query.includeRaw) })
+        : detail,
     });
   }
   const [latestActionMap, zoneMap, delivery] = await Promise.all([
@@ -447,9 +461,12 @@ async function queueDetail(req, res) {
       ],
     }).lean(),
   ]);
+  const detail = mapDay(day, latestActionMap.get(String(day._id)), zoneMap, getRequestLang(req), req.dashboardUserRole, delivery);
   return res.status(200).json({
     status: true,
-    data: mapDay(day, latestActionMap.get(String(day._id)), zoneMap, getRequestLang(req), req.dashboardUserRole, delivery),
+    data: req.params.screen === "kitchen" && String(req.query.view || "").trim().toLowerCase() !== "legacy"
+      ? normalizeKitchenQueueItem(detail, { includeRaw: isTruthyQuery(req.query.includeRaw) })
+      : detail,
   });
 }
 
