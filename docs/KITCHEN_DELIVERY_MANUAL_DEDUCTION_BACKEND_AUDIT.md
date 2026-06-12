@@ -230,7 +230,11 @@ Backend path confirmed: `/home/hema/Projects/basicdiet145`
 ### Files Changed
 
 - `src/controllers/dashboard/opsBoardController.js`
+- `src/controllers/dashboard/subscriptionManualDeductionController.js`
 - `src/services/dashboard/kitchenQueueContractService.js`
+- `src/services/dashboard/opsPayloadService.js`
+- `src/services/dashboard/manualSubscriptionDeductionService.js`
+- `src/routes/dashboardSubscriptions.js`
 - `tests/opsPayloadService.test.js`
 - `docs/KITCHEN_QUEUE_DASHBOARD_RESPONSE_CONTRACT.md`
 - `docs/KITCHEN_DELIVERY_MANUAL_DEDUCTION_BACKEND_AUDIT.md`
@@ -239,12 +243,17 @@ Backend path confirmed: `/home/hema/Projects/basicdiet145`
 
 - `GET /api/dashboard/kitchen/queue`
 - `GET /api/dashboard/kitchen/queue/:dayId`
+- `GET /api/dashboard/pickup/queue`
+- `GET /api/dashboard/pickup/queue/:dayId`
+- `GET /api/dashboard/courier/queue`
+- `GET /api/dashboard/courier/queue/:dayId`
+- `GET /api/dashboard/subscriptions/:subscriptionId/manual-deductions`
 
-Courier and pickup queue endpoints keep the legacy board DTO unless separately changed.
+Kitchen, pickup, and courier queue endpoints now use the same clean v2 contract by default. Legacy board DTOs remain available through `view=legacy`.
 
 ### Response Fields Added / Organized
 
-The kitchen queue default response now returns:
+The kitchen, pickup, and courier queue default responses now return:
 
 - `contractVersion: "dashboard_kitchen_queue.v2"`
 - `date`, `businessDate`, `count`, `filters`
@@ -263,9 +272,11 @@ The kitchen queue default response now returns:
 
 The response preserves lightweight compatibility aliases such as `entityId`, `entityType`, `subscriptionDayId`, `status`, and `allowedActions`. Heavy legacy/internal data is excluded from the default response.
 
+Manual deduction history is not injected into queue responses. A compact manual deduction history endpoint returns `dashboard_manual_deductions.v1` with deduction counts, balances before/after, actor summary, reason, notes, and timestamps.
+
 ### Clean Mode
 
-Default kitchen queue response is clean v2.
+Default kitchen, pickup, and courier queue responses are clean v2.
 
 - Use `includeRaw=true` to attach the legacy DTO under `items[].raw`.
 - Use `view=legacy` to return the pre-v2 board DTO.

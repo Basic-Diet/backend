@@ -1,4 +1,4 @@
-# Kitchen Queue Dashboard Response Contract
+# Dashboard Queue Response Contract
 
 Backend path: `/home/hema/Projects/basicdiet145`
 
@@ -6,9 +6,17 @@ Backend path: `/home/hema/Projects/basicdiet145`
 
 `GET /api/dashboard/kitchen/queue?date=YYYY-MM-DD`
 
+`GET /api/dashboard/pickup/queue?date=YYYY-MM-DD`
+
+`GET /api/dashboard/courier/queue?date=YYYY-MM-DD`
+
 Detail:
 
 `GET /api/dashboard/kitchen/queue/:dayId`
+
+`GET /api/dashboard/pickup/queue/:dayId`
+
+`GET /api/dashboard/courier/queue/:dayId`
 
 Contract version:
 
@@ -25,7 +33,7 @@ Contract version:
 - `includeRaw=true`: attaches the legacy DTO under `items[].raw` for internal debugging.
 - `view=legacy`: returns the pre-v2 board DTO.
 
-By default, the kitchen queue returns the clean v2 contract. Heavy raw fields such as `mealSlots`, `materializedMeals`, raw snapshots, full payments, full users, full plans, and full catalog/product documents are not returned at the top level.
+By default, kitchen, pickup, and courier queues return the clean v2 contract. Heavy raw fields such as `mealSlots`, `materializedMeals`, raw snapshots, full payments, full users, full plans, and full catalog/product documents are not returned at the top level.
 
 ## List Shape
 
@@ -180,6 +188,20 @@ Pickup requests use:
 - `fulfillment.pickup.released`
 - `fulfillment.pickup.pickupCodeState`
 
+## Courier Item
+
+Courier queue items use the same item shape. Delivery state lives under:
+
+- `fulfillment.type = "home_delivery"`
+- `ids.deliveryId`
+- `fulfillment.delivery.deliveryId`
+- `fulfillment.delivery.date`
+- `fulfillment.delivery.status`
+- `fulfillment.delivery.address`
+- `fulfillment.delivery.window`
+- `fulfillment.delivery.zoneId`
+- `fulfillment.delivery.courierId`
+
 ## Reading Counts
 
 - `orderSummary.mealCount`: meals to prepare. Premium does not add to this count.
@@ -225,3 +247,40 @@ These fields are debug-only and only available inside `raw` when `includeRaw=tru
 - full payment objects
 - full subscription/user/plan documents
 - repeated legacy context/pricing/items copies
+
+## Manual Deductions
+
+Manual deduction history is intentionally not injected into queue responses.
+
+Compact read endpoint:
+
+`GET /api/dashboard/subscriptions/:subscriptionId/manual-deductions`
+
+Shape:
+
+```js
+{
+  status: true,
+  data: {
+    contractVersion: "dashboard_manual_deductions.v1",
+    subscriptionId: "sub1",
+    count: 1,
+    items: [{
+      id: "log1",
+      subscriptionId: "sub1",
+      customerId: "user1",
+      businessDate: "2026-06-12",
+      deducted: { regularMeals: 1, premiumMeals: 1, total: 2 },
+      before: { remainingRegularMeals: 5, remainingPremiumMeals: 2, remainingMeals: 7 },
+      after: { remainingRegularMeals: 4, remainingPremiumMeals: 1, remainingMeals: 5 },
+      fulfillmentMethod: "pickup",
+      actor: { id: "admin1", role: "admin" },
+      reason: "branch pickup",
+      notes: "manual counter consumption",
+      createdAt: "2026-06-12T09:00:00.000Z"
+    }]
+  }
+}
+```
+
+This endpoint returns a compact summary only. It does not expose raw `ActivityLog` documents.

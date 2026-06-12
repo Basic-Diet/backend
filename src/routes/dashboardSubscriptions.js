@@ -36,4 +36,11 @@ router.post(
   asyncHandler(controller.manualDeduction)
 );
 
+router.get(
+  "/:subscriptionId/manual-deductions",
+  dashboardAuthMiddleware,
+  dashboardRoleMiddleware(["admin"]),
+  asyncHandler(controller.listManualDeductions)
+);
+
 module.exports = router;

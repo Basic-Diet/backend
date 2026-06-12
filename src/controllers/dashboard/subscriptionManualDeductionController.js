@@ -38,7 +38,21 @@ async function manualDeduction(req, res) {
   }
 }
 
+async function listManualDeductions(req, res) {
+  try {
+    const data = await manualDeductionService.listManualDeductions({
+      subscriptionId: req.params.subscriptionId,
+      role: req.dashboardUserRole || req.userRole,
+      limit: req.query.limit,
+    });
+    return res.status(200).json({ status: true, data });
+  } catch (err) {
+    return handleManualDeductionError(res, err);
+  }
+}
+
 module.exports = {
+  listManualDeductions,
   searchByPhone,
   manualDeduction,
 };

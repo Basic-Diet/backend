@@ -212,7 +212,8 @@ function buildPaymentValidityPayload(day = {}) {
     .some((slot) => slot && slot.premiumSource === "pending_payment");
   const hasPendingAddonPayment = (Array.isArray(day && day.addonSelections) ? day.addonSelections : [])
     .some((addon) => addon && addon.source === "pending_payment");
-  const paymentStatus = premiumPayment.status || (requirement.requiresPayment ? "pending" : "not_required");
+  const rawPaymentStatus = premiumPayment.status || (requirement.requiresPayment ? "pending" : "not_required");
+  const paymentStatus = rawPaymentStatus === "none" && !requirement.requiresPayment ? "not_required" : rawPaymentStatus;
   const revisionMismatch = paymentStatus === "revision_mismatch" || requirement.blockingReason === "PAYMENT_REVISION_MISMATCH";
   const pendingUnpaid = Boolean(
     (requirement.requiresPayment && !["paid", "satisfied", "not_required"].includes(paymentStatus))

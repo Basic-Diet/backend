@@ -28,6 +28,7 @@ const {
   isTruthyQuery,
   normalizeKitchenQueueItem,
   normalizeKitchenQueueResponse,
+  shouldUseCleanQueueContract,
 } = require("../../services/dashboard/kitchenQueueContractService");
 // Settlement on read is DISABLED — see pastSubscriptionDaySettlementService.js
 
@@ -405,7 +406,7 @@ async function queue(req, res) {
   }
 
   const data = await queryBoardDays(req, { screen });
-  if (screen === "kitchen" && String(req.query.view || "").trim().toLowerCase() !== "legacy") {
+  if (shouldUseCleanQueueContract(screen, req.query)) {
     return res.status(200).json({
       status: true,
       data: normalizeKitchenQueueResponse(data, { includeRaw: isTruthyQuery(req.query.includeRaw) }),
@@ -443,7 +444,7 @@ async function queueDetail(req, res) {
     const detail = mapPickupRequest(pickupRequest, subscription, subscription.userId || null, getRequestLang(req), req.dashboardUserRole);
     return res.status(200).json({
       status: true,
-      data: req.params.screen === "kitchen" && String(req.query.view || "").trim().toLowerCase() !== "legacy"
+      data: shouldUseCleanQueueContract(req.params.screen, req.query)
         ? normalizeKitchenQueueItem(detail, { includeRaw: isTruthyQuery(req.query.includeRaw) })
         : detail,
     });
@@ -464,7 +465,7 @@ async function queueDetail(req, res) {
   const detail = mapDay(day, latestActionMap.get(String(day._id)), zoneMap, getRequestLang(req), req.dashboardUserRole, delivery);
   return res.status(200).json({
     status: true,
-    data: req.params.screen === "kitchen" && String(req.query.view || "").trim().toLowerCase() !== "legacy"
+    data: shouldUseCleanQueueContract(req.params.screen, req.query)
       ? normalizeKitchenQueueItem(detail, { includeRaw: isTruthyQuery(req.query.includeRaw) })
       : detail,
   });

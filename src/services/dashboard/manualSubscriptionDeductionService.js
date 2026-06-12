@@ -360,10 +360,66 @@ async function manualDeduction({ subscriptionId, body, actorId, actorRole }) {
   }
 }
 
+function serializeManualDeductionLog(log) {
+  const meta = log && log.meta && typeof log.meta === "object" ? log.meta : {};
+  return {
+    id: log && log._id ? String(log._id) : null,
+    subscriptionId: meta.subscriptionId || (log && log.entityId ? String(log.entityId) : null),
+    customerId: meta.customerId || null,
+    businessDate: meta.businessDate || null,
+    deducted: {
+      regularMeals: Number(meta.deductedRegularMeals || 0),
+      premiumMeals: Number(meta.deductedPremiumMeals || 0),
+      total: Number(meta.deductedTotalMeals || 0),
+    },
+    before: {
+      remainingRegularMeals: meta.before ? Number(meta.before.remainingRegularMeals || 0) : null,
+      remainingPremiumMeals: meta.before ? Number(meta.before.remainingPremiumMeals || 0) : null,
+      remainingMeals: meta.before ? Number(meta.before.remainingMeals || 0) : null,
+    },
+    after: {
+      remainingRegularMeals: meta.after ? Number(meta.after.remainingRegularMeals || 0) : null,
+      remainingPremiumMeals: meta.after ? Number(meta.after.remainingPremiumMeals || 0) : null,
+      remainingMeals: meta.after ? Number(meta.after.remainingMeals || 0) : null,
+    },
+    fulfillmentMethod: meta.fulfillmentMethod || null,
+    actor: {
+      id: meta.actorId || (log && log.byUserId ? String(log.byUserId) : null),
+      role: meta.actorRole || (log && log.byRole ? String(log.byRole) : null),
+    },
+    reason: meta.reason || "",
+    notes: meta.notes || "",
+    createdAt: log && log.createdAt ? log.createdAt : null,
+  };
+}
+
+async function listManualDeductions({ subscriptionId, role, limit = 50 }) {
+  assertAdminRole(role);
+  if (!mongoose.Types.ObjectId.isValid(subscriptionId)) {
+    throw new ManualDeductionError("SUBSCRIPTION_NOT_FOUND", "Subscription not found", 404);
+  }
+
+  const cappedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const logs = await ActivityLog.find({
+    entityType: "subscription",
+    entityId: subscriptionId,
+    action: MANUAL_DEDUCTION_ACTION,
+  }).sort({ createdAt: -1 }).limit(cappedLimit).lean();
+
+  return {
+    contractVersion: "dashboard_manual_deductions.v1",
+    subscriptionId: String(subscriptionId),
+    count: logs.length,
+    items: logs.map(serializeManualDeductionLog),
+  };
+}
+
 module.exports = {
   MANUAL_DEDUCTION_ACTION,
   ManualDeductionError,
+  listManualDeductions,
   resolveBalances,
   searchByPhone,
   manualDeduction,
+  serializeManualDeductionLog,
 };

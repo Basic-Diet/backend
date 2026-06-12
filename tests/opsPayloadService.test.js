@@ -10,8 +10,13 @@ const {
 } = require("../src/services/dashboard/opsPayloadService");
 const {
   CONTRACT_VERSION,
+  normalizeDashboardQueueResponse,
   normalizeKitchenQueueResponse,
+  shouldUseCleanQueueContract,
 } = require("../src/services/dashboard/kitchenQueueContractService");
+const {
+  serializeManualDeductionLog,
+} = require("../src/services/dashboard/manualSubscriptionDeductionService");
 
 function run() {
   const subscription = {
@@ -255,6 +260,113 @@ function run() {
   }).items[0];
   assert.strictEqual(supersededClean.payment.superseded, true);
   assert.strictEqual(supersededClean.payment.canFulfill, false);
+
+  const pickupQueue = normalizeDashboardQueueResponse({
+    date: "2026-06-12",
+    businessDate: "2026-06-12",
+    items: [{
+      entityId: "pickupRequest1",
+      entityType: "subscription_pickup_request",
+      requestId: "pickupRequest1",
+      subscriptionId: "sub1",
+      customer: { id: "user1", name: "Sara", phone: "+966500000000" },
+      date: "2026-06-12",
+      status: "locked",
+      fulfillmentType: "pickup_request",
+      plan,
+      kitchenDetails,
+      paymentValidity: {
+        paymentRequired: false,
+        paymentStatus: "reserved",
+        paymentApplied: true,
+        pendingUnpaid: false,
+        superseded: false,
+        revisionMismatch: false,
+        canPrepare: true,
+        canFulfill: false,
+      },
+      pickup,
+      snapshot: { raw: "hidden by default" },
+      allowedActions: [{ id: "prepare" }, { id: "cancel" }],
+    }],
+  });
+  const courierQueue = normalizeDashboardQueueResponse({
+    date: "2026-06-12",
+    businessDate: "2026-06-12",
+    items: [{
+      entityId: "deliveryDay1",
+      entityType: "subscription_day",
+      subscriptionId: "sub1",
+      subscriptionDayId: "deliveryDay1",
+      user: { id: "user1", name: "Sara", phone: "+966500000000" },
+      date: "2026-06-12",
+      status: "out_for_delivery",
+      fulfillmentType: "home_delivery",
+      plan,
+      kitchenDetails,
+      paymentValidity: paidValidity,
+      delivery,
+      mealSlots: day.mealSlots,
+      allowedActions: [{ id: "notify_arrival" }, { id: "fulfill" }],
+    }],
+  });
+  assert.strictEqual(pickupQueue.contractVersion, CONTRACT_VERSION);
+  assert.strictEqual(courierQueue.contractVersion, CONTRACT_VERSION);
+  assert.strictEqual(pickupQueue.items[0].source.type, "pickup_request");
+  assert.strictEqual(pickupQueue.items[0].fulfillment.type, "branch_pickup");
+  assert.strictEqual(pickupQueue.items[0].fulfillment.pickup.pickupRequestId, "pickup1");
+  assert.strictEqual(pickupQueue.items[0].fulfillment.pickup.mealCount, 3);
+  assert.strictEqual(courierQueue.items[0].source.type, "subscription_day");
+  assert.strictEqual(courierQueue.items[0].fulfillment.type, "home_delivery");
+  assert.strictEqual(courierQueue.items[0].fulfillment.delivery.deliveryId, "delivery1");
+  assert.strictEqual(courierQueue.items[0].payment.paymentStatus, "not_required");
+  assert.deepStrictEqual(
+    Object.keys(cleanResponse.items[0].actions).sort(),
+    Object.keys(pickupQueue.items[0].actions).sort()
+  );
+  assert.deepStrictEqual(
+    Object.keys(cleanResponse.items[0].actions).sort(),
+    Object.keys(courierQueue.items[0].actions).sort()
+  );
+  assert.strictEqual(pickupQueue.items[0].snapshot, undefined);
+  assert.strictEqual(courierQueue.items[0].mealSlots, undefined);
+  const pickupRawQueue = normalizeDashboardQueueResponse({
+    date: "2026-06-12",
+    items: [{ entityId: "pickupRequest1", entityType: "subscription_pickup_request", kitchenDetails, paymentValidity: paidValidity, snapshot: { raw: true } }],
+  }, { includeRaw: true });
+  assert.deepStrictEqual(pickupRawQueue.items[0].raw.snapshot, { raw: true });
+  assert.strictEqual(shouldUseCleanQueueContract("kitchen", {}), true);
+  assert.strictEqual(shouldUseCleanQueueContract("pickup", {}), true);
+  assert.strictEqual(shouldUseCleanQueueContract("courier", {}), true);
+  assert.strictEqual(shouldUseCleanQueueContract("pickup", { view: "legacy" }), false);
+  assert.strictEqual(shouldUseCleanQueueContract("courier", { view: "legacy" }), false);
+
+  const deduction = serializeManualDeductionLog({
+    _id: "log1",
+    entityId: "sub1",
+    byUserId: "admin1",
+    byRole: "admin",
+    createdAt: "2026-06-12T09:00:00.000Z",
+    meta: {
+      subscriptionId: "sub1",
+      customerId: "user1",
+      businessDate: "2026-06-12",
+      deductedRegularMeals: 1,
+      deductedPremiumMeals: 1,
+      deductedTotalMeals: 2,
+      before: { remainingRegularMeals: 5, remainingPremiumMeals: 2, remainingMeals: 7 },
+      after: { remainingRegularMeals: 4, remainingPremiumMeals: 1, remainingMeals: 5 },
+      fulfillmentMethod: "pickup",
+      actorId: "admin1",
+      actorRole: "admin",
+      reason: "branch pickup",
+      notes: "manual counter consumption",
+    },
+  });
+  assert.strictEqual(deduction.subscriptionId, "sub1");
+  assert.strictEqual(deduction.deducted.total, 2);
+  assert.strictEqual(deduction.after.remainingMeals, 5);
+  assert.strictEqual(deduction.meta, undefined);
 
   console.log("✅ ops payload service exposes plan, kitchen details, payment, delivery, and pickup fields");
 }

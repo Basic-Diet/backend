@@ -1,6 +1,7 @@
 "use strict";
 
 const CONTRACT_VERSION = "dashboard_kitchen_queue.v2";
+const QUEUE_SCREENS = new Set(["kitchen", "pickup", "courier"]);
 
 function asId(value) {
   return value === undefined || value === null || value === "" ? null : String(value);
@@ -238,6 +239,11 @@ function normalizeKitchenQueueResponse(data = {}, { includeRaw = false, business
   };
 }
 
+function shouldUseCleanQueueContract(screen, query = {}) {
+  return QUEUE_SCREENS.has(String(screen || ""))
+    && String(query.view || "").trim().toLowerCase() !== "legacy";
+}
+
 function isTruthyQuery(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
 }
@@ -245,6 +251,9 @@ function isTruthyQuery(value) {
 module.exports = {
   CONTRACT_VERSION,
   isTruthyQuery,
+  normalizeDashboardQueueItem: normalizeKitchenQueueItem,
+  normalizeDashboardQueueResponse: normalizeKitchenQueueResponse,
   normalizeKitchenQueueItem,
   normalizeKitchenQueueResponse,
+  shouldUseCleanQueueContract,
 };
