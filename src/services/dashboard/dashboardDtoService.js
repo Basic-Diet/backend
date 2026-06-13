@@ -244,7 +244,15 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
     mode: "pickup",
     role,
     lang,
+  }).map((action) => {
+    if (!action || action.id !== "start_preparation") return action;
+    return {
+      ...action,
+      id: "prepare",
+      endpoint: "/api/dashboard/ops/actions/prepare",
+    };
   });
+  const preparedAt = pickupRequest.pickupPreparedAt || pickupRequest.preparationStartedAt || null;
 
   return {
     source: "subscription_pickup_request",
@@ -292,6 +300,8 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
     isCompleted: statusPayload.isCompleted,
     pickupCode: statusPayload.pickupCode,
     pickupCodeIssuedAt: statusPayload.pickupCodeIssuedAt,
+    preparedAt,
+    pickupPreparedAt: preparedAt,
     fulfilledAt: statusPayload.fulfilledAt,
     ui: {
       ...ui,
@@ -306,7 +316,7 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
       pickupLocationId: subscription && subscription.pickupLocationId ? String(subscription.pickupLocationId) : null,
       pickupCode: statusPayload.pickupCode,
       pickupCodeIssuedAt: statusPayload.pickupCodeIssuedAt,
-      pickupPreparedAt: pickupRequest.pickupPreparedAt || null,
+      pickupPreparedAt: preparedAt,
       pickupNoShowAt: pickupRequest.pickupNoShowAt || null,
       ...buildPickupPayload({ pickupRequest, subscription: subscription || {} }),
     },
@@ -326,6 +336,7 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
     timestamps: {
       createdAt: pickupRequest.createdAt,
       updatedAt: pickupRequest.updatedAt,
+      preparedAt,
     },
   };
 }

@@ -146,6 +146,16 @@ async function getRemainingMeals(subscriptionId) {
       const updatedRequest = await SubscriptionPickupRequest.findById(pickupRequest._id).lean();
       assert(updatedRequest.preparationStartedAt, "preparationStartedAt should be set by start_preparation");
       assert(updatedRequest.pickupPreparedAt, "pickupPreparedAt should be set by start_preparation");
+      assert.strictEqual(updatedRequest.pickupCode || null, null);
+      const queueRes = await api.get(`/api/dashboard/pickup/queue?date=${TODAY}`).set(kitchenHeaders);
+      assert.strictEqual(queueRes.status, 200, JSON.stringify(queueRes.body));
+      const row = queueRes.body.data.items.find((item) => item.ids.pickupRequestId === String(pickupRequest._id));
+      assert(row, "prepared pickup request should appear in pickup queue");
+      assert.strictEqual(row.source.status, "in_preparation");
+      assert(row.timestamps.preparedAt, "queue timestamps.preparedAt should be set after preparation");
+      assert.strictEqual(row.fulfillment.pickup.pickupCodeState, "not_issued");
+      assert.strictEqual(row.actions.canReadyForPickup, true);
+      assert(row.actions.allowed.some((action) => action.id === "ready_for_pickup"), "ready_for_pickup should be allowed after preparation");
     });
 
     await test("legacy prepare endpoint remains an alias for pickup request preparation", async () => {
@@ -361,7 +371,8 @@ async function getRemainingMeals(subscriptionId) {
       const row = res.body.data.items.find((item) => item.ids.pickupRequestId === String(pickupRequest._id));
       assert(row, "pickup request should appear in pickup queue");
       assert.strictEqual(row.ids.entityType, "subscription_pickup_request");
-      assert.deepStrictEqual(row.actions.allowed.map((action) => action.id), ["start_preparation", "cancel"]);
+      assert.deepStrictEqual(row.actions.allowed.map((action) => action.id), ["prepare", "cancel"]);
+      assert.strictEqual(row.actions.allowed[0].endpoint, "/api/dashboard/ops/actions/prepare");
       assert.strictEqual(row.actions.canPrepare, true);
       assert.strictEqual(row.actions.canReadyForPickup, false);
       assert.strictEqual(row.actions.canFulfill, false);
