@@ -1,0 +1,9 @@
+# Use this workspace to collaborate
+workspace:
+  id: 6125d25d-740d-44f2-81a4-ebc9fc2269d9
+
+localResources:
+  collections:
+    - ../BasicDiet_Operations_Lifecycle.postman_collection.json
+  environments:
+    - ../BasicDiet_Local.postman_environment.json

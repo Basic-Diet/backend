@@ -95,6 +95,17 @@ function buildPickupRequestSnapshot(day) {
   };
 }
 
+function resolvePickupRequestDayStatus(day) {
+  return String(day && day.status || "open");
+}
+
+function assertPickupRequestDayIsEligible(day) {
+  if (!day) return;
+  if (["skipped", "frozen"].includes(resolvePickupRequestDayStatus(day))) {
+    throw createServiceError("DAY_SKIPPED", "This day is skipped or frozen", 409);
+  }
+}
+
 function stringifyId(value) {
   return value ? String(value) : null;
 }
@@ -159,7 +170,7 @@ async function createPickupRequestDocument({
 }) {
   const createPayload = {
     subscriptionId: subscription._id,
-    subscriptionDayId: day._id,
+    subscriptionDayId: day && day._id ? day._id : null,
     userId: subscription.userId,
     date,
     mealCount,
@@ -238,19 +249,15 @@ async function createSubscriptionPickupRequestForClient({
   const dayQuery = SubscriptionDay.findOne({ subscriptionId: subscription._id, date });
   if (session) dayQuery.session(session);
   const day = await dayQuery;
-  if (!day) {
-    throw createServiceError("NOT_FOUND", "Day not found", 404);
+  assertPickupRequestDayIsEligible(day);
+  if (day) {
+    validateDayBeforeLockOrPrepare({
+      subscription,
+      day,
+      allowedStatuses: PICKUP_REQUEST_ALLOWED_DAY_STATUSES,
+      allowQuantityOnlyPickup: true,
+    });
   }
-  if (["skipped", "frozen"].includes(String(day.status || "open"))) {
-    throw createServiceError("DAY_SKIPPED", "This day is skipped or frozen", 409);
-  }
-
-  validateDayBeforeLockOrPrepare({
-    subscription,
-    day,
-    allowedStatuses: PICKUP_REQUEST_ALLOWED_DAY_STATUSES,
-    allowQuantityOnlyPickup: true,
-  });
 
   assertDateInsideSubscriptionRange({ subscription, date });
   if (Number(subscription.remainingMeals || 0) < normalizedMealCount) {

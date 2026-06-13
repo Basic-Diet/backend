@@ -552,6 +552,172 @@ function run() {
   assert.strictEqual(nestedItem.kitchen.meals[0].display.preparationTextAr, "حضّر ساندويتش متداخل مع بروتين 100g");
   assertKitchenDisplayFields(nestedItem);
 
+  const hydrationResponse = normalizeKitchenQueueResponse({
+    date: "2026-06-14",
+    items: [{
+      entityId: "hydrationDay",
+      entityType: "subscription_day",
+      subscriptionId: "sub1",
+      user: { id: "user1", name: "Sara", phone: "+966500000000" },
+      date: "2026-06-14",
+      status: "locked",
+      fulfillmentType: "branch_pickup",
+      plan,
+      kitchenDetails: {
+        mealSlots: [
+          {
+            slotIndex: 1,
+            slotKey: "standard",
+            selectionType: "standard_meal",
+            productKey: "standard_meal",
+            proteinKey: "meatballs",
+            proteinNameI18n: { ar: "كرات لحم", en: "Meatballs" },
+            proteinGrams: 100,
+            carbSelections: [
+              { carbId: "carb_pasta", key: "alfredo_pasta", nameI18n: { ar: "باستا الفريدو", en: "Alfredo Pasta" }, grams: 250 },
+              { carbId: "6a2ce701c2ce6c0528b5c9da", grams: 120 },
+            ],
+            quantity: 1,
+          },
+          {
+            slotIndex: 2,
+            slotKey: "premium_salad",
+            selectionType: "premium_large_salad",
+            productKey: "premium_large_salad",
+            proteinNameI18n: { ar: "دجاج", en: "Chicken" },
+            proteinGrams: 100,
+            salad: {
+              presetKey: "premium_large_salad",
+              groups: {
+                leafy_greens: [
+                  { id: "leaf1", key: "rocket", name: { ar: "جرجير", en: "Rocket" } },
+                ],
+                cheese_nuts: ["6a2ce701c2ce6c0528b5c9db"],
+              },
+            },
+            quantity: 1,
+          },
+          {
+            slotIndex: 3,
+            slotKey: "sandwich",
+            selectionType: "sandwich",
+            sandwichId: "sandwich1",
+            sandwichKey: "turkey_sandwich",
+            sandwichNameI18n: { ar: "ساندويتش ديك رومي", en: "Turkey Sandwich" },
+            proteinGrams: 100,
+            quantity: 1,
+          },
+        ],
+        addons: [
+          { id: "addon1", key: "juice", nameI18n: { ar: "عصير", en: "Juice" }, quantity: 1 },
+          { id: "6a2ce701c2ce6c0528b5c9dc", quantity: 1 },
+        ],
+      },
+      paymentValidity: paidValidity,
+      allowedActions: [{ id: "prepare", label: { ar: "تحضير", en: "Prepare" } }],
+    }],
+  });
+  const hydrationPayload = hydrationResponse.items[0];
+  const hydrationJson = JSON.stringify(hydrationResponse);
+  assert(!hydrationJson.includes("[object Object]"));
+  assert(!hydrationJson.includes("حضّر premium_large_salad"));
+  assert(!hydrationJson.includes("حضّر standard_meal"));
+  assert(!hydrationJson.includes('"displayName":"premium_large_salad"'));
+  assert(!hydrationJson.includes('"displayName":"standard_meal"'));
+  assert.strictEqual(hydrationPayload.kitchen.meals[0].product.displayName, "وجبة");
+  assert(hydrationPayload.kitchen.meals[0].display.titleAr.includes("وجبة"));
+  assert(hydrationPayload.kitchen.meals[0].display.preparationTextAr.includes("وجبة"));
+  assert.strictEqual(hydrationPayload.kitchen.meals[0].protein.displayName, "كرات لحم");
+  assert.strictEqual(hydrationPayload.kitchen.meals[0].carbs[0].displayName, "باستا الفريدو");
+  assert.strictEqual(hydrationPayload.kitchen.meals[0].carbs[1].displayName, "عنصر غير معروف");
+  assert.strictEqual(hydrationPayload.kitchen.meals[1].mealTypeLabel.ar, "سلطة كبيرة مميزة");
+  assert.strictEqual(hydrationPayload.kitchen.meals[1].product.displayName, "سلطة كبيرة مميزة");
+  assert(hydrationPayload.kitchen.meals[1].display.titleAr.includes("سلطة كبيرة مميزة"));
+  assert(hydrationPayload.kitchen.meals[1].display.preparationTextAr.includes("سلطة كبيرة مميزة"));
+  assert.strictEqual(hydrationPayload.kitchen.meals[1].salad.displayName, "سلطة كبيرة مميزة");
+  assert.strictEqual(hydrationPayload.kitchen.meals[1].salad.groups.leafy_greens[0].displayName, "جرجير");
+  assert.strictEqual(hydrationPayload.kitchen.meals[1].salad.groups.cheese_nuts[0].displayName, "عنصر غير معروف");
+  assert.deepStrictEqual(hydrationPayload.kitchen.meals[1].salad.rawIds.cheese_nuts, ["6a2ce701c2ce6c0528b5c9db"]);
+  assert.strictEqual(hydrationPayload.kitchen.meals[2].sandwich.displayName, "ساندويتش ديك رومي");
+  assert.strictEqual(hydrationPayload.kitchen.addons[0].displayName, "عصير");
+  assert.strictEqual(hydrationPayload.kitchen.addons[1].displayName, "عنصر غير معروف");
+  assert(hydrationPayload.dataQuality.warnings.some((warning) => warning.code === "UNRESOLVED_OPTION_NAME"));
+  assert(hydrationPayload.dataQuality.warnings.some((warning) => warning.code === "UNRESOLVED_ADDON_NAME"));
+  assert(hydrationPayload.dataQuality.warnings.some((warning) => warning.code === "UNRESOLVED_SALAD_GROUP_ITEM"));
+
+  const oneTimeKitchenDetails = buildOrderKitchenDetailsPayload({
+    items: [
+      {
+        itemType: "standard_meal",
+        productKey: "standard_meal",
+        qty: 1,
+        selections: {
+          proteinId: "protein1",
+          proteinName: { ar: "دجاج", en: "Chicken" },
+          carbs: [{ carbId: "carb1", key: "rice", name: { ar: "رز أبيض", en: "White Rice" }, grams: 120 }],
+        },
+      },
+      {
+        itemType: "premium_large_salad",
+        productKey: "premium_large_salad",
+        qty: 1,
+        selections: {
+          salad: {
+            presetKey: "premium_large_salad",
+            groups: { leafy_greens: [{ id: "leaf1", name: { ar: "خس", en: "Lettuce" } }] },
+          },
+        },
+      },
+      {
+        itemType: "addon_item",
+        productId: "addon1",
+        productKey: "soup",
+        name: { ar: "شوربة", en: "Soup" },
+        qty: 1,
+      },
+    ],
+  }, "ar");
+  const oneTimeResponse = normalizeKitchenQueueResponse({
+    date: "2026-06-14",
+    items: [{
+      entityId: "order1",
+      entityType: "order",
+      orderId: "order1",
+      customer: { id: "user1", name: "Sara", phone: "+966500000000" },
+      date: "2026-06-14",
+      status: "confirmed",
+      fulfillmentType: "home_delivery",
+      kitchenDetails: oneTimeKitchenDetails,
+      paymentValidity: { paymentStatus: "paid", paymentApplied: true, canPrepare: true, canFulfill: false },
+      allowedActions: [{ id: "prepare", label: { ar: "تحضير", en: "Prepare" } }],
+    }],
+  });
+  assert.strictEqual(oneTimeResponse.items[0].kitchen.meals[0].product.displayName, "وجبة");
+  assert.strictEqual(oneTimeResponse.items[0].kitchen.meals[0].protein.displayName, "دجاج");
+  assert.strictEqual(oneTimeResponse.items[0].kitchen.meals[0].carbs[0].displayName, "رز أبيض");
+  assert.strictEqual(oneTimeResponse.items[0].kitchen.meals[1].product.displayName, "سلطة كبيرة مميزة");
+  assert.strictEqual(oneTimeResponse.items[0].kitchen.meals[1].salad.groups.leafy_greens[0].displayName, "خس");
+  assert.strictEqual(oneTimeResponse.items[0].kitchen.addons[0].displayName, "شوربة");
+  assert(!JSON.stringify(oneTimeResponse).includes('"displayName":"standard_meal"'));
+  assert(!JSON.stringify(oneTimeResponse).includes('"displayName":"premium_large_salad"'));
+
+  const emptyPrepareResponse = normalizeKitchenQueueResponse({
+    date: "2026-06-14",
+    items: [{
+      entityId: "emptyDay",
+      entityType: "subscription_day",
+      customer: { id: "user1", name: "Sara", phone: "+966500000000" },
+      date: "2026-06-14",
+      status: "locked",
+      kitchenDetails: { mealSlots: [], addons: [] },
+      paymentValidity: { paymentStatus: "not_required", canPrepare: true, canFulfill: false },
+      allowedActions: [{ id: "prepare", label: { ar: "تحضير", en: "Prepare" } }],
+    }],
+  }, { includeCanceled: true });
+  assert.strictEqual(emptyPrepareResponse.items[0].kitchen.meals.length, 0);
+  assert.strictEqual(emptyPrepareResponse.items[0].payment.canPrepare, false);
+  assert(!emptyPrepareResponse.items[0].actions.allowed.some((action) => action.id === "prepare"));
+
   const deduction = serializeManualDeductionLog({
     _id: "log1",
     entityId: "sub1",

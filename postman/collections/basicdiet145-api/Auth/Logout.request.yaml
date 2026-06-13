@@ -1,0 +1,17 @@
+$kind: http-request
+name: Logout
+method: POST
+url: '{{baseUrl}}/auth/logout'
+order: 9000
+auth:
+  type: bearer
+  credentials:
+    - key: token
+      value: '{{accessToken}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 200 or 401", function() {
+        pm.expect([200, 401]).to.include(pm.response.code);
+      });

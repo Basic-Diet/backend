@@ -1,0 +1,21 @@
+$kind: http-request
+name: Register - Request OTP
+method: POST
+url: '{{baseUrl}}/auth/register/request-otp'
+order: 3000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "phoneE164": "{{testPhone}}"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 200 or 429", function() {
+        pm.expect([200, 429]).to.include(pm.response.code);
+      });

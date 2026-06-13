@@ -1,0 +1,23 @@
+$kind: http-request
+name: Register - Verify
+method: POST
+url: '{{baseUrl}}/auth/register/verify'
+order: 4000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "phoneE164": "{{testPhone}}",
+      "otp": "{{testOtp}}",
+      "name": "Test User"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 200 or 400", function() {
+        pm.expect([200, 400]).to.include(pm.response.code);
+      });

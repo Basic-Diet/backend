@@ -5,10 +5,23 @@ const QUEUE_SCREENS = new Set(["kitchen", "pickup", "courier"]);
 
 const MEAL_TYPE_LABELS = {
   standard_meal: { ar: "وجبة", en: "Standard meal" },
+  basic_meal: { ar: "وجبة بيسك", en: "Basic Meal" },
   premium_meal: { ar: "وجبة مميزة", en: "Premium meal" },
-  premium_large_salad: { ar: "سلطة كبيرة مميزة", en: "Premium large salad" },
+  premium_large_salad: { ar: "سلطة كبيرة مميزة", en: "Premium Large Salad" },
+  basic_salad: { ar: "سلطة", en: "Salad" },
   sandwich: { ar: "ساندويتش", en: "Sandwich" },
 };
+
+const SEMANTIC_LABELS = {
+  ...MEAL_TYPE_LABELS,
+  addon: { ar: "إضافة", en: "Add-on" },
+  sauce: { ar: "صوص", en: "Sauce" },
+  side: { ar: "جانب", en: "Side" },
+  carb: { ar: "كارب", en: "Carb" },
+  protein: { ar: "بروتين", en: "Protein" },
+};
+
+const UNKNOWN_ITEM_LABEL = { ar: "عنصر غير معروف", en: "Unknown item" };
 
 const FULFILLMENT_LABELS = {
   home_delivery: { ar: "توصيل للمنزل", en: "Home delivery" },
@@ -68,6 +81,10 @@ const WARNING_MESSAGES = {
   MISSING_CUSTOMER: ["بيانات العميل غير موجودة", "Customer data is missing"],
   EMPTY_KITCHEN_MEALS: ["لا توجد وجبات للتحضير", "No kitchen meals to prepare"],
   CANCELED_EMPTY_ROW: ["هذا الطلب ملغي ولا يحتوي وجبات للتحضير", "Canceled row has no meals to prepare"],
+  UNRESOLVED_OPTION_NAME: ["تعذر تحديد اسم العنصر من الكتالوج", "Could not resolve option name from catalog"],
+  UNRESOLVED_ADDON_NAME: ["تعذر تحديد اسم الإضافة من الكتالوج", "Could not resolve add-on name from catalog"],
+  UNRESOLVED_SALAD_GROUP_ITEM: ["تعذر تحديد اسم مكون السلطة من الكتالوج", "Could not resolve salad group item name from catalog"],
+  FALLBACK_DISPLAY_NAME_USED: ["تم استخدام اسم بديل للعرض", "Fallback display name was used"],
 };
 
 function asId(value) {
@@ -89,6 +106,18 @@ function scalarString(value) {
 
 function isNonEmpty(value) {
   return scalarString(value) !== "";
+}
+
+function isObjectIdLike(value) {
+  return /^[a-f\d]{24}$/i.test(String(value || ""));
+}
+
+function humanizeKey(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function extractNameValue(value, depth = 0) {
@@ -145,6 +174,11 @@ function nameObject(value, fallback = "") {
 function displayName(name, fallback = "") {
   const label = nameObject(name, fallback);
   return String(label.ar || label.en || fallback || "");
+}
+
+function semanticLabelFor(key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  return SEMANTIC_LABELS[normalized] || null;
 }
 
 function withWarning(warnings, code, field) {
@@ -222,54 +256,125 @@ function buildIds(item) {
 }
 
 function entityPayload({ id, key, name, fallback }) {
-  const label = nameObject(name, fallback || key || id || "");
+  const semanticFallback = semanticLabelFor(key) || semanticLabelFor(fallback);
+  const fallbackText = fallback || key || id || "";
+  const fallbackValue = semanticFallback
+    || (fallbackText && typeof fallbackText === "object" ? fallbackText : null)
+    || (isObjectIdLike(fallbackText) ? UNKNOWN_ITEM_LABEL : humanizeKey(fallbackText));
+  const label = nameObject(name, fallbackValue);
   return {
     id: asId(id),
     key: key || null,
     name: label,
-    displayName: displayName(label, key || id || ""),
+    displayName: displayName(label, fallbackValue),
   };
 }
 
 function normalizeOption(option = {}) {
+  const key = option.optionKey || option.key || null;
+  const id = option.optionId || option.id || null;
+  const fallback = key || id || "option";
+  const name = option.name || option.nameI18n || option.optionName || option.label;
+  const unresolved = !extractNameValue(name) && isObjectIdLike(fallback);
+  const label = unresolved ? UNKNOWN_ITEM_LABEL : nameObject(name, semanticLabelFor(key) || humanizeKey(fallback));
   return {
     ...option,
-    name: nameObject(option.name || option.nameI18n || option.optionName || option.label, option.optionKey || option.key || ""),
-    displayName: displayName(option.name || option.nameI18n || option.optionName || option.label, option.optionKey || option.key || ""),
+    id: asId(id),
+    key,
+    name: label,
+    displayName: displayName(label, fallback),
   };
 }
 
 function normalizeCarb(carb = {}, index, warnings, slotIndex) {
   const fallback = carb.key || carb.carbId || carb.id || "";
+  const name = carb.nameI18n || carb.name || carb.carbName;
+  const unresolved = !extractNameValue(name) && isObjectIdLike(fallback);
+  const label = unresolved ? UNKNOWN_ITEM_LABEL : nameObject(name, semanticLabelFor(carb.key) || humanizeKey(fallback));
   const payload = {
     id: asId(carb.carbId || carb.id),
     key: carb.key ? String(carb.key) : null,
-    name: nameObject(carb.nameI18n || carb.name || carb.carbName, fallback),
-    displayName: displayName(carb.nameI18n || carb.name || carb.carbName, fallback),
+    name: label,
+    displayName: displayName(label, fallback),
     grams: carb.grams !== undefined && carb.grams !== null ? asNumber(carb.grams, null) : null,
   };
-  if (!isNonEmpty(carb.name) && !isNonEmpty(carb.nameI18n && (carb.nameI18n.ar || carb.nameI18n.en))) {
+  if (unresolved) {
     withWarning(warnings, "MISSING_CARB_NAME", `kitchen.meals[${slotIndex}].carbs[${index}].name`);
+    withWarning(warnings, "UNRESOLVED_OPTION_NAME", `kitchen.meals[${slotIndex}].carbs[${index}]`);
+  } else if (!isNonEmpty(carb.name) && !isNonEmpty(carb.nameI18n && (carb.nameI18n.ar || carb.nameI18n.en))) {
+    withWarning(warnings, "MISSING_CARB_NAME", `kitchen.meals[${slotIndex}].carbs[${index}].name`);
+    withWarning(warnings, "FALLBACK_DISPLAY_NAME_USED", `kitchen.meals[${slotIndex}].carbs[${index}].name`);
   }
   return payload;
 }
 
+function normalizeSaladGroupItem(item, groupKey, itemIndex, warnings, slotIndex) {
+  if (item && typeof item === "object") {
+    const key = item.key || item.optionKey || item.ingredientKey || null;
+    const id = item.id || item._id || item.optionId || item.ingredientId || item;
+    const name = item.nameI18n || item.name || item.optionName || item.label;
+    const unresolved = !extractNameValue(name) && isObjectIdLike(key || id);
+    const payload = entityPayload({
+      id,
+      key,
+      name: unresolved ? UNKNOWN_ITEM_LABEL : name,
+      fallback: key || id || groupKey,
+    });
+    if (unresolved) withWarning(warnings, "UNRESOLVED_SALAD_GROUP_ITEM", `kitchen.meals[${slotIndex}].salad.groups.${groupKey}[${itemIndex}]`);
+    return payload;
+  }
+  const id = asId(item);
+  const unresolved = isObjectIdLike(id);
+  if (unresolved) withWarning(warnings, "UNRESOLVED_SALAD_GROUP_ITEM", `kitchen.meals[${slotIndex}].salad.groups.${groupKey}[${itemIndex}]`);
+  return entityPayload({
+    id,
+    key: unresolved ? null : String(item || groupKey),
+    name: unresolved ? UNKNOWN_ITEM_LABEL : null,
+    fallback: unresolved ? "unknown_item" : item || groupKey,
+  });
+}
+
+function normalizeSalad(salad, mealType, warnings, slotIndex) {
+  if (!salad && mealType !== "premium_large_salad" && mealType !== "basic_salad") return null;
+  const source = salad && typeof salad === "object" ? salad : {};
+  const presetKey = source.presetKey || source.key || mealType || "basic_salad";
+  const presetLabel = semanticLabelFor(presetKey) || semanticLabelFor(mealType) || nameObject(source.name, presetKey);
+  const groupsSource = source.groups && typeof source.groups === "object" ? source.groups : {};
+  const groupKeys = Array.from(new Set(["leafy_greens", "vegetables", "protein", "cheese_nuts", "fruits", "sauce"].concat(Object.keys(groupsSource))));
+  const groups = {};
+  const rawIds = {};
+  groupKeys.forEach((groupKey) => {
+    const values = Array.isArray(groupsSource[groupKey]) ? groupsSource[groupKey] : [];
+    groups[groupKey] = values.map((item, itemIndex) => normalizeSaladGroupItem(item, groupKey, itemIndex, warnings, slotIndex));
+    rawIds[groupKey] = values.map((item) => asId(item && typeof item === "object" ? item.id || item._id || item.optionId || item.ingredientId : item)).filter(Boolean);
+  });
+  return {
+    ...source,
+    presetKey,
+    name: nameObject(source.name || presetLabel, presetLabel),
+    displayName: displayName(source.name || presetLabel, presetKey),
+    groups,
+    rawIds,
+  };
+}
+
 function normalizeMeal(slot = {}, slotIndex, fulfillmentType, warnings) {
   const mealType = slot.selectionType || slot.mealType || "standard_meal";
-  const mealTypeLabel = MEAL_TYPE_LABELS[mealType] || nameObject(mealType, mealType);
+  const mealTypeLabel = MEAL_TYPE_LABELS[mealType] || nameObject(null, humanizeKey(mealType));
   const productFallback = slot.productKey || slot.productId || slot.sandwichKey || slot.sandwichId || mealType;
+  const fallbackProductName = semanticLabelFor(slot.productKey) || semanticLabelFor(mealType) || humanizeKey(productFallback);
   const product = entityPayload({
     id: slot.productId || (mealType === "sandwich" ? slot.sandwichId : null),
     key: slot.productKey || slot.sandwichKey,
     name: slot.productNameI18n || slot.productName,
-    fallback: productFallback,
+    fallback: fallbackProductName,
   });
   const sandwich = mealType === "sandwich"
     ? entityPayload({
       id: slot.sandwichId || slot.productId,
       key: slot.sandwichKey || slot.productKey,
       name: slot.sandwichNameI18n || slot.sandwichName || slot.productNameI18n || slot.productName,
-      fallback: productFallback,
+      fallback: fallbackProductName,
     })
     : null;
   const proteinFallback = slot.proteinKey || slot.proteinFamilyKey || slot.proteinId || "";
@@ -287,6 +392,7 @@ function normalizeMeal(slot = {}, slotIndex, fulfillmentType, warnings) {
   const sauce = (Array.isArray(slot.sauce) ? slot.sauce : []).map(normalizeOption);
   const sides = (Array.isArray(slot.sides) ? slot.sides : []).map(normalizeOption);
   const options = (Array.isArray(slot.selectedOptions) ? slot.selectedOptions : []).map(normalizeOption);
+  const salad = normalizeSalad(slot.salad, mealType, warnings, slotIndex);
   const badgesAr = [mealTypeLabel.ar, protein.grams ? `${protein.grams}g` : null, slot.isPremium ? "مميز" : null]
     .filter(Boolean);
   const primaryName = mealType === "sandwich" && sandwich ? sandwich.displayName : product.displayName;
@@ -294,6 +400,7 @@ function normalizeMeal(slot = {}, slotIndex, fulfillmentType, warnings) {
   if (!product.id && !product.key) withWarning(warnings, "MISSING_PRODUCT", `kitchen.meals[${slotIndex}].product`);
   if (!slot.productName && !(slot.productNameI18n && (slot.productNameI18n.ar || slot.productNameI18n.en))) {
     withWarning(warnings, "MISSING_PRODUCT_NAME", `kitchen.meals[${slotIndex}].product.name`);
+    withWarning(warnings, "FALLBACK_DISPLAY_NAME_USED", `kitchen.meals[${slotIndex}].product.name`);
   }
   if (mealType === "sandwich" && (!sandwich || (!sandwich.id && !sandwich.key))) {
     withWarning(warnings, "MISSING_SANDWICH", `kitchen.meals[${slotIndex}].sandwich`);
@@ -311,7 +418,7 @@ function normalizeMeal(slot = {}, slotIndex, fulfillmentType, warnings) {
     sandwich,
     protein,
     carbs,
-    salad: slot.salad || null,
+    salad,
     sauce,
     sides,
     options,
@@ -334,12 +441,16 @@ function normalizeMeal(slot = {}, slotIndex, fulfillmentType, warnings) {
   };
 }
 
-function normalizeAddon(addon = {}) {
+function normalizeAddon(addon = {}, index, warnings) {
+  const name = addon.nameI18n || addon.name || addon.addonName;
+  const fallback = addon.key || addon.addonKey || addon.id || addon.addonId || "addon";
+  const unresolved = !extractNameValue(name) && isObjectIdLike(fallback);
+  if (unresolved) withWarning(warnings, "UNRESOLVED_ADDON_NAME", `kitchen.addons[${index}]`);
   const payload = entityPayload({
     id: addon.id || addon.addonId,
     key: addon.key || addon.addonKey,
-    name: addon.nameI18n || addon.name || addon.addonName,
-    fallback: addon.key || addon.addonKey || addon.id || addon.addonId || "addon",
+    name: unresolved ? UNKNOWN_ITEM_LABEL : name,
+    fallback,
   });
   return {
     ...payload,
@@ -356,17 +467,20 @@ function normalizeKitchenQueueItem(item, { includeRaw = false, includeLegacyAlia
   const ids = buildIds(item);
   const warnings = [];
   const kitchenDetails = item.kitchenDetails || {};
-  const payment = item.paymentValidity || {};
+  const payment = { ...(item.paymentValidity || {}) };
   const fulfillmentType = fulfillmentTypeFor(item);
   const meals = (Array.isArray(kitchenDetails.mealSlots) ? kitchenDetails.mealSlots : [])
     .map((slot, index) => normalizeMeal(slot, index, fulfillmentType, warnings));
-  const addons = (Array.isArray(kitchenDetails.addons) ? kitchenDetails.addons : []).map(normalizeAddon);
+  const addons = (Array.isArray(kitchenDetails.addons) ? kitchenDetails.addons : []).map((addon, index) => normalizeAddon(addon, index, warnings));
   const actions = buildActions(item, payment);
-  const mealCount = sumQuantity(meals);
-  const addonCount = sumQuantity(addons);
   const sourceType = sourceTypeFor(item);
-  const delivery = item.delivery || {};
   const pickup = item.pickup || {};
+  const pickupMealCount = asNumber(pickup.mealCount || item.mealCount || (item.context && item.context.mealCount), 0);
+  const mealCount = sourceType === "pickup_request" && meals.length === 0
+    ? pickupMealCount
+    : sumQuantity(meals);
+  const addonCount = sumQuantity(addons);
+  const delivery = item.delivery || {};
   const timestamps = item.timestamps || {};
   const status = item.status || null;
   const lifecycleGroup = lifecycleGroupFor(status);
@@ -376,6 +490,11 @@ function normalizeKitchenQueueItem(item, { includeRaw = false, includeLegacyAlia
   if (!item.plan) withWarning(warnings, "MISSING_PLAN", "subscription.plan");
   if (mealCount === 0) withWarning(warnings, "EMPTY_KITCHEN_MEALS", "kitchen.meals");
   if (lifecycleGroup === "archived" && mealCount === 0) withWarning(warnings, "CANCELED_EMPTY_ROW", "source.status");
+  if (mealCount === 0 && sourceType !== "pickup_request") {
+    payment.canPrepare = false;
+    actions.allowed = actions.allowed.filter((action) => action && action.id !== "prepare");
+    actions.canPrepare = false;
+  }
 
   const planName = item.plan ? nameObject(item.plan.nameI18n || item.plan.name, item.plan.key || item.plan.id || "") : nameObject("", "");
   const titleAr = meals[0] ? meals[0].display.titleAr : (lifecycleGroup === "archived" ? "طلب ملغي" : "طلب بدون وجبات");

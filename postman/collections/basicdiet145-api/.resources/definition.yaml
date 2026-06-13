@@ -1,0 +1,9 @@
+$kind: collection
+name: basicdiet145 API
+scripts:
+  - type: http:beforeRequest
+    language: text/javascript
+    code: |-
+      if (pm.environment.get('accessToken')) {
+        pm.request.headers.add({ key: 'Authorization', value: 'Bearer ' + pm.environment.get('accessToken') });
+      }

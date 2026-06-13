@@ -447,7 +447,7 @@ async function queryBoardDays(req, { screen }) {
   let pickupRequestItems = [];
   if (method === "all" || method === "pickup") {
     const defaultPickupRequestStatuses = screen === "pickup" || screen === "kitchen"
-      ? ["locked", "in_preparation", "ready_for_pickup"]
+      ? ["locked", "in_preparation", "ready_for_pickup", "fulfilled"]
       : ["locked", "in_preparation", "ready_for_pickup"];
     const pickupRequestStatuses = req.query.status
       ? statuses.filter((status) => ["locked", "in_preparation", "ready_for_pickup", "fulfilled", "no_show", "canceled"].includes(status))

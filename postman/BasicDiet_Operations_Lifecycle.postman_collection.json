@@ -1,0 +1,4504 @@
+{
+  "info": {
+    "_postman_id": "56b7f6b0-6d13-48bb-a0f1-basicdietops",
+    "name": "BasicDiet Operations Lifecycle",
+    "description": "Dashboard Operations lifecycle pack generated from backend routes/controllers/services. No production tokens included.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Setup / Auth / Health",
+      "item": [
+        {
+          "name": "Health check",
+          "id": "basicdiet-ops-0001",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Health is up or reports DB unavailable\", function () { pm.expect([200,503]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dashboard auth check - /api/dashboard/auth/me",
+          "id": "basicdiet-ops-0002",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "auth",
+                "me"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Dashboard token is valid\", function () {",
+                  "  if (pm.response.code === 401) throw new Error(\"Paste a valid dashboardToken in the environment\");",
+                  "  pm.expect(pm.response.code).to.eql(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "App current user - /api/auth/me",
+          "id": "basicdiet-ops-0003",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Client token valid when supplied\", function () { pm.expect([200,401]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dashboard login endpoint contract only",
+          "id": "basicdiet-ops-0004",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "auth",
+                "login"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{dashboardEmail}}\",\n  \"password\": \"{{dashboardPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Optional. Use only with non-production dashboard credentials. Tokens are intentionally not hardcoded."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Login endpoint exists\", function () { pm.expect([200,400,401,429]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set dashboardToken reminder",
+          "id": "basicdiet-ops-0005",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                ""
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Reminder\", function () {",
+                  "  pm.expect(pm.environment.get(\"dashboardToken\") || \"\", \"Paste dashboard token into dashboardToken before protected folders\").to.not.eql(\"\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Queue Contract Smoke Tests",
+      "item": [
+        {
+          "name": "Kitchen Queue v2",
+          "id": "basicdiet-ops-0006",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"No [object Object] in response\", function () {",
+                  "  const text = pm.response.text();",
+                  "  pm.expect(text.includes(\"[object Object]\")).to.eql(false);",
+                  "});",
+                  "pm.test(\"V2 contract exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.contractVersion).to.include(\"v2\");",
+                  "});",
+                  "pm.test(\"Items have dashboard-ready shape\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    pm.expect(item).to.have.property(\"ids\");",
+                  "    pm.expect(item).to.have.property(\"customer\");",
+                  "    pm.expect(item).to.have.property(\"source\");",
+                  "    pm.expect(item).to.have.property(\"orderSummary\");",
+                  "    pm.expect(item).to.have.property(\"kitchen\");",
+                  "    pm.expect(item).to.have.property(\"fulfillment\");",
+                  "    pm.expect(item).to.have.property(\"payment\");",
+                  "    pm.expect(item).to.have.property(\"actions\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Raw payload is hidden by default\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => pm.expect(item.raw).to.eql(undefined));",
+                  "});",
+                  "pm.test(\"Payment invalid rows are not fulfillable\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => {",
+                  "    const payment = item.payment || {};",
+                  "    const allowed = item.actions?.allowed || [];",
+                  "    if (payment.pendingUnpaid || payment.superseded || payment.revisionMismatch) {",
+                  "      pm.expect(payment.canFulfill, JSON.stringify(item.ids || {})).to.eql(false);",
+                  "      pm.expect(allowed.includes(\"fulfill\"), JSON.stringify(item.ids || {})).to.eql(false);",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test(\"Kitchen meal display fields are safe\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    (item.kitchen?.meals || []).forEach((meal) => {",
+                  "      pm.expect(meal.display?.titleAr || \"\").to.not.eql(\"\");",
+                  "      pm.expect(meal.display?.titleAr || \"\").to.not.include(\"[object Object]\");",
+                  "      pm.expect(meal.display?.preparationTextAr || \"\").to.not.eql(\"\");",
+                  "      pm.expect(meal.display?.preparationTextAr || \"\").to.not.include(\"[object Object]\");",
+                  "      if (meal.product?.displayName) pm.expect(meal.product.displayName).to.not.include(\"[object Object]\");",
+                  "      if (meal.protein?.displayName) pm.expect(meal.protein.displayName).to.not.include(\"[object Object]\");",
+                  "      if (meal.plan?.proteinGrams || item.plan?.proteinGrams) pm.expect(meal.protein).to.have.property(\"grams\");",
+                  "    });",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pickup Queue v2",
+          "id": "basicdiet-ops-0007",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/pickup/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "pickup",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"No [object Object] in response\", function () {",
+                  "  const text = pm.response.text();",
+                  "  pm.expect(text.includes(\"[object Object]\")).to.eql(false);",
+                  "});",
+                  "pm.test(\"V2 contract exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.contractVersion).to.include(\"v2\");",
+                  "});",
+                  "pm.test(\"Items have dashboard-ready shape\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    pm.expect(item).to.have.property(\"ids\");",
+                  "    pm.expect(item).to.have.property(\"customer\");",
+                  "    pm.expect(item).to.have.property(\"source\");",
+                  "    pm.expect(item).to.have.property(\"orderSummary\");",
+                  "    pm.expect(item).to.have.property(\"kitchen\");",
+                  "    pm.expect(item).to.have.property(\"fulfillment\");",
+                  "    pm.expect(item).to.have.property(\"payment\");",
+                  "    pm.expect(item).to.have.property(\"actions\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Raw payload is hidden by default\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => pm.expect(item.raw).to.eql(undefined));",
+                  "});",
+                  "pm.test(\"Payment invalid rows are not fulfillable\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => {",
+                  "    const payment = item.payment || {};",
+                  "    const allowed = item.actions?.allowed || [];",
+                  "    if (payment.pendingUnpaid || payment.superseded || payment.revisionMismatch) {",
+                  "      pm.expect(payment.canFulfill, JSON.stringify(item.ids || {})).to.eql(false);",
+                  "      pm.expect(allowed.includes(\"fulfill\"), JSON.stringify(item.ids || {})).to.eql(false);",
+                  "    }",
+                  "  });",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Courier Queue v2",
+          "id": "basicdiet-ops-0008",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/courier/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "courier",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"No [object Object] in response\", function () {",
+                  "  const text = pm.response.text();",
+                  "  pm.expect(text.includes(\"[object Object]\")).to.eql(false);",
+                  "});",
+                  "pm.test(\"V2 contract exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.contractVersion).to.include(\"v2\");",
+                  "});",
+                  "pm.test(\"Items have dashboard-ready shape\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    pm.expect(item).to.have.property(\"ids\");",
+                  "    pm.expect(item).to.have.property(\"customer\");",
+                  "    pm.expect(item).to.have.property(\"source\");",
+                  "    pm.expect(item).to.have.property(\"orderSummary\");",
+                  "    pm.expect(item).to.have.property(\"kitchen\");",
+                  "    pm.expect(item).to.have.property(\"fulfillment\");",
+                  "    pm.expect(item).to.have.property(\"payment\");",
+                  "    pm.expect(item).to.have.property(\"actions\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Raw payload is hidden by default\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => pm.expect(item.raw).to.eql(undefined));",
+                  "});",
+                  "pm.test(\"Payment invalid rows are not fulfillable\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => {",
+                  "    const payment = item.payment || {};",
+                  "    const allowed = item.actions?.allowed || [];",
+                  "    if (payment.pendingUnpaid || payment.superseded || payment.revisionMismatch) {",
+                  "      pm.expect(payment.canFulfill, JSON.stringify(item.ids || {})).to.eql(false);",
+                  "      pm.expect(allowed.includes(\"fulfill\"), JSON.stringify(item.ids || {})).to.eql(false);",
+                  "    }",
+                  "  });",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kitchen Queue includeRaw=true",
+          "id": "basicdiet-ops-0009",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue?date={{testDate}}&includeRaw=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                },
+                {
+                  "key": "includeRaw",
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Raw is exposed only when requested\", function () {",
+                  "  const items = pm.response.json().data?.items || [];",
+                  "  if (items.length) pm.expect(items.some((item) => Object.prototype.hasOwnProperty.call(item, \"raw\"))).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kitchen Queue legacy view",
+          "id": "basicdiet-ops-0010",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue?date={{testDate}}&view=legacy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                },
+                {
+                  "key": "view",
+                  "value": "legacy"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Legacy response shape exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.items).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Home Delivery Lifecycle",
+      "item": [
+        {
+          "name": "Find actionable home delivery day",
+          "id": "basicdiet-ops-0011",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue?date={{testDate}}&method=delivery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                },
+                {
+                  "key": "method",
+                  "value": "delivery"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "const json = pm.response.json();",
+                  "const items = json.data?.items || [];",
+                  "const first = items.find((i) => i.ids?.entityType === \"subscription_day\" && i.fulfillment?.type === \"home_delivery\" && (i.actions?.canPrepare || (i.actions?.allowed || []).includes(\"prepare\")));",
+                  "pm.test(\"Found home delivery subscription day\", function () { pm.expect(first, \"No matching row; set variables manually or use a date with test data\").to.exist; });",
+                  "if (first) {",
+                  "  pm.environment.set(\"entityId\", first.ids?.entityId || first.id || \"\");",
+                  "  pm.environment.set(\"entityType\", first.ids?.entityType || first.entityType || \"\");",
+                  "  pm.environment.set(\"deliverySubscriptionId\", first.ids?.subscriptionId || \"\");",
+                  "  pm.environment.set(\"deliverySubscriptionDayId\", first.ids?.subscriptionDayId || \"\");",
+                  "  pm.environment.set(\"pickupSubscriptionId\", first.ids?.subscriptionId || \"\");",
+                  "  pm.environment.set(\"pickupSubscriptionDayId\", first.ids?.subscriptionDayId || \"\");",
+                  "  pm.environment.set(\"pickupRequestId\", first.ids?.pickupRequestId || first.fulfillment?.pickup?.pickupRequestId || \"\");",
+                  "  pm.environment.set(\"deliveryId\", first.fulfillment?.delivery?.deliveryId || \"\");",
+                  "  ",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Prepare home delivery day",
+          "id": "basicdiet-ops-0012",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/prepare",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "prepare"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Action succeeded\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data).to.exist;",
+                  "});",
+                  "const json = pm.response.json();",
+                  "const status = json.data?.status || json.data?.fulfillment?.status || \"\";",
+                  "if ([\"in_preparation\"].length) {",
+                  "  pm.test(\"Status is an expected post-action state\", function () { pm.expect([\"in_preparation\"]).to.include(status); });",
+                  "}",
+                  "const deliveryId = json.data?.fulfillment?.delivery?.deliveryId || json.data?.delivery?.deliveryId || json.data?.deliveryId;",
+                  "if (deliveryId) pm.environment.set(\"deliveryId\", deliveryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify prepared in kitchen queue",
+          "id": "basicdiet-ops-0013",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue/{{entityId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue",
+                "{{entityId}}"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Prepared item detail\", function () { pm.expect([\"in_preparation\", \"out_for_delivery\", \"fulfilled\"]).to.include(pm.response.json().data?.fulfillment?.status || pm.response.json().data?.status); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dispatch home delivery",
+          "id": "basicdiet-ops-0014",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{courierToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/dispatch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "dispatch"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Action succeeded\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data).to.exist;",
+                  "});",
+                  "const json = pm.response.json();",
+                  "const status = json.data?.status || json.data?.fulfillment?.status || \"\";",
+                  "if ([\"out_for_delivery\"].length) {",
+                  "  pm.test(\"Status is an expected post-action state\", function () { pm.expect([\"out_for_delivery\"]).to.include(status); });",
+                  "}",
+                  "const deliveryId = json.data?.fulfillment?.delivery?.deliveryId || json.data?.delivery?.deliveryId || json.data?.deliveryId;",
+                  "if (deliveryId) pm.environment.set(\"deliveryId\", deliveryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify item in courier queue",
+          "id": "basicdiet-ops-0015",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{courierToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/courier/queue?date={{testDate}}&method=delivery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "courier",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                },
+                {
+                  "key": "method",
+                  "value": "delivery"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"No [object Object] in response\", function () {",
+                  "  const text = pm.response.text();",
+                  "  pm.expect(text.includes(\"[object Object]\")).to.eql(false);",
+                  "});",
+                  "pm.test(\"V2 contract exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.contractVersion).to.include(\"v2\");",
+                  "});",
+                  "pm.test(\"Items have dashboard-ready shape\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    pm.expect(item).to.have.property(\"ids\");",
+                  "    pm.expect(item).to.have.property(\"customer\");",
+                  "    pm.expect(item).to.have.property(\"source\");",
+                  "    pm.expect(item).to.have.property(\"orderSummary\");",
+                  "    pm.expect(item).to.have.property(\"kitchen\");",
+                  "    pm.expect(item).to.have.property(\"fulfillment\");",
+                  "    pm.expect(item).to.have.property(\"payment\");",
+                  "    pm.expect(item).to.have.property(\"actions\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Raw payload is hidden by default\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => pm.expect(item.raw).to.eql(undefined));",
+                  "});",
+                  "pm.test(\"Payment invalid rows are not fulfillable\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => {",
+                  "    const payment = item.payment || {};",
+                  "    const allowed = item.actions?.allowed || [];",
+                  "    if (payment.pendingUnpaid || payment.superseded || payment.revisionMismatch) {",
+                  "      pm.expect(payment.canFulfill, JSON.stringify(item.ids || {})).to.eql(false);",
+                  "      pm.expect(allowed.includes(\"fulfill\"), JSON.stringify(item.ids || {})).to.eql(false);",
+                  "    }",
+                  "  });",
+                  "});",
+                  "",
+                  "const item = (pm.response.json().data?.items || []).find(i => i.ids?.entityId === pm.environment.get(\"entityId\"));",
+                  "pm.test(\"Dispatched item appears in courier queue\", function () { pm.expect(item).to.exist; });",
+                  "if (item?.fulfillment?.delivery?.deliveryId) pm.environment.set(\"deliveryId\", item.fulfillment.delivery.deliveryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fulfill delivery",
+          "id": "basicdiet-ops-0016",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{courierToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/fulfill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "fulfill"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Action succeeded\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data).to.exist;",
+                  "});",
+                  "const json = pm.response.json();",
+                  "const status = json.data?.status || json.data?.fulfillment?.status || \"\";",
+                  "if ([\"fulfilled\"].length) {",
+                  "  pm.test(\"Status is an expected post-action state\", function () { pm.expect([\"fulfilled\"]).to.include(status); });",
+                  "}",
+                  "const deliveryId = json.data?.fulfillment?.delivery?.deliveryId || json.data?.delivery?.deliveryId || json.data?.deliveryId;",
+                  "if (deliveryId) pm.environment.set(\"deliveryId\", deliveryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Duplicate fulfill delivery safety",
+          "id": "basicdiet-ops-0017",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{courierToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/fulfill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "fulfill"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"LOCKED\",\"ORDER_PAYMENT_REQUIRED\",\"INSUFFICIENT_CREDITS\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Duplicate dispatch safety",
+          "id": "basicdiet-ops-0018",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{courierToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/dispatch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "dispatch"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"LOCKED\",\"INVALID_MODE_FOR_ACTION\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Branch Pickup Lifecycle",
+      "item": [
+        {
+          "name": "Find branch pickup item",
+          "id": "basicdiet-ops-0019",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/pickup/queue?date={{testDate}}&method=pickup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "pickup",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                },
+                {
+                  "key": "method",
+                  "value": "pickup"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "const json = pm.response.json();",
+                  "const items = json.data?.items || [];",
+                  "const first = items.find((i) => i.fulfillment?.type === \"branch_pickup\" && [\"subscription_day\", \"subscription_pickup_request\"].includes(i.ids?.entityType));",
+                  "pm.test(\"Found branch pickup item\", function () { pm.expect(first, \"No matching row; set variables manually or use a date with test data\").to.exist; });",
+                  "if (first) {",
+                  "  pm.environment.set(\"entityId\", first.ids?.entityId || first.id || \"\");",
+                  "  pm.environment.set(\"entityType\", first.ids?.entityType || first.entityType || \"\");",
+                  "  pm.environment.set(\"deliverySubscriptionId\", first.ids?.subscriptionId || \"\");",
+                  "  pm.environment.set(\"deliverySubscriptionDayId\", first.ids?.subscriptionDayId || \"\");",
+                  "  pm.environment.set(\"pickupSubscriptionId\", first.ids?.subscriptionId || \"\");",
+                  "  pm.environment.set(\"pickupSubscriptionDayId\", first.ids?.subscriptionDayId || \"\");",
+                  "  pm.environment.set(\"pickupRequestId\", first.ids?.pickupRequestId || first.fulfillment?.pickup?.pickupRequestId || \"\");",
+                  "  pm.environment.set(\"deliveryId\", first.fulfillment?.delivery?.deliveryId || \"\");",
+                  "  ",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create client pickup request",
+          "id": "basicdiet-ops-0020",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{testDate}}\",\n  \"mealCount\": 1,\n  \"idempotencyKey\": \"postman-{{testDate}}-{{pickupSubscriptionId}}-1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Pickup request created or documented data/auth error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code === 200) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.environment.set(\"pickupRequestId\", json.data?.requestId || \"\");",
+                  "    pm.environment.set(\"entityId\", json.data?.requestId || pm.environment.get(\"entityId\"));",
+                  "    pm.environment.set(\"entityType\", \"subscription_pickup_request\");",
+                  "  } else {",
+                  "    pm.expect([400,401,403,404,409,422]).to.include(pm.response.code);",
+                  "    pm.expect(json.error?.code).to.exist;",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List client pickup requests",
+          "id": "basicdiet-ops-0021",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests?date={{testDate}}&status=all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                },
+                {
+                  "key": "status",
+                  "value": "all"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"List pickup requests works when token/data match\", function () { pm.expect([200,401,403,404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Prepare pickup item",
+          "id": "basicdiet-ops-0022",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/prepare",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "prepare"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Action succeeded\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data).to.exist;",
+                  "});",
+                  "const json = pm.response.json();",
+                  "const status = json.data?.status || json.data?.fulfillment?.status || \"\";",
+                  "if ([\"in_preparation\"].length) {",
+                  "  pm.test(\"Status is an expected post-action state\", function () { pm.expect([\"in_preparation\"]).to.include(status); });",
+                  "}",
+                  "const deliveryId = json.data?.fulfillment?.delivery?.deliveryId || json.data?.delivery?.deliveryId || json.data?.deliveryId;",
+                  "if (deliveryId) pm.environment.set(\"deliveryId\", deliveryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ready for pickup",
+          "id": "basicdiet-ops-0023",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/ready_for_pickup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "ready_for_pickup"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Action succeeded\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data).to.exist;",
+                  "});",
+                  "const json = pm.response.json();",
+                  "const status = json.data?.status || json.data?.fulfillment?.status || \"\";",
+                  "if ([\"ready_for_pickup\"].length) {",
+                  "  pm.test(\"Status is an expected post-action state\", function () { pm.expect([\"ready_for_pickup\"]).to.include(status); });",
+                  "}",
+                  "const deliveryId = json.data?.fulfillment?.delivery?.deliveryId || json.data?.delivery?.deliveryId || json.data?.deliveryId;",
+                  "if (deliveryId) pm.environment.set(\"deliveryId\", deliveryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fulfill pickup",
+          "id": "basicdiet-ops-0024",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kitchenToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/fulfill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "fulfill"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Action succeeded\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data).to.exist;",
+                  "});",
+                  "const json = pm.response.json();",
+                  "const status = json.data?.status || json.data?.fulfillment?.status || \"\";",
+                  "if ([\"fulfilled\"].length) {",
+                  "  pm.test(\"Status is an expected post-action state\", function () { pm.expect([\"fulfilled\"]).to.include(status); });",
+                  "}",
+                  "const deliveryId = json.data?.fulfillment?.delivery?.deliveryId || json.data?.delivery?.deliveryId || json.data?.deliveryId;",
+                  "if (deliveryId) pm.environment.set(\"deliveryId\", deliveryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Duplicate pickup fulfill safety",
+          "id": "basicdiet-ops-0025",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kitchenToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/fulfill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "fulfill"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"LOCKED\",\"INSUFFICIENT_CREDITS\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "No-show pickup path",
+          "id": "basicdiet-ops-0026",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/no_show",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "no_show"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\",\n  \"payload\": {\n    \"reason\": \"postman_no_show\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Home delivery pickup request rejection check",
+          "id": "basicdiet-ops-0027",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{deliverySubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{deliverySubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{dateDay2}}\",\n  \"mealCount\": 1,\n  \"idempotencyKey\": \"postman-delivery-pickup-reject-{{dateDay2}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_DELIVERY_MODE\",\"SUBSCRIPTION_DATE_OUT_OF_RANGE\",\"NOT_FOUND\",\"FORBIDDEN\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03B - Branch Pickup Multiple Same-Day Requests",
+      "description": "Verifies balance-based same-day pickup request reservations and idempotency. Requires appToken and pickupSubscriptionId for an active pickup subscription with remainingMeals=5.",
+      "item": [
+        {
+          "name": "Create pickup request A (mealCount 1)",
+          "id": "basicdiet-ops-03b-001",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{appToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{businessDate}}\",\n  \"mealCount\": 1,\n  \"idempotencyKey\": \"postman-branch-pickup-A\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () { pm.response.to.be.json; });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "pm.test(\"A created\", function () { pm.expect(pm.response.code).to.equal(200); });",
+                  "pm.environment.set(\"pickupRequestAId\", json?.data?.requestId || \"\");",
+                  "pm.test(\"A request id returned\", function () { pm.expect(pm.environment.get(\"pickupRequestAId\")).to.not.equal(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retry pickup request A with same idempotencyKey",
+          "id": "basicdiet-ops-03b-002",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{appToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{businessDate}}\",\n  \"mealCount\": 1,\n  \"idempotencyKey\": \"postman-branch-pickup-A\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () { pm.response.to.be.json; });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "pm.test(\"A retry is idempotent\", function () { pm.expect(pm.response.code).to.equal(200); });",
+                  "pm.test(\"A retry returns same request\", function () { pm.expect(json?.data?.requestId).to.equal(pm.environment.get(\"pickupRequestAId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create pickup request B (mealCount 1)",
+          "id": "basicdiet-ops-03b-003",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{appToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{businessDate}}\",\n  \"mealCount\": 1,\n  \"idempotencyKey\": \"postman-branch-pickup-B\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () { pm.response.to.be.json; });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "pm.test(\"B created\", function () { pm.expect(pm.response.code).to.equal(200); });",
+                  "pm.environment.set(\"pickupRequestBId\", json?.data?.requestId || \"\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create pickup request C (mealCount 3)",
+          "id": "basicdiet-ops-03b-004",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{appToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{businessDate}}\",\n  \"mealCount\": 3,\n  \"idempotencyKey\": \"postman-branch-pickup-C\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () { pm.response.to.be.json; });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "pm.test(\"C created\", function () { pm.expect(pm.response.code).to.equal(200); });",
+                  "pm.environment.set(\"pickupRequestCId\", json?.data?.requestId || \"\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Extra pickup request D fails when balance exhausted",
+          "id": "basicdiet-ops-03b-005",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{appToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{businessDate}}\",\n  \"mealCount\": 1,\n  \"idempotencyKey\": \"postman-branch-pickup-D\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () { pm.response.to.be.json; });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "pm.test(\"D fails with insufficient credits\", function () { pm.expect(pm.response.code).to.equal(422); pm.expect(json?.error?.code).to.equal(\"INSUFFICIENT_CREDITS\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pickup queue shows separate same-day request rows",
+          "id": "basicdiet-ops-03b-006",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/pickup/queue?date={{businessDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "pickup",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{businessDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () { pm.response.to.be.json; });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "pm.test(\"Queue loaded\", function () { pm.expect(pm.response.code).to.equal(200); });",
+                  "const ids = [pm.environment.get(\"pickupRequestAId\"), pm.environment.get(\"pickupRequestBId\"), pm.environment.get(\"pickupRequestCId\")].filter(Boolean);",
+                  "const rows = json?.data?.items || [];",
+                  "pm.test(\"A/B/C are visible as request rows\", function () { ids.forEach((id) => pm.expect(rows.some((row) => row?.ids?.pickupRequestId === id)).to.equal(true)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Day Status / Transition Matrix",
+      "item": [
+        {
+          "name": "Action lock",
+          "id": "basicdiet-ops-0028",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/lock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "lock"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action prepare",
+          "id": "basicdiet-ops-0029",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/prepare",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "prepare"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action dispatch",
+          "id": "basicdiet-ops-0030",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{courierToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/dispatch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "dispatch"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action ready_for_pickup",
+          "id": "basicdiet-ops-0031",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/ready_for_pickup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "ready_for_pickup"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action fulfill",
+          "id": "basicdiet-ops-0032",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{courierToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/fulfill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "fulfill"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action cancel",
+          "id": "basicdiet-ops-0033",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "cancel"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\",\n  \"payload\": {\n    \"reason\": \"postman_cancel\",\n    \"notes\": \"Postman lifecycle test\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action no_show",
+          "id": "basicdiet-ops-0034",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/no_show",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "no_show"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\",\n  \"payload\": {\n    \"reason\": \"postman_no_show\",\n    \"notes\": \"Postman lifecycle test\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action reopen",
+          "id": "basicdiet-ops-0035",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/reopen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "reopen"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action notify_arrival",
+          "id": "basicdiet-ops-0036",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/notify_arrival",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "notify_arrival"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"FORBIDDEN\",\"INVALID_ROLE_FOR_MODE\",\"INVALID_MODE_FOR_ACTION\",\"ORDER_PAYMENT_REQUIRED\",\"PICKUP_PREPARE_REQUIRED\",\"LOCKED\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh current entity detail",
+          "id": "basicdiet-ops-0037",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue/{{entityId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue",
+                "{{entityId}}"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Detail refresh works or entity no longer on board\", function () { pm.expect([200,404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Payment / Fulfillment Validity",
+      "item": [
+        {
+          "name": "Kitchen payment validity sweep",
+          "id": "basicdiet-ops-0038",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"No [object Object] in response\", function () {",
+                  "  const text = pm.response.text();",
+                  "  pm.expect(text.includes(\"[object Object]\")).to.eql(false);",
+                  "});",
+                  "pm.test(\"V2 contract exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.contractVersion).to.include(\"v2\");",
+                  "});",
+                  "pm.test(\"Items have dashboard-ready shape\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    pm.expect(item).to.have.property(\"ids\");",
+                  "    pm.expect(item).to.have.property(\"customer\");",
+                  "    pm.expect(item).to.have.property(\"source\");",
+                  "    pm.expect(item).to.have.property(\"orderSummary\");",
+                  "    pm.expect(item).to.have.property(\"kitchen\");",
+                  "    pm.expect(item).to.have.property(\"fulfillment\");",
+                  "    pm.expect(item).to.have.property(\"payment\");",
+                  "    pm.expect(item).to.have.property(\"actions\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Raw payload is hidden by default\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => pm.expect(item.raw).to.eql(undefined));",
+                  "});",
+                  "pm.test(\"Payment invalid rows are not fulfillable\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => {",
+                  "    const payment = item.payment || {};",
+                  "    const allowed = item.actions?.allowed || [];",
+                  "    if (payment.pendingUnpaid || payment.superseded || payment.revisionMismatch) {",
+                  "      pm.expect(payment.canFulfill, JSON.stringify(item.ids || {})).to.eql(false);",
+                  "      pm.expect(allowed.includes(\"fulfill\"), JSON.stringify(item.ids || {})).to.eql(false);",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test(\"Kitchen meal display fields are safe\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    (item.kitchen?.meals || []).forEach((meal) => {",
+                  "      pm.expect(meal.display?.titleAr || \"\").to.not.eql(\"\");",
+                  "      pm.expect(meal.display?.titleAr || \"\").to.not.include(\"[object Object]\");",
+                  "      pm.expect(meal.display?.preparationTextAr || \"\").to.not.eql(\"\");",
+                  "      pm.expect(meal.display?.preparationTextAr || \"\").to.not.include(\"[object Object]\");",
+                  "      if (meal.product?.displayName) pm.expect(meal.product.displayName).to.not.include(\"[object Object]\");",
+                  "      if (meal.protein?.displayName) pm.expect(meal.protein.displayName).to.not.include(\"[object Object]\");",
+                  "      if (meal.plan?.proteinGrams || item.plan?.proteinGrams) pm.expect(meal.protein).to.have.property(\"grams\");",
+                  "    });",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pickup payment validity sweep",
+          "id": "basicdiet-ops-0039",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/pickup/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "pickup",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"No [object Object] in response\", function () {",
+                  "  const text = pm.response.text();",
+                  "  pm.expect(text.includes(\"[object Object]\")).to.eql(false);",
+                  "});",
+                  "pm.test(\"V2 contract exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.contractVersion).to.include(\"v2\");",
+                  "});",
+                  "pm.test(\"Items have dashboard-ready shape\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    pm.expect(item).to.have.property(\"ids\");",
+                  "    pm.expect(item).to.have.property(\"customer\");",
+                  "    pm.expect(item).to.have.property(\"source\");",
+                  "    pm.expect(item).to.have.property(\"orderSummary\");",
+                  "    pm.expect(item).to.have.property(\"kitchen\");",
+                  "    pm.expect(item).to.have.property(\"fulfillment\");",
+                  "    pm.expect(item).to.have.property(\"payment\");",
+                  "    pm.expect(item).to.have.property(\"actions\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Raw payload is hidden by default\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => pm.expect(item.raw).to.eql(undefined));",
+                  "});",
+                  "pm.test(\"Payment invalid rows are not fulfillable\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => {",
+                  "    const payment = item.payment || {};",
+                  "    const allowed = item.actions?.allowed || [];",
+                  "    if (payment.pendingUnpaid || payment.superseded || payment.revisionMismatch) {",
+                  "      pm.expect(payment.canFulfill, JSON.stringify(item.ids || {})).to.eql(false);",
+                  "      pm.expect(allowed.includes(\"fulfill\"), JSON.stringify(item.ids || {})).to.eql(false);",
+                  "    }",
+                  "  });",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Courier payment validity sweep",
+          "id": "basicdiet-ops-0040",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/courier/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "courier",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"No [object Object] in response\", function () {",
+                  "  const text = pm.response.text();",
+                  "  pm.expect(text.includes(\"[object Object]\")).to.eql(false);",
+                  "});",
+                  "pm.test(\"V2 contract exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.contractVersion).to.include(\"v2\");",
+                  "});",
+                  "pm.test(\"Items have dashboard-ready shape\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    pm.expect(item).to.have.property(\"ids\");",
+                  "    pm.expect(item).to.have.property(\"customer\");",
+                  "    pm.expect(item).to.have.property(\"source\");",
+                  "    pm.expect(item).to.have.property(\"orderSummary\");",
+                  "    pm.expect(item).to.have.property(\"kitchen\");",
+                  "    pm.expect(item).to.have.property(\"fulfillment\");",
+                  "    pm.expect(item).to.have.property(\"payment\");",
+                  "    pm.expect(item).to.have.property(\"actions\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Raw payload is hidden by default\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => pm.expect(item.raw).to.eql(undefined));",
+                  "});",
+                  "pm.test(\"Payment invalid rows are not fulfillable\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => {",
+                  "    const payment = item.payment || {};",
+                  "    const allowed = item.actions?.allowed || [];",
+                  "    if (payment.pendingUnpaid || payment.superseded || payment.revisionMismatch) {",
+                  "      pm.expect(payment.canFulfill, JSON.stringify(item.ids || {})).to.eql(false);",
+                  "      pm.expect(allowed.includes(\"fulfill\"), JSON.stringify(item.ids || {})).to.eql(false);",
+                  "    }",
+                  "  });",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Manual Deduction Lifecycle",
+      "item": [
+        {
+          "name": "Search subscription by phone",
+          "id": "basicdiet-ops-0041",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/subscriptions/search?phone={{customerPhone}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "subscriptions",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "phone",
+                  "value": "{{customerPhone}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Search succeeds with test phone or reports not found\", function () { pm.expect([200,404]).to.include(pm.response.code); });",
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data || {};",
+                  "  pm.environment.set(\"manualDeductionSubscriptionId\", data.subscription?.id || \"\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get manual deduction history",
+          "id": "basicdiet-ops-0042",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/subscriptions/{{manualDeductionSubscriptionId}}/manual-deductions?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "subscriptions",
+                "{{manualDeductionSubscriptionId}}",
+                "manual-deductions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"History is compact\", function () {",
+                  "  const data = pm.response.json().data || {};",
+                  "  pm.expect(data.contractVersion).to.eql(\"dashboard_manual_deductions.v1\");",
+                  "  pm.expect(data.count).to.be.a(\"number\");",
+                  "  (data.items || []).forEach((row) => {",
+                  "    pm.expect(row).to.have.property(\"deducted\");",
+                  "    pm.expect(row).to.have.property(\"before\");",
+                  "    pm.expect(row).to.have.property(\"after\");",
+                  "    pm.expect(row).to.have.property(\"actor\");",
+                  "    pm.expect(row).to.have.property(\"reason\");",
+                  "    pm.expect(row).to.have.property(\"notes\");",
+                  "    pm.expect(row).to.have.property(\"businessDate\");",
+                  "    pm.expect(row.raw).to.eql(undefined);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Valid manual deduction",
+          "id": "basicdiet-ops-0043",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/subscriptions/{{manualDeductionSubscriptionId}}/manual-deduction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "subscriptions",
+                "{{manualDeductionSubscriptionId}}",
+                "manual-deduction"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"regularMeals\": 1,\n  \"premiumMeals\": 0,\n  \"reason\": \"postman_manual_deduction\",\n  \"notes\": \"Postman lifecycle test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Manual deduction succeeded\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.deducted.total).to.eql(1);",
+                  "  pm.expect(json.data.remaining.totalMeals).to.be.a(\"number\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deduct above remaining meals",
+          "id": "basicdiet-ops-0044",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/subscriptions/{{manualDeductionSubscriptionId}}/manual-deduction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "subscriptions",
+                "{{manualDeductionSubscriptionId}}",
+                "manual-deduction"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"regularMeals\": 999999,\n  \"premiumMeals\": 0,\n  \"reason\": \"postman_over_deduct\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INSUFFICIENT_REMAINING_MEALS\",\"INSUFFICIENT_REGULAR_MEALS\",\"DELIVERY_ALREADY_DEDUCTED_TODAY\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Non-admin manual deduction attempt",
+          "id": "basicdiet-ops-0045",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kitchenToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/subscriptions/{{manualDeductionSubscriptionId}}/manual-deduction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "subscriptions",
+                "{{manualDeductionSubscriptionId}}",
+                "manual-deduction"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"regularMeals\": 1,\n  \"premiumMeals\": 0,\n  \"reason\": \"postman_forbidden\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Non-admin is forbidden\", function () { pm.expect(pm.response.code).to.eql(403); pm.expect(pm.response.json().error?.code).to.eql(\"FORBIDDEN\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delivery same business date duplicate deduction",
+          "id": "basicdiet-ops-0046",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/subscriptions/{{manualDeductionSubscriptionId}}/manual-deduction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "subscriptions",
+                "{{manualDeductionSubscriptionId}}",
+                "manual-deduction"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"regularMeals\": 1,\n  \"premiumMeals\": 0,\n  \"reason\": \"postman_duplicate_delivery_day\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"DELIVERY_ALREADY_DEDUCTED_TODAY\",\"INSUFFICIENT_REMAINING_MEALS\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify queues after manual deduction",
+          "id": "basicdiet-ops-0047",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{dashboardToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"No [object Object] in response\", function () {",
+                  "  const text = pm.response.text();",
+                  "  pm.expect(text.includes(\"[object Object]\")).to.eql(false);",
+                  "});",
+                  "pm.test(\"V2 contract exists\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql(true);",
+                  "  pm.expect(json.data.contractVersion).to.include(\"v2\");",
+                  "});",
+                  "pm.test(\"Items have dashboard-ready shape\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    pm.expect(item).to.have.property(\"ids\");",
+                  "    pm.expect(item).to.have.property(\"customer\");",
+                  "    pm.expect(item).to.have.property(\"source\");",
+                  "    pm.expect(item).to.have.property(\"orderSummary\");",
+                  "    pm.expect(item).to.have.property(\"kitchen\");",
+                  "    pm.expect(item).to.have.property(\"fulfillment\");",
+                  "    pm.expect(item).to.have.property(\"payment\");",
+                  "    pm.expect(item).to.have.property(\"actions\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Raw payload is hidden by default\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => pm.expect(item.raw).to.eql(undefined));",
+                  "});",
+                  "pm.test(\"Payment invalid rows are not fulfillable\", function () {",
+                  "  const json = pm.response.json();",
+                  "  (json.data.items || []).forEach((item) => {",
+                  "    const payment = item.payment || {};",
+                  "    const allowed = item.actions?.allowed || [];",
+                  "    if (payment.pendingUnpaid || payment.superseded || payment.revisionMismatch) {",
+                  "      pm.expect(payment.canFulfill, JSON.stringify(item.ids || {})).to.eql(false);",
+                  "      pm.expect(allowed.includes(\"fulfill\"), JSON.stringify(item.ids || {})).to.eql(false);",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test(\"Kitchen meal display fields are safe\", function () {",
+                  "  const json = pm.response.json();",
+                  "  const items = json.data.items || [];",
+                  "  items.forEach((item) => {",
+                  "    (item.kitchen?.meals || []).forEach((meal) => {",
+                  "      pm.expect(meal.display?.titleAr || \"\").to.not.eql(\"\");",
+                  "      pm.expect(meal.display?.titleAr || \"\").to.not.include(\"[object Object]\");",
+                  "      pm.expect(meal.display?.preparationTextAr || \"\").to.not.eql(\"\");",
+                  "      pm.expect(meal.display?.preparationTextAr || \"\").to.not.include(\"[object Object]\");",
+                  "      if (meal.product?.displayName) pm.expect(meal.product.displayName).to.not.include(\"[object Object]\");",
+                  "      if (meal.protein?.displayName) pm.expect(meal.protein.displayName).to.not.include(\"[object Object]\");",
+                  "      if (meal.plan?.proteinGrams || item.plan?.proteinGrams) pm.expect(meal.protein).to.have.property(\"grams\");",
+                  "    });",
+                  "  });",
+                  "});",
+                  "pm.test(\"Manual deduction does not create fake queue item\", function () {",
+                  "  const subId = pm.environment.get(\"manualDeductionSubscriptionId\");",
+                  "  const items = pm.response.json().data?.items || [];",
+                  "  const fake = items.find(i => i.ids?.subscriptionId === subId && i.source?.type === \"manual_deduction\");",
+                  "  pm.expect(fake).to.eql(undefined);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Error Cases / Negative Tests",
+      "item": [
+        {
+          "name": "Missing token kitchen queue",
+          "id": "basicdiet-ops-0048",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/kitchen/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "kitchen",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Missing token rejected\", function () { pm.expect(pm.response.code).to.eql(401); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wrong role courier reads pickup queue",
+          "id": "basicdiet-ops-0049",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{courierToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/pickup/queue?date={{testDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "pickup",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{testDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"FORBIDDEN\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid entityId action",
+          "id": "basicdiet-ops-0050",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/prepare",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "prepare"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"subscription_day\",\n  \"entityId\": \"not-an-object-id\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Invalid entityId rejected\", function () { pm.expect(pm.response.code).to.eql(400); pm.expect(pm.response.json().error?.code).to.eql(\"INVALID_ENTITY_ID\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid entityType action",
+          "id": "basicdiet-ops-0051",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/prepare",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "prepare"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"not_real\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Invalid entityType rejected\", function () { pm.expect(pm.response.code).to.eql(400); pm.expect(pm.response.json().error?.code).to.eql(\"INVALID_ENTITY_TYPE\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid transition fulfill from current state",
+          "id": "basicdiet-ops-0052",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kitchenToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ops/actions/fulfill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ops",
+                "actions",
+                "fulfill"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entityType\": \"{{entityType}}\",\n  \"entityId\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_TRANSITION\",\"INVALID_ROLE_FOR_MODE\",\"ORDER_PAYMENT_REQUIRED\",\"INSUFFICIENT_CREDITS\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Out of range pickup request date",
+          "id": "basicdiet-ops-0053",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"2099-01-01\",\n  \"mealCount\": 1,\n  \"idempotencyKey\": \"postman-out-of-range\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INVALID_DATE\",\"SUBSCRIPTION_DATE_OUT_OF_RANGE\",\"SUBSCRIPTION_EXPIRED\",\"NOT_FOUND\",\"FORBIDDEN\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Insufficient credits pickup request",
+          "id": "basicdiet-ops-0054",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{pickupSubscriptionId}}/pickup-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subscriptions",
+                "{{pickupSubscriptionId}}",
+                "pickup-requests"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{testDate}}\",\n  \"mealCount\": 999999,\n  \"idempotencyKey\": \"postman-insufficient-{{testDate}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Response is JSON\", function () {",
+                  "  pm.response.to.have.header(\"Content-Type\");",
+                  "  pm.response.to.be.json;",
+                  "});",
+                  "pm.environment.set(\"lastResponseStatus\", String(pm.response.code));",
+                  "try {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set(\"lastErrorCode\", json?.error?.code || \"\");",
+                  "} catch (e) {",
+                  "  pm.environment.set(\"lastErrorCode\", \"NON_JSON\");",
+                  "}",
+                  "pm.test(\"Safe success or documented error\", function () {",
+                  "  const json = pm.response.json();",
+                  "  if (pm.response.code < 400) {",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "  } else {",
+                  "    pm.expect([\"INSUFFICIENT_CREDITS\",\"INVALID_DATE\",\"NOT_FOUND\",\"FORBIDDEN\"]).to.include(json?.error?.code);",
+                  "    pm.expect(json?.error?.message || json?.message || \"\").to.not.eql(\"\");",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

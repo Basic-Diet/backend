@@ -230,7 +230,7 @@ async function getRemainingMeals(subscriptionId) {
       });
 
       assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-      assert.strictEqual(res.body.data.status, "fulfilled");
+      assert.strictEqual(res.body.data.source.status, "fulfilled");
     });
 
     await test("fulfill requires ready_for_pickup status", async () => {
@@ -249,7 +249,7 @@ async function getRemainingMeals(subscriptionId) {
     await test("no_show consumes reserved credits without releasing balance", async () => {
       const { subscription, pickupRequest } = await seedReservedPickupRequest({ status: "ready_for_pickup", remainingMeals: 8 });
 
-      const res = await api.post("/api/dashboard/ops/actions/no_show").set(kitchenHeaders).send({
+      const res = await api.post("/api/dashboard/ops/actions/no_show").set(adminHeaders).send({
         entityType: "subscription_pickup_request",
         entityId: String(pickupRequest._id),
         payload: { reason: "customer_no_show" },
@@ -315,11 +315,11 @@ async function getRemainingMeals(subscriptionId) {
       const res = await api.get(`/api/dashboard/pickup/queue?date=${TODAY}`).set(kitchenHeaders);
 
       assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-      const row = res.body.data.items.find((item) => item.requestId === String(pickupRequest._id));
+      const row = res.body.data.items.find((item) => item.ids.pickupRequestId === String(pickupRequest._id));
       assert(row, "pickup request should appear in pickup queue");
-      assert.strictEqual(row.entityType, "subscription_pickup_request");
-      assert.deepStrictEqual(row.allowedActions.map((action) => action.id), ["start_preparation", "ready_for_pickup", "cancel", "no_show"]);
-      assert.strictEqual(row.pickupCode, null);
+      assert.strictEqual(row.ids.entityType, "subscription_pickup_request");
+      assert.deepStrictEqual(row.actions.allowed.map((action) => action.id), ["start_preparation", "ready_for_pickup", "cancel", "no_show"]);
+      assert.strictEqual(row.fulfillment.pickup.pickupCodeState, "not_issued");
     });
 
     await test("pickup queue does not mix legacy SubscriptionDay rows with request-level rows", async () => {
@@ -339,8 +339,8 @@ async function getRemainingMeals(subscriptionId) {
       const res = await api.get(`/api/dashboard/pickup/queue?date=${TODAY}`).set(kitchenHeaders);
 
       assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-      const requestRow = res.body.data.items.find((item) => item.requestId === String(pickupRequest._id));
-      const legacyDayRow = res.body.data.items.find((item) => item.entityType === "subscription_day" && item.entityId === String(day._id));
+      const requestRow = res.body.data.items.find((item) => item.ids.pickupRequestId === String(pickupRequest._id));
+      const legacyDayRow = res.body.data.items.find((item) => item.ids.entityType === "subscription_day" && item.ids.entityId === String(day._id));
       assert(requestRow, "request row should appear");
       assert.strictEqual(legacyDayRow, undefined);
     });

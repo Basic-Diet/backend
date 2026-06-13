@@ -56,7 +56,7 @@ async function main() {
   const dashboardUser = await DashboardUser.create({
     email: `${TEST_TAG}@example.com`,
     passwordHash: "not-used-in-this-test",
-    role: "kitchen",
+    role: "admin",
     isActive: true,
   });
   const user = await User.create({
@@ -93,10 +93,10 @@ async function main() {
   try {
     let res = await api.get("/api/dashboard/kitchen/queue?date=2026-05-10&method=delivery").set(auth(dashboardUser));
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    const row = res.body.data.items.find((item) => item.entityType === "subscription_day" && item.entityId === String(day._id));
+    const row = res.body.data.items.find((item) => item.ids.entityType === "subscription_day" && item.ids.entityId === String(day._id));
     assert(row, "subscription_day row should be present");
-    assert.deepStrictEqual(row.allowedActions.map((action) => action.id), ["prepare", "lock", "cancel"]);
-    assert(row.allowedActions.every((action) => action.endpoint && action.method === "POST"));
+    assert.deepStrictEqual(row.actions.allowed.map((action) => action.id), ["prepare", "lock", "cancel"]);
+    assert(row.actions.allowed.every((action) => action.endpoint && action.method === "POST"));
 
     res = await api.post("/api/dashboard/kitchen/actions/lock").set(auth(dashboardUser)).send({
       entityType: "subscription_day",
@@ -104,7 +104,7 @@ async function main() {
       payload: { reason: "regression test lock" },
     });
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    assert.strictEqual(res.body.data.status, "locked");
+    assert.strictEqual(res.body.data.source.status, "locked");
 
     res = await api.post("/api/dashboard/kitchen/actions/prepare").set(auth(dashboardUser)).send({
       entityType: "subscription_day",
@@ -112,9 +112,9 @@ async function main() {
       payload: { reason: "regression test prepare" },
     });
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    assert.strictEqual(res.body.data.status, "in_preparation");
-    assert.deepStrictEqual(res.body.data.allowedActions.map((action) => action.id), ["dispatch", "cancel"]);
-    assert(!res.body.data.allowedActions.some((action) => action.id === "set_ready"));
+    assert.strictEqual(res.body.data.source.status, "in_preparation");
+    assert.deepStrictEqual(res.body.data.actions.allowed.map((action) => action.id), ["dispatch", "cancel"]);
+    assert(!res.body.data.actions.allowed.some((action) => action.id === "set_ready"));
   } finally {
     await cleanup();
     await mongoose.disconnect();

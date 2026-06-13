@@ -1,0 +1,22 @@
+$kind: http-request
+name: Login
+method: POST
+url: '{{baseUrl}}/auth/login'
+order: 5000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "phoneE164": "{{testPhone}}",
+      "password": "testpassword"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 200 or 401", function() {
+        pm.expect([200, 401]).to.include(pm.response.code);
+      });

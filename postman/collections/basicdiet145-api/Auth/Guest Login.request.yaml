@@ -1,0 +1,23 @@
+$kind: http-request
+name: Guest Login
+method: POST
+url: '{{baseUrl}}/auth/guest'
+order: 6000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {}
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 200", function() {
+        pm.response.to.have.status(200);
+      });
+      pm.test("Response has token", function() {
+        const json = pm.response.json();
+        pm.expect(json.data || json.token || json.accessToken).to.exist;
+      });

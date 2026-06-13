@@ -19,6 +19,8 @@ const dateUtils = require("../src/utils/date");
 const TEST_TAG = `pickup-request-routes-${Date.now()}`;
 const TEST_PLAN_ID = new mongoose.Types.ObjectId();
 const TODAY = dateUtils.getTodayKSADate();
+const SUBSCRIPTION_START_DATE = dateUtils.addDaysToKSADateString(TODAY, -7);
+const SUBSCRIPTION_END_DATE = dateUtils.addDaysToKSADateString(TODAY, 30);
 
 const results = { passed: 0, failed: 0 };
 
@@ -55,7 +57,7 @@ async function connect() {
 async function cleanup() {
   const users = await User.find({ phone: { $regex: `^${TEST_TAG}` } }).select("_id").lean();
   const userIds = users.map((user) => user._id);
-  const subscriptions = await Subscription.find({ pickupLocationId: TEST_TAG }).select("_id").lean();
+  const subscriptions = await Subscription.find({ userId: { $in: userIds } }).select("_id").lean();
   const subscriptionIds = subscriptions.map((subscription) => subscription._id);
   await Promise.all([
     SubscriptionPickupRequest.deleteMany({ $or: [{ userId: { $in: userIds } }, { subscriptionId: { $in: subscriptionIds } }] }),
@@ -110,15 +112,15 @@ async function seedSubscriptionWithDay({
     userId: user._id,
     planId: TEST_PLAN_ID,
     status: "active",
-    startDate: new Date("2026-05-01T00:00:00Z"),
-    endDate: new Date("2026-06-01T00:00:00Z"),
-    validityEndDate: new Date("2026-06-01T00:00:00Z"),
+    startDate: new Date(`${SUBSCRIPTION_START_DATE}T00:00:00Z`),
+    endDate: new Date(`${SUBSCRIPTION_END_DATE}T00:00:00Z`),
+    validityEndDate: new Date(`${SUBSCRIPTION_END_DATE}T00:00:00Z`),
     totalMeals: remainingMeals,
     remainingMeals,
     selectedGrams: 200,
     selectedMealsPerDay: 1,
     deliveryMode,
-    pickupLocationId: TEST_TAG,
+    pickupLocationId: "main",
   });
 
   const day = await SubscriptionDay.create({

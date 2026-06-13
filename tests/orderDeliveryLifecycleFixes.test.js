@@ -234,7 +234,7 @@ async function cleanup() {
       const subscription = await createSubscription(user, { deliveryMode: "delivery" });
 
       const openCancelDay = await createDay(subscription, { date: "2026-05-21", status: "open" });
-      let res = await api.post("/api/dashboard/ops/actions/cancel").set(auth("kitchen")).send({
+      let res = await api.post("/api/dashboard/ops/actions/cancel").set(auth("admin")).send({
         entityId: String(openCancelDay._id),
         entityType: "subscription_day",
         payload: { reason: "stock_out" },
@@ -243,7 +243,7 @@ async function cleanup() {
       assert.strictEqual(res.body.data.status, "delivery_canceled");
 
       const lockedDay = await createDay(subscription, { date: "2026-05-22", status: "open" });
-      res = await api.post("/api/dashboard/ops/actions/lock").set(auth("kitchen")).send({
+      res = await api.post("/api/dashboard/ops/actions/lock").set(auth("admin")).send({
         entityId: String(lockedDay._id),
         entityType: "subscription_day",
       });
@@ -257,7 +257,7 @@ async function cleanup() {
       assert.strictEqual(res.body.data.status, "open");
 
       const flowDay = await createDay(subscription, { date: "2026-05-23", status: "open" });
-      res = await api.post("/api/dashboard/ops/actions/prepare").set(auth("kitchen")).send({
+      res = await api.post("/api/dashboard/ops/actions/prepare").set(auth("admin")).send({
         entityId: String(flowDay._id),
         entityType: "subscription_day",
       });
@@ -292,7 +292,7 @@ async function cleanup() {
         status: "open",
         pickupRequested: true,
       });
-      let res = await api.post("/api/dashboard/ops/actions/cancel").set(auth("kitchen")).send({
+      let res = await api.post("/api/dashboard/ops/actions/cancel").set(auth("admin")).send({
         entityId: String(openCancelDay._id),
         entityType: "subscription_day",
         payload: { reason: "customer_request" },
@@ -306,7 +306,7 @@ async function cleanup() {
         pickupRequested: true,
         pickupRequestedAt: new Date(),
       });
-      res = await api.post("/api/dashboard/ops/actions/prepare").set(auth("kitchen")).send({
+      res = await api.post("/api/dashboard/ops/actions/prepare").set(auth("admin")).send({
         entityId: String(flowDay._id),
         entityType: "subscription_day",
       });
@@ -321,7 +321,7 @@ async function cleanup() {
       const pickupCode = res.body.data.context.pickupCode;
       assert.match(pickupCode, /^\d{6}$/);
 
-      res = await api.get("/api/dashboard/pickup/queue?date=2026-05-25&method=pickup").set(auth("kitchen"));
+      res = await api.get("/api/dashboard/pickup/queue?date=2026-05-25&method=pickup&view=legacy").set(auth("kitchen"));
       expectStatus(res, 200, "pickup queue");
       const row = res.body.data.items.find((item) => item.entityId === String(flowDay._id));
       assert(row, "ready pickup day should be in queue");
@@ -352,7 +352,7 @@ async function cleanup() {
         pickupCode: "123456",
         pickupCodeIssuedAt: new Date(),
       });
-      res = await api.post("/api/dashboard/ops/actions/no_show").set(auth("kitchen")).send({
+      res = await api.post("/api/dashboard/ops/actions/no_show").set(auth("admin")).send({
         entityId: String(noShowDay._id),
         entityType: "subscription_day",
         payload: { reason: "customer_no_show" },
