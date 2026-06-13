@@ -18,6 +18,44 @@ const {
   serializeManualDeductionLog,
 } = require("../src/services/dashboard/manualSubscriptionDeductionService");
 
+function assertNoObjectObject(value, path = "root") {
+  if (typeof value === "string") {
+    assert(!value.includes("[object Object]"), `${path} contains [object Object]`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertNoObjectObject(entry, `${path}[${index}]`));
+    return;
+  }
+  if (value && typeof value === "object") {
+    Object.entries(value).forEach(([key, entry]) => assertNoObjectObject(entry, `${path}.${key}`));
+  }
+}
+
+function assertDisplayText(value, path) {
+  assert.strictEqual(typeof value, "string", `${path} should be a string`);
+  assert(value.trim() !== "", `${path} should not be empty`);
+  assert(!value.includes("[object Object]"), `${path} should not contain [object Object]`);
+}
+
+function assertKitchenDisplayFields(item) {
+  assertDisplayText(item.orderSummary.display.titleAr, "orderSummary.display.titleAr");
+  (item.actions.allowed || []).forEach((action, index) => {
+    assert(action.label && typeof action.label === "object", `actions.allowed[${index}].label should be localized`);
+    assertDisplayText(action.label.ar || action.label.en, `actions.allowed[${index}].label`);
+  });
+  item.kitchen.meals.forEach((meal, mealIndex) => {
+    assertDisplayText(meal.product.displayName, `kitchen.meals[${mealIndex}].product.displayName`);
+    if (meal.sandwich) assertDisplayText(meal.sandwich.displayName, `kitchen.meals[${mealIndex}].sandwich.displayName`);
+    assertDisplayText(meal.protein.displayName, `kitchen.meals[${mealIndex}].protein.displayName`);
+    meal.carbs.forEach((carb, carbIndex) => {
+      assertDisplayText(carb.displayName, `kitchen.meals[${mealIndex}].carbs[${carbIndex}].displayName`);
+    });
+    assertDisplayText(meal.display.titleAr, `kitchen.meals[${mealIndex}].display.titleAr`);
+    assertDisplayText(meal.display.preparationTextAr, `kitchen.meals[${mealIndex}].display.preparationTextAr`);
+  });
+}
+
 function run() {
   const subscription = {
     _id: "sub1",
@@ -229,6 +267,7 @@ function run() {
   assert(cleanItem.orderSummary.display.titleAr);
   assert(cleanItem.kitchen.meals[0].display.titleAr);
   assert(cleanItem.kitchen.meals[0].display.preparationTextAr);
+  assertKitchenDisplayFields(cleanItem);
 
   const rawResponse = normalizeKitchenQueueResponse({
     date: "2026-06-12",
@@ -406,6 +445,7 @@ function run() {
   assert.strictEqual(sandwichItem.orderSummary.itemCount, 2);
   assert.strictEqual(sandwichItem.kitchen.addons[0].name.ar, "شوربة");
   assert.strictEqual(sandwichItem.dataQuality.isComplete, true);
+  assertKitchenDisplayFields(sandwichItem);
 
   const missingResponse = normalizeKitchenQueueResponse({
     date: "2026-06-13",
@@ -429,6 +469,11 @@ function run() {
   assert(warningCodes.includes("MISSING_PRODUCT_NAME"));
   assert(warningCodes.includes("MISSING_PROTEIN_NAME"));
   assert(warningCodes.includes("MISSING_CARB_NAME"));
+  assertDisplayText(missingResponse.items[0].kitchen.meals[0].product.displayName, "fallback product.displayName");
+  assertDisplayText(missingResponse.items[0].kitchen.meals[0].sandwich.displayName, "fallback sandwich.displayName");
+  assertDisplayText(missingResponse.items[0].kitchen.meals[0].protein.displayName, "fallback protein.displayName");
+  assertDisplayText(missingResponse.items[0].kitchen.meals[0].carbs[0].displayName, "fallback carb.displayName");
+  assertNoObjectObject(missingResponse);
 
   const canceledResponse = normalizeKitchenQueueResponse({
     date: "2026-06-13",
@@ -442,6 +487,70 @@ function run() {
   assert.strictEqual(includedCanceled.items[0].source.lifecycleGroup, "archived");
   assert.strictEqual(includedCanceled.items[0].source.isActionable, false);
   assert(includedCanceled.items[0].dataQuality.warnings.some((warning) => warning.code === "CANCELED_EMPTY_ROW"));
+
+  const nestedNameResponse = normalizeKitchenQueueResponse({
+    date: "2026-06-13",
+    items: [{
+      entityId: "nestedNames",
+      entityType: "subscription_day",
+      subscriptionId: "sub1",
+      user: { id: "user1", name: "Sara", phone: "+966500000000" },
+      date: "2026-06-13",
+      status: "locked",
+      fulfillmentType: "branch_pickup",
+      plan: {
+        id: "plan1",
+        key: "nested_plan",
+        name: { title: { ar: "باقة", en: "Package" } },
+        proteinGrams: 100,
+        portionSize: "100g",
+        selectedMealsPerDay: 1,
+        totalMeals: 10,
+        remainingMeals: 8,
+        deliveryMode: "pickup",
+      },
+      kitchenDetails: {
+        mealSlots: [{
+          slotIndex: 1,
+          slotKey: "slot_1",
+          selectionType: "sandwich",
+          productId: "product1",
+          productKey: "nested_product",
+          productNameI18n: { name: { ar: "ساندويتش متداخل", en: "Nested Sandwich" } },
+          sandwichId: "product1",
+          sandwichKey: "nested_product",
+          sandwichNameI18n: { displayName: { ar: "ساندويتش متداخل", en: "Nested Sandwich" } },
+          proteinKey: "beef",
+          proteinNameI18n: { value: { ar: "لحم", en: "Beef" } },
+          proteinGrams: 100,
+          carbSelections: [{ carbId: "carb1", key: "rice", nameI18n: { label: { ar: "أرز", en: "Rice" } }, grams: 150 }],
+          sauce: [{ optionKey: "hot", name: { name: { ar: "حار", en: "Hot" } } }],
+          sides: [{ optionKey: "veg", name: { title: { ar: "خضار", en: "Vegetables" } } }],
+          selectedOptions: [{ optionKey: "extra", label: { value: { ar: "إضافي", en: "Extra" } } }],
+          quantity: 1,
+        }],
+        addons: [{ id: "addon1", key: "soup", nameI18n: { displayName: { ar: "شوربة", en: "Soup" } }, quantity: 1 }],
+      },
+      paymentValidity: paidValidity,
+      allowedActions: [{ id: "prepare", label: { name: { ar: "تحضير", en: "Prepare" } } }],
+    }],
+  });
+  const nestedItem = nestedNameResponse.items[0];
+  assertNoObjectObject(nestedNameResponse);
+  assert.strictEqual(nestedItem.subscription.plan.name.ar, "باقة");
+  assert.strictEqual(nestedItem.kitchen.meals[0].product.name.ar, "ساندويتش متداخل");
+  assert.strictEqual(nestedItem.kitchen.meals[0].product.displayName, "ساندويتش متداخل");
+  assert.strictEqual(nestedItem.kitchen.meals[0].protein.name.ar, "لحم");
+  assert.strictEqual(nestedItem.kitchen.meals[0].protein.displayName, "لحم");
+  assert.strictEqual(nestedItem.kitchen.meals[0].carbs[0].name.ar, "أرز");
+  assert.strictEqual(nestedItem.kitchen.meals[0].sauce[0].displayName, "حار");
+  assert.strictEqual(nestedItem.kitchen.meals[0].sides[0].displayName, "خضار");
+  assert.strictEqual(nestedItem.kitchen.meals[0].options[0].displayName, "إضافي");
+  assert.strictEqual(nestedItem.kitchen.addons[0].displayName, "شوربة");
+  assert.strictEqual(nestedItem.actions.allowed[0].label.ar, "تحضير");
+  assert.strictEqual(nestedItem.kitchen.meals[0].display.titleAr, "ساندويتش متداخل - 100g");
+  assert.strictEqual(nestedItem.kitchen.meals[0].display.preparationTextAr, "حضّر ساندويتش متداخل مع بروتين 100g");
+  assertKitchenDisplayFields(nestedItem);
 
   const deduction = serializeManualDeductionLog({
     _id: "log1",

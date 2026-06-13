@@ -79,19 +79,66 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function isScalar(value) {
+  return ["string", "number", "boolean"].includes(typeof value);
+}
+
+function scalarString(value) {
+  return isScalar(value) && String(value).trim() !== "" ? String(value) : "";
+}
+
 function isNonEmpty(value) {
-  return value !== undefined && value !== null && String(value).trim() !== "";
+  return scalarString(value) !== "";
+}
+
+function extractNameValue(value, depth = 0) {
+  if (depth > 6 || value === undefined || value === null) return null;
+  if (isScalar(value)) return scalarString(value);
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const extracted = extractNameValue(entry, depth + 1);
+      if (extracted) return extracted;
+    }
+    return null;
+  }
+  if (typeof value === "object") {
+    const arValue = extractNameValue(value.ar, depth + 1);
+    const enValue = extractNameValue(value.en, depth + 1);
+    if (arValue || enValue) {
+      return {
+        ar: (arValue && typeof arValue === "object" ? arValue.ar || arValue.en : arValue)
+          || (enValue && typeof enValue === "object" ? enValue.ar || enValue.en : enValue)
+          || "",
+        en: (enValue && typeof enValue === "object" ? enValue.en || enValue.ar : enValue)
+          || (arValue && typeof arValue === "object" ? arValue.en || arValue.ar : arValue)
+          || "",
+      };
+    }
+    for (const key of ["displayName", "name", "title", "label", "value", "text"]) {
+      const extracted = extractNameValue(value[key], depth + 1);
+      if (extracted) return extracted;
+    }
+  }
+  return null;
 }
 
 function nameObject(value, fallback = "") {
-  if (value && typeof value === "object" && (isNonEmpty(value.ar) || isNonEmpty(value.en))) {
+  const extracted = extractNameValue(value);
+  const fallbackExtracted = extractNameValue(fallback);
+  if (extracted && typeof extracted === "object") {
     return {
-      ar: String(value.ar || value.en || fallback || ""),
-      en: String(value.en || value.ar || fallback || ""),
+      ar: extracted.ar || extracted.en || scalarString(fallbackExtracted) || "",
+      en: extracted.en || extracted.ar || scalarString(fallbackExtracted) || "",
     };
   }
-  if (isNonEmpty(value)) return { ar: String(value), en: String(value) };
-  if (isNonEmpty(fallback)) return { ar: String(fallback), en: String(fallback) };
+  if (isNonEmpty(extracted)) return { ar: String(extracted), en: String(extracted) };
+  if (fallbackExtracted && typeof fallbackExtracted === "object") {
+    return {
+      ar: fallbackExtracted.ar || fallbackExtracted.en || "",
+      en: fallbackExtracted.en || fallbackExtracted.ar || "",
+    };
+  }
+  if (isNonEmpty(fallbackExtracted)) return { ar: String(fallbackExtracted), en: String(fallbackExtracted) };
   return { ar: "", en: "" };
 }
 
@@ -149,9 +196,7 @@ function buildActions(item, payment) {
   return {
     allowed: allowed.map((action) => ({
       ...action,
-      label: typeof (action && action.label) === "object"
-        ? action.label
-        : nameObject(action && action.label, action && action.id ? String(action.id) : ""),
+      label: nameObject(action && action.label, action && action.id ? String(action.id) : ""),
     })),
     disabled: [],
     canPrepare: Boolean(ids.has("prepare") && (!payment || payment.canPrepare !== false)),

@@ -10,15 +10,70 @@ function stringifyId(value) {
 function localizedName(value, lang = "en") {
   if (!value) return "";
   if (typeof value === "string") return value;
-  return pickLang(value, lang) || pickLang(value, "en") || pickLang(value, "ar") || "";
+  const extracted = extractNameValue(value);
+  if (!extracted) return "";
+  if (typeof extracted === "string") return extracted;
+  return pickLang(extracted, lang) || pickLang(extracted, "en") || pickLang(extracted, "ar") || "";
+}
+
+function isScalar(value) {
+  return ["string", "number", "boolean"].includes(typeof value);
+}
+
+function scalarString(value) {
+  return isScalar(value) && String(value).trim() !== "" ? String(value) : "";
+}
+
+function extractNameValue(value, depth = 0) {
+  if (depth > 6 || value === undefined || value === null) return null;
+  if (isScalar(value)) return scalarString(value);
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const extracted = extractNameValue(entry, depth + 1);
+      if (extracted) return extracted;
+    }
+    return null;
+  }
+  if (typeof value === "object") {
+    const arValue = extractNameValue(value.ar, depth + 1);
+    const enValue = extractNameValue(value.en, depth + 1);
+    if (arValue || enValue) {
+      return {
+        ar: (arValue && typeof arValue === "object" ? arValue.ar || arValue.en : arValue)
+          || (enValue && typeof enValue === "object" ? enValue.ar || enValue.en : enValue)
+          || "",
+        en: (enValue && typeof enValue === "object" ? enValue.en || enValue.ar : enValue)
+          || (arValue && typeof arValue === "object" ? arValue.en || arValue.ar : arValue)
+          || "",
+      };
+    }
+    for (const key of ["displayName", "name", "title", "label", "value", "text"]) {
+      const extracted = extractNameValue(value[key], depth + 1);
+      if (extracted) return extracted;
+    }
+  }
+  return null;
 }
 
 function localizedNameObject(value, fallback = "") {
-  if (!value) return { ar: fallback || "", en: fallback || "" };
-  if (typeof value === "string") return { ar: value, en: value };
-  const ar = value.ar || value.en || fallback || "";
-  const en = value.en || value.ar || fallback || "";
-  return { ar: String(ar || ""), en: String(en || "") };
+  const extracted = extractNameValue(value);
+  const fallbackExtracted = extractNameValue(fallback);
+  if (extracted && typeof extracted === "object") {
+    const fallbackText = typeof fallbackExtracted === "string" ? fallbackExtracted : "";
+    return {
+      ar: extracted.ar || extracted.en || fallbackText,
+      en: extracted.en || extracted.ar || fallbackText,
+    };
+  }
+  if (typeof extracted === "string" && extracted) return { ar: extracted, en: extracted };
+  if (fallbackExtracted && typeof fallbackExtracted === "object") {
+    return {
+      ar: fallbackExtracted.ar || fallbackExtracted.en || "",
+      en: fallbackExtracted.en || fallbackExtracted.ar || "",
+    };
+  }
+  if (typeof fallbackExtracted === "string" && fallbackExtracted) return { ar: fallbackExtracted, en: fallbackExtracted };
+  return { ar: "", en: "" };
 }
 
 function getFromMap(map, id) {
