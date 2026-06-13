@@ -1357,3 +1357,4 @@ optionGroup displayStyle parses correctly.
 nameI18n Arabic/English fallback works.
 empty imageUrl does not crash UI.
 ```
+    
