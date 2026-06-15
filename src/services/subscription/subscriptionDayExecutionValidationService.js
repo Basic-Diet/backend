@@ -109,7 +109,7 @@ function assertMealAssignmentsComplete({ subscription, day }) {
   };
 }
 
-function validateDayBeforeLockOrPrepare({ subscription, day, allowedStatuses = ["open"], allowQuantityOnlyPickup = false } = {}) {
+function validateDayBeforeLockOrPrepare({ subscription, day, allowedStatuses = ["open"], allowQuantityOnlyPickup = false, allowPendingAddons = false } = {}) {
   assertDayIsExecutable(day, allowedStatuses);
   if (!allowQuantityOnlyPickup) {
     assertMealAssignmentsComplete({ subscription, day });
@@ -122,7 +122,9 @@ function validateDayBeforeLockOrPrepare({ subscription, day, allowedStatuses = [
       genericPremiumWalletFlagEnabled: isPhase2GenericPremiumWalletEnabled(),
     }),
   });
-  assertNoPendingOneTimeAddonPayment({ day });
+  if (!allowPendingAddons) {
+    assertNoPendingOneTimeAddonPayment({ day });
+  }
   return day;
 }
 

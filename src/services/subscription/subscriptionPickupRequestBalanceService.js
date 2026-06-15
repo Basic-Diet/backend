@@ -16,6 +16,15 @@ function assertPositiveMealCount(mealCount) {
   }
 }
 
+function buildZeroMealResult(kind, pickupRequest) {
+  return {
+    [kind]: false,
+    zeroMealRequest: true,
+    pickupRequest,
+    mealCount: 0,
+  };
+}
+
 function withOptionalSession(options, session) {
   return session ? { ...options, session } : options;
 }
@@ -55,6 +64,14 @@ async function reserveSubscriptionMealsForPickupRequest({
   const pickupRequest = await findPickupRequestOrThrow(pickupRequestId, session);
   const requestMealCount = Number(pickupRequest.mealCount || 0);
   const resolvedMealCount = mealCount == null ? requestMealCount : Number(mealCount);
+  if (resolvedMealCount === 0 && requestMealCount === 0) {
+    if (!pickupRequest.creditsReserved) {
+      pickupRequest.creditsReserved = true;
+      pickupRequest.creditsReservedAt = pickupRequest.creditsReservedAt || new Date();
+      await pickupRequest.save(withOptionalSession({}, session));
+    }
+    return buildZeroMealResult("reserved", pickupRequest);
+  }
   assertPositiveMealCount(resolvedMealCount);
 
   if (requestMealCount !== resolvedMealCount) {
@@ -120,6 +137,14 @@ async function consumeReservedPickupMeals({
   session = null,
 } = {}) {
   const now = new Date();
+  const existing = await findPickupRequestOrThrow(pickupRequestId, session);
+  if (Number(existing.mealCount || 0) === 0) {
+    if (!existing.creditsConsumedAt && !existing.creditsReleasedAt) {
+      existing.creditsConsumedAt = now;
+      await existing.save(withOptionalSession({}, session));
+    }
+    return buildZeroMealResult("consumed", existing);
+  }
   const updatedPickupRequest = await SubscriptionPickupRequest.findOneAndUpdate(
     {
       _id: pickupRequestId,
@@ -169,6 +194,17 @@ async function releaseReservedPickupMeals({
   }
 
   const now = new Date();
+  const existing = await findPickupRequestOrThrow(pickupRequestId, session);
+  if (String(existing.subscriptionId) !== String(subscriptionId)) {
+    throw createServiceError("SUBSCRIPTION_MISMATCH", "Pickup request does not belong to subscription", 400);
+  }
+  if (Number(existing.mealCount || 0) === 0) {
+    if (!existing.creditsReleasedAt && !existing.creditsConsumedAt) {
+      existing.creditsReleasedAt = now;
+      await existing.save(withOptionalSession({}, session));
+    }
+    return buildZeroMealResult("released", existing);
+  }
   const releasedPickupRequest = await SubscriptionPickupRequest.findOneAndUpdate(
     {
       _id: pickupRequestId,

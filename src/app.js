@@ -134,7 +134,9 @@ function createApp() {
     const originalJson = res.json.bind(res);
     res.json = (payload) => {
       const normalized = normalizeTopLevelStatusField(payload, res.statusCode, req.originalUrl || req.path);
-      const sanitized = validateAndFixResponse(normalized);
+      const requestUrl = req.originalUrl || req.path || "";
+      const shouldPreserveExactCopy = /^\/api\/subscriptions\/[^/]+\/pickup-availability(?:\?|$)/.test(requestUrl);
+      const sanitized = shouldPreserveExactCopy ? normalized : validateAndFixResponse(normalized);
       try {
         JSON.stringify(sanitized);
         return originalJson(sanitized);

@@ -2610,10 +2610,10 @@ async function preparePickup(req, res) {
 function resolvePickupRequestErrorStatus(err) {
   if (err && typeof err.status === "number") return err.status;
   const code = err && err.code ? err.code : "INTERNAL";
-  if (["INVALID_DELIVERY_MODE", "INVALID_DATE", "INVALID_MEAL_COUNT", "SUBSCRIPTION_MISMATCH", "MEAL_COUNT_MISMATCH"].includes(code)) {
+  if (["INVALID_DELIVERY_MODE", "INVALID_DATE", "INVALID_MEAL_COUNT", "INVALID_SELECTED_PICKUP_ITEM_IDS", "DUPLICATE_SELECTED_PICKUP_ITEM_IDS", "SUBSCRIPTION_MISMATCH", "MEAL_COUNT_MISMATCH"].includes(code)) {
     return 400;
   }
-  if (["INSUFFICIENT_CREDITS", "SUB_INACTIVE", "SUB_EXPIRED", "PLANNING_INCOMPLETE", "PLANNING_UNCONFIRMED", "PREMIUM_OVERAGE_PAYMENT_REQUIRED", "PREMIUM_PAYMENT_REQUIRED", "ONE_TIME_ADDON_PAYMENT_REQUIRED", "ADDON_PAYMENT_REQUIRED", "PENDING_ADDON_PAYMENT"].includes(code)) {
+  if (["INSUFFICIENT_CREDITS", "SUB_INACTIVE", "SUB_EXPIRED", "PLANNING_INCOMPLETE", "PLANNING_UNCONFIRMED", "PREMIUM_OVERAGE_PAYMENT_REQUIRED", "PREMIUM_PAYMENT_REQUIRED", "ONE_TIME_ADDON_PAYMENT_REQUIRED", "ADDON_PAYMENT_REQUIRED", "PENDING_ADDON_PAYMENT", "PICKUP_ITEM_NOT_FOUND", "PICKUP_ITEM_UNAVAILABLE"].includes(code)) {
     return 422;
   }
   if (code === "NOT_FOUND" || code === "PICKUP_REQUEST_NOT_FOUND") return 404;
@@ -2624,13 +2624,14 @@ function resolvePickupRequestErrorStatus(err) {
 async function createPickupRequest(req, res) {
   try {
     const { id } = req.params;
-    const { date, mealCount, selectedMealSlotIds, idempotencyKey } = req.body || {};
+    const { date, mealCount, selectedMealSlotIds, selectedPickupItemIds, idempotencyKey } = req.body || {};
     const result = await createSubscriptionPickupRequestForClient({
       userId: req.userId,
       subscriptionId: id,
       date,
       mealCount,
       selectedMealSlotIds,
+      selectedPickupItemIds,
       idempotencyKey,
       lang: getRequestLang(req),
     });
@@ -2657,6 +2658,8 @@ async function getPickupAvailability(req, res) {
       userId: req.userId,
       subscriptionId: id,
       date,
+      includeUnavailable: ["true", "1", true].includes(req.query && req.query.includeUnavailable),
+      includeHistory: ["true", "1", true].includes(req.query && req.query.includeHistory),
     });
     return res.status(200).json({ status: true, data });
   } catch (err) {

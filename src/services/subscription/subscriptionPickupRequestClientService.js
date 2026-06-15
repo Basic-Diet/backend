@@ -23,12 +23,15 @@ const {
   assertSubscriptionActiveAndOwned,
 } = require("./subscriptionDateRangeHelperService");
 const {
+  assertSelectedPickupItemsAvailable,
   assertSelectedSlotsAvailableForPickup,
   buildAvailabilityFromDay,
   buildPickupRequestPayloadHash,
   enrichDayMealSlotsWithResolvedSnapshots,
+  filterAvailabilityForVisibility,
   findBlockingPickupRequests,
   normalizeSelectedMealSlotIds,
+  normalizeSelectedPickupItemIds,
   resolveCanonicalPaymentReason,
 } = require("./subscriptionPickupSlotService");
 
@@ -112,30 +115,40 @@ function buildPickupAvailabilitySummary({ subscription = {}, availability = {} }
   const selectableItems = Array.isArray(availability.pickupItems)
     ? availability.pickupItems.filter((item) => item && item.selectionMode === "independent")
     : [];
-  const fallbackSlots = Array.isArray(availability.slots) ? availability.slots : [];
-  const countSource = selectableItems.length ? selectableItems : fallbackSlots;
-  const availableCount = countSource.filter((item) => {
-    if (!item) return false;
-    if (item.availability) return Boolean(item.availability.available && item.availability.canSelect);
-    return Boolean(item.available);
-  }).length;
-  const unavailableCount = countSource.length - availableCount;
+  const stateCount = (state) => selectableItems.filter((item) => item && item.availability && item.availability.state === state).length;
+  const availableSelectableCount = selectableItems.filter((item) => item && item.availability && item.availability.available && item.availability.canSelect).length;
+  const paymentBlockedCount = stateCount("payment_required");
+  const reservedCount = stateCount("reserved");
+  const fulfilledCount = stateCount("fulfilled");
+  const noShowCount = stateCount("no_show");
+  const availableByType = (type) => selectableItems.filter((item) => item && item.itemType === type && item.availability && item.availability.available && item.availability.canSelect).length;
   const appendLimit = Number(subscription.remainingMeals || 0);
   const canAppendMeals = appendLimit > 0;
   return {
-    availableCount,
-    unavailableCount,
-    canCreatePickupRequest: availableCount > 0,
+    availableCount: availableSelectableCount,
+    unavailableCount: selectableItems.length - availableSelectableCount,
+    availableSelectableCount,
+    paymentBlockedCount,
+    reservedCount,
+    fulfilledCount,
+    noShowCount,
+    hiddenUnavailableCount: Number(availability.hiddenUnavailableCount || 0),
+    availableMealSlotCount: availableByType("meal") + availableByType("premium_meal"),
+    availableAddonCount: availableByType("addon"),
+    availableSaladCount: availableByType("large_salad"),
+    availableProteinExtraCount: availableByType("protein_extra"),
+    availableSandwichCount: availableByType("sandwich"),
+    canCreatePickupRequest: availableSelectableCount > 0,
     canAppendMeals,
     appendLimit,
-    titleAr: availableCount > 0 ? "وجبات متاحة للاستلام" : "لا توجد وجبات متاحة للاستلام",
-    titleEn: availableCount > 0 ? "Meals available for pickup" : "No meals available for pickup",
-    emptyTextAr: availableCount === 0 && canAppendMeals
-      ? "لا توجد وجبات متاحة للاستلام الآن. يمكنك إضافة وجبات جديدة لهذا اليوم من رصيد اشتراكك."
-      : null,
-    emptyTextEn: availableCount === 0 && canAppendMeals
-      ? "No meals are available for pickup now. You can add new meals for this day from your subscription balance."
-      : null,
+    titleAr: availableSelectableCount > 0 ? "عناصر متاحة للاستلام" : "لا توجد عناصر متاحة للاستلام",
+    titleEn: availableSelectableCount > 0 ? "Items available for pickup" : "No items available for pickup",
+    emptyTextAr: availableSelectableCount === 0 && canAppendMeals
+      ? "لا توجد عناصر متاحة للاستلام الآن. يمكنك إضافة عناصر جديدة لهذا اليوم من رصيد اشتراكك."
+      : "",
+    emptyTextEn: availableSelectableCount === 0 && canAppendMeals
+      ? "No items are available for pickup now. You can add new items for this day from your subscription balance."
+      : "",
   };
 }
 
@@ -143,6 +156,10 @@ function addSetValue(set, value) {
   if (value === undefined || value === null) return;
   const raw = String(value).trim();
   if (raw) set.add(raw);
+}
+
+function dedupeLocal(values = []) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))].sort();
 }
 
 function isObjectIdString(value) {
@@ -265,9 +282,9 @@ async function loadPickupAvailabilityCatalogMaps(day, { session = null } = {}) {
   return maps;
 }
 
-function assertValidMealCount(mealCount) {
-  if (!Number.isInteger(mealCount) || mealCount <= 0) {
-    throw createServiceError("INVALID_MEAL_COUNT", "mealCount must be a positive integer", 400);
+function assertValidMealCount(mealCount, { allowZero = false } = {}) {
+  if (!Number.isInteger(mealCount) || mealCount < (allowZero ? 0 : 1)) {
+    throw createServiceError("INVALID_MEAL_COUNT", allowZero ? "mealCount must be a non-negative integer" : "mealCount must be a positive integer", 400);
   }
 }
 
@@ -284,15 +301,33 @@ function buildPickupRequestSnapshot(day, catalogMaps = {}) {
   };
 }
 
-function buildSelectedPickupRequestSnapshot(day, selectedMealSlotIds, catalogMaps = {}) {
+function buildSelectedPickupRequestSnapshot(day, selectedMealSlotIds, catalogMaps = {}, selectedPickupItems = []) {
   const ids = new Set(normalizeSelectedMealSlotIds(selectedMealSlotIds));
+  const selectedAddonCountsBySourceId = (Array.isArray(selectedPickupItems) ? selectedPickupItems : [])
+    .filter((item) => item && item.itemType === "addon")
+    .reduce((map, item) => {
+      const key = item.sourceId ? String(item.sourceId) : null;
+      if (!key) return map;
+      map.set(key, Number(map.get(key) || 0) + 1);
+      return map;
+    }, new Map());
   const base = buildPickupRequestSnapshot(day, catalogMaps);
   return {
     ...base,
     mealSlots: Array.isArray(base.mealSlots)
       ? base.mealSlots.filter((slot) => ids.has(String(slot.slotKey || slot.slotIndex || "")))
       : [],
+    addons: Array.isArray(base.addons)
+      ? base.addons
+        .filter((addon) => selectedAddonCountsBySourceId.has(String(addon.addonId || addon.id || addon._id || "")))
+        .map((addon) => ({
+          ...addon,
+          quantity: selectedAddonCountsBySourceId.get(String(addon.addonId || addon.id || addon._id || "")) || 1,
+        }))
+      : [],
     selectedMealSlotIds: [...ids],
+    selectedPickupItemIds: selectedPickupItems.map((item) => item.itemId),
+    selectedPickupItems,
   };
 }
 
@@ -325,6 +360,8 @@ function mapSubscriptionPickupRequestStatus(pickupRequest, { idempotent = false,
     date: pickupRequest.date,
     mealCount: Number(pickupRequest.mealCount || 0),
     selectedMealSlotIds: Array.isArray(pickupRequest.selectedMealSlotIds) ? pickupRequest.selectedMealSlotIds : [],
+    selectedPickupItemIds: Array.isArray(pickupRequest.selectedPickupItemIds) ? pickupRequest.selectedPickupItemIds : [],
+    selectedPickupItems: Array.isArray(pickupRequest.selectedPickupItems) ? pickupRequest.selectedPickupItems : [],
     selectionMode: pickupRequest.selectionMode || "legacy_meal_count",
     currentStep: copy.currentStep,
     status,
@@ -369,6 +406,8 @@ async function createPickupRequestDocument({
   date,
   mealCount,
   selectedMealSlotIds = [],
+  selectedPickupItemIds = [],
+  selectedPickupItems = [],
   requestPayloadHash = null,
   selectionMode = "legacy_meal_count",
   idempotencyKey,
@@ -382,12 +421,16 @@ async function createPickupRequestDocument({
     date,
     mealCount,
     selectedMealSlotIds,
+    selectedPickupItemIds,
+    selectedPickupItems,
     requestPayloadHash,
     selectionMode,
     status: "locked",
     idempotencyKey: idempotencyKey || null,
-    snapshot: selectionMode === "slot_ids"
-      ? buildSelectedPickupRequestSnapshot(day, selectedMealSlotIds, catalogMaps)
+    creditsReserved: Number(mealCount || 0) === 0,
+    creditsReservedAt: Number(mealCount || 0) === 0 ? new Date() : null,
+    snapshot: selectionMode === "slot_ids" || selectionMode === "pickup_item_ids"
+      ? buildSelectedPickupRequestSnapshot(day, selectedMealSlotIds, catalogMaps, selectedPickupItems)
       : buildPickupRequestSnapshot(day, catalogMaps),
   };
 
@@ -404,6 +447,7 @@ async function createSubscriptionPickupRequestForClient({
   date,
   mealCount,
   selectedMealSlotIds,
+  selectedPickupItemIds,
   idempotencyKey = null,
   lang = "en",
   session = null,
@@ -411,9 +455,14 @@ async function createSubscriptionPickupRequestForClient({
   const normalizedSelectedMealSlotIds = selectedMealSlotIds !== undefined
     ? normalizeSelectedMealSlotIds(selectedMealSlotIds)
     : [];
+  const normalizedSelectedPickupItemIds = selectedPickupItemIds !== undefined
+    ? normalizeSelectedPickupItemIds(selectedPickupItemIds)
+    : [];
+  const explicitPickupItemIds = dedupeLocal([...normalizedSelectedPickupItemIds, ...normalizedSelectedMealSlotIds]);
+  const usesItemSelection = normalizedSelectedPickupItemIds.length > 0;
   const usesSlotSelection = normalizedSelectedMealSlotIds.length > 0;
-  const normalizedMealCount = usesSlotSelection ? normalizedSelectedMealSlotIds.length : Number(mealCount);
-  assertValidMealCount(normalizedMealCount);
+  let normalizedMealCount = usesItemSelection ? 0 : (usesSlotSelection ? normalizedSelectedMealSlotIds.length : Number(mealCount));
+  assertValidMealCount(normalizedMealCount, { allowZero: usesItemSelection });
 
   const normalizedIdempotencyKey = idempotencyKey ? String(idempotencyKey).trim() : null;
 
@@ -459,6 +508,7 @@ async function createSubscriptionPickupRequestForClient({
     date,
     mealCount: normalizedMealCount,
     selectedMealSlotIds: normalizedSelectedMealSlotIds,
+    selectedPickupItemIds: explicitPickupItemIds,
   });
   if (existing) {
     if (existing.requestPayloadHash && existing.requestPayloadHash !== requestPayloadHash) {
@@ -482,18 +532,38 @@ async function createSubscriptionPickupRequestForClient({
       day,
       allowedStatuses: PICKUP_REQUEST_ALLOWED_DAY_STATUSES,
       allowQuantityOnlyPickup: true,
+      allowPendingAddons: true,
     });
   }
 
   assertDateInsideSubscriptionRange({ subscription, date });
 
-  if (usesSlotSelection) {
-    await assertSelectedSlotsAvailableForPickup({
+  let selectedPickupItems = [];
+  let finalSelectedPickupItemIds = explicitPickupItemIds;
+  let finalSelectedMealSlotIds = normalizedSelectedMealSlotIds;
+  if (usesItemSelection) {
+    const selection = await assertSelectedPickupItemsAvailable({
+      subscriptionId: subscription._id,
+      day,
+      selectedPickupItemIds: explicitPickupItemIds,
+      session,
+      subscription,
+      catalogMaps,
+    });
+    selectedPickupItems = selection.selectedPickupItems;
+    finalSelectedPickupItemIds = selection.selectedPickupItemIds;
+    finalSelectedMealSlotIds = dedupeLocal([...normalizedSelectedMealSlotIds, ...selection.selectedMealSlotIds]);
+    normalizedMealCount = selection.mealCreditCount;
+  } else if (usesSlotSelection) {
+    const selection = await assertSelectedSlotsAvailableForPickup({
       subscriptionId: subscription._id,
       day,
       selectedMealSlotIds: normalizedSelectedMealSlotIds,
       session,
     });
+    const pickupItemById = new Map((selection.availability.pickupItems || []).map((item) => [item.itemId, item]));
+    selectedPickupItems = normalizedSelectedMealSlotIds.map((id) => pickupItemById.get(id)).filter(Boolean);
+    finalSelectedPickupItemIds = normalizedSelectedMealSlotIds;
   } else if (day && Array.isArray(day.mealSlots) && day.mealSlots.length > 0) {
     const pickupRequests = await findBlockingPickupRequests({ subscriptionId: subscription._id, date, session });
     const availability = buildAvailabilityFromDay({ day, pickupRequests, subscription, catalogMaps });
@@ -520,9 +590,11 @@ async function createSubscriptionPickupRequestForClient({
       day,
       date,
       mealCount: normalizedMealCount,
-      selectedMealSlotIds: normalizedSelectedMealSlotIds,
+      selectedMealSlotIds: finalSelectedMealSlotIds,
+      selectedPickupItemIds: finalSelectedPickupItemIds,
+      selectedPickupItems,
       requestPayloadHash,
-      selectionMode: usesSlotSelection ? "slot_ids" : "legacy_meal_count",
+      selectionMode: usesItemSelection ? "pickup_item_ids" : (usesSlotSelection ? "slot_ids" : "legacy_meal_count"),
       idempotencyKey: normalizedIdempotencyKey,
       catalogMaps,
       session,
@@ -550,13 +622,15 @@ async function createSubscriptionPickupRequestForClient({
   }
 
   try {
-    const reservation = await reserveSubscriptionMealsForPickupRequest({
-      subscriptionId: subscription._id,
-      pickupRequestId: pickupRequest._id,
-      mealCount: normalizedMealCount,
-      session,
-    });
-    pickupRequest = reservation.pickupRequest;
+    if (normalizedMealCount > 0) {
+      const reservation = await reserveSubscriptionMealsForPickupRequest({
+        subscriptionId: subscription._id,
+        pickupRequestId: pickupRequest._id,
+        mealCount: normalizedMealCount,
+        session,
+      });
+      pickupRequest = reservation.pickupRequest;
+    }
   } catch (err) {
     await SubscriptionPickupRequest.deleteOne(
       { _id: pickupRequest._id, creditsReserved: { $ne: true } },
@@ -576,6 +650,8 @@ async function getPickupAvailabilityForClient({
   userId,
   subscriptionId,
   date,
+  includeUnavailable = false,
+  includeHistory = false,
   session = null,
 } = {}) {
   const subscriptionQuery = Subscription.findById(subscriptionId).populate("planId");
@@ -599,12 +675,14 @@ async function getPickupAvailabilityForClient({
   const day = await dayQuery.lean();
   const pickupRequests = await findBlockingPickupRequests({ subscriptionId: subscription._id, date, session });
   const catalogMaps = day ? await loadPickupAvailabilityCatalogMaps(day, { session }) : {};
-  const availability = buildAvailabilityFromDay({
+  const fullAvailability = buildAvailabilityFromDay({
     day,
     pickupRequests,
     subscription,
     catalogMaps,
   });
+  const availability = filterAvailabilityForVisibility(fullAvailability, { includeUnavailable, includeHistory });
+  availability.hiddenUnavailableCount = Math.max(0, (fullAvailability.pickupItems || []).length - (availability.pickupItems || []).length);
   const wallet = buildPickupAvailabilityWallet(subscription, availability);
   const summary = buildPickupAvailabilitySummary({ subscription, availability });
   return {
