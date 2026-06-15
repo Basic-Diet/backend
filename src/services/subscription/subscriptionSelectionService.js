@@ -4,7 +4,13 @@ const SubscriptionDay = require("../../models/SubscriptionDay");
 const dateUtils = require("../../utils/date");
 const { getRestaurantBusinessDate } = require("../restaurantHoursService");
 const { resolveMealsPerDay, applyDayWalletSelections } = require("../../utils/subscription/subscriptionDaySelectionSync");
-const { getMealPlannerRules, mapPaymentRequirement, buildMealSlotDraft } = require("./mealSlotPlannerService");
+const {
+  getMealPlannerRules,
+  mapPaymentRequirement,
+  buildMealSlotDraft,
+  recomputePlannerMetaFromSlots,
+  projectMaterializedAndLegacyFromSlots,
+} = require("./mealSlotPlannerService");
 const { applyCanonicalDraftPlanningToDay } = require("./subscriptionDayPlanningService");
 const {
   isCanonicalPlannerRequest,
@@ -476,7 +482,33 @@ async function validateSelectionDateRangeOrThrow(date, sub, endDateOverride) {
   }
 }
 
-async function performDaySelectionUpdate({ userId, subscriptionId, date, selections = [], premiumSelections = [], mealSlots, contractVersion, requestedOneTimeAddonIds, runtime }) {
+function clonePlain(value) {
+  return JSON.parse(JSON.stringify(value || null));
+}
+
+function isPickupAppendAllowedForExistingDay(subscription, day) {
+  if (!subscription || subscription.deliveryMode !== "pickup" || !day) return false;
+  if (["skipped", "frozen"].includes(String(day.status || "open"))) return false;
+  return true;
+}
+
+function buildAppendMealSlots(existingDay, appendMealSlots = []) {
+  const existingSlots = Array.isArray(existingDay && existingDay.mealSlots)
+    ? clonePlain(existingDay.mealSlots)
+    : [];
+  const maxSlotIndex = existingSlots.reduce((max, slot) => Math.max(max, Number(slot && slot.slotIndex || 0)), 0);
+  const appendedSlots = appendMealSlots.map((slot, index) => {
+    const slotIndex = maxSlotIndex + index + 1;
+    return {
+      ...clonePlain(slot),
+      slotIndex,
+      slotKey: `slot_${slotIndex}`,
+    };
+  });
+  return existingSlots.concat(appendedSlots);
+}
+
+async function performDaySelectionUpdate({ userId, subscriptionId, date, selections = [], premiumSelections = [], mealSlots, contractVersion, requestedOneTimeAddonIds, runtime, appendOnly = false }) {
   const totalSelected = (selections || []).length + (premiumSelections || []).length;
 
   // 1. Fetch context (Lean)
@@ -495,12 +527,15 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
   if (totalSelected > mealsPerDayLimit) throw { status: 400, code: "DAILY_CAP", message: "Selections exceed meals per day" };
 
   const existingDay = await SubscriptionDay.findOne({ subscriptionId: canonicalSubscriptionId, date }).lean();
-  await assertSubscriptionDayModifiable({
-    subscription: subForDraft,
-    day: existingDay,
-    date,
-    getBusinessDateFn: getRestaurantBusinessDate,
-  });
+  const allowAppendToConfirmedPickup = appendOnly && isPickupAppendAllowedForExistingDay(subForDraft, existingDay);
+  if (!allowAppendToConfirmedPickup) {
+    await assertSubscriptionDayModifiable({
+      subscription: subForDraft,
+      day: existingDay,
+      date,
+      getBusinessDateFn: getRestaurantBusinessDate,
+    });
+  }
   if (!Array.isArray(mealSlots)) {
     throw {
       status: 422,
@@ -526,10 +561,17 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
     const hasSuperseded = hasSupersededPayment(existingDay);
     
     // Only lock if not pending/unpaid and not superseded
-    if (!hasPendingPayment && !hasSuperseded) {
+    if (!hasPendingPayment && !hasSuperseded && !allowAppendToConfirmedPickup) {
       if (existingDay.status !== "open") throw { status: 409, code: "LOCKED", message: "Day is locked" };
       if (existingDay.plannerState === "confirmed") throw { status: 409, code: "LOCKED", message: "Planner is already confirmed for this day" };
     }
+  }
+  if (appendOnly) {
+    if (!existingDay) throw { status: 404, code: "DAY_NOT_FOUND", message: "Day not found" };
+    if (!allowAppendToConfirmedPickup && existingDay.plannerState === "confirmed") {
+      throw { status: 409, code: "LOCKED", message: "Planner is already confirmed for this day" };
+    }
+    mealSlots = buildAppendMealSlots(existingDay, mealSlots);
   }
 
   // 2. Build Draft & Reconcile Addons (In-Memory)
@@ -558,6 +600,38 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
       slotErrors: draft.slotErrors,
       rules: getMealPlannerRules()
     };
+  }
+
+  if (appendOnly) {
+    const preservedExistingSlots = Array.isArray(existingDay && existingDay.mealSlots)
+      ? clonePlain(existingDay.mealSlots)
+      : [];
+    const appendedProcessedSlots = draft.processedSlots.slice(preservedExistingSlots.length);
+    draft.processedSlots = preservedExistingSlots.concat(appendedProcessedSlots);
+    const recomputed = recomputePlannerMetaFromSlots({
+      mealSlots: draft.processedSlots,
+      requiredSlotCount: mealsPerDayLimit,
+      maxSlotCount: planningLimits.maxSlotCount,
+    });
+    if (Array.isArray(recomputed.slotErrors) && recomputed.slotErrors.length > 0) {
+      throw {
+        status: 422,
+        code: "INVALID_MEAL_PLAN",
+        message: "Meal planner validation failed",
+        valid: false,
+        slotErrors: recomputed.slotErrors,
+        rules: getMealPlannerRules(),
+      };
+    }
+    draft.plannerMeta = recomputed.plannerMeta;
+    const projection = projectMaterializedAndLegacyFromSlots({
+      processedSlots: draft.processedSlots,
+      now: new Date(),
+    });
+    draft.materializedMeals = projection.materializedMeals;
+    draft.selections = projection.selections;
+    draft.premiumUpgradeSelections = projection.premiumSelections;
+    draft.baseMealSlots = projection.baseMealSlots;
   }
 
   {
@@ -620,7 +694,9 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
       mealSlots: draft.processedSlots,
       plannerMeta: draft.plannerMeta,
       plannerVersion: "v1",
-      plannerState: "draft",
+      plannerState: appendOnly && existingDay && existingDay.plannerState === "confirmed" && !derivedDraftState.paymentRequirement.requiresPayment
+        ? "confirmed"
+        : "draft",
       plannerRevisionHash: derivedDraftState.plannerRevisionHash,
       premiumExtraPayment: derivedDraftState.premiumExtraPayment,
       materializedMeals: draft.materializedMeals,
@@ -795,6 +871,8 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
     }
     await subInSession.save({ session });
 
+    const finalCommercialState = buildDayCommercialState(day.toObject ? day.toObject() : day);
+
     await session.commitTransaction();
     session.endSession();
     return {
@@ -802,11 +880,11 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
       day,
       idempotent: false,
       plannerRevisionHash: day.plannerRevisionHash,
-      premiumSummary: day.premiumSummary,
-      addonSummary: buildDayCommercialState(day).addonSummary,
+      premiumSummary: finalCommercialState.premiumSummary,
+      addonSummary: finalCommercialState.addonSummary,
       premiumExtraPayment: day.premiumExtraPayment,
-      paymentRequirement: day.paymentRequirement,
-      commercialState: day.commercialState,
+      paymentRequirement: finalCommercialState.paymentRequirement,
+      commercialState: finalCommercialState.commercialState,
     };
   } catch (err) {
     if (session.inTransaction()) await session.abortTransaction();

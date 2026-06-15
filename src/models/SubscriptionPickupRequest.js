@@ -40,6 +40,16 @@ const SubscriptionPickupRequestSchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
+    selectedMealSlotIds: {
+      type: [String],
+      default: undefined,
+    },
+    requestPayloadHash: { type: String, trim: true, default: null },
+    selectionMode: {
+      type: String,
+      enum: ["slot_ids", "legacy_meal_count"],
+      default: "legacy_meal_count",
+    },
     status: {
       type: String,
       enum: SUBSCRIPTION_PICKUP_REQUEST_STATUSES,

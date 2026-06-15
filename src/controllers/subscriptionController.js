@@ -174,6 +174,7 @@ const {
 } = require("../services/subscription/subscriptionPickupClientService");
 const {
   createSubscriptionPickupRequestForClient,
+  getPickupAvailabilityForClient,
   getSubscriptionPickupRequestStatusForClient,
   listSubscriptionPickupRequestsForClient,
 } = require("../services/subscription/subscriptionPickupRequestClientService");
@@ -193,6 +194,7 @@ const {
   unfreezeSubscriptionForClient,
 } = require("../services/subscription/subscriptionFreezeClientService");
 const {
+  appendDayMealsForClient,
   confirmDayPlanningForClient,
   updateDaySelectionForClient,
   validateDaySelectionForClient,
@@ -2298,6 +2300,34 @@ async function updateDaySelection(req, res, runtimeOverrides = null) {
   return res.status(result.status).json(payload);
 }
 
+async function appendDayMeals(req, res, runtimeOverrides = null) {
+  const runtime = runtimeOverrides ? { ...sliceP2S1DefaultRuntime, ...runtimeOverrides } : sliceP2S1DefaultRuntime;
+  const { id, date } = req.params;
+
+  try {
+    validateObjectId(id, "subscriptionId");
+  } catch (err) {
+    return errorResponse(res, err.status, err.code, err.message);
+  }
+  const result = await appendDayMealsForClient({
+    subscriptionId: id,
+    date,
+    body: req.body || {},
+    userId: req.userId,
+    lang: getRequestLang(req),
+    runtime,
+    writeLogSafelyFn: writeLogSafely,
+    loadWalletCatalogMapsSafelyFn: loadWalletCatalogMapsSafely,
+    logWalletIntegrityErrorFn: logWalletIntegrityError,
+  });
+  if (!result.ok) {
+    return errorResponse(res, result.status, result.code, result.message, result.details);
+  }
+  const payload = { status: true, data: result.data };
+  if (result.idempotent) payload.idempotent = true;
+  return res.status(result.status).json(payload);
+}
+
 async function validateDaySelection(req, res) {
   const { id } = req.params;
   const date = resolveRequestedDate(req);
@@ -2583,7 +2613,7 @@ function resolvePickupRequestErrorStatus(err) {
   if (["INVALID_DELIVERY_MODE", "INVALID_DATE", "INVALID_MEAL_COUNT", "SUBSCRIPTION_MISMATCH", "MEAL_COUNT_MISMATCH"].includes(code)) {
     return 400;
   }
-  if (["INSUFFICIENT_CREDITS", "SUB_INACTIVE", "SUB_EXPIRED", "PLANNING_INCOMPLETE", "PLANNING_UNCONFIRMED", "PREMIUM_OVERAGE_PAYMENT_REQUIRED", "PREMIUM_PAYMENT_REQUIRED", "ONE_TIME_ADDON_PAYMENT_REQUIRED"].includes(code)) {
+  if (["INSUFFICIENT_CREDITS", "SUB_INACTIVE", "SUB_EXPIRED", "PLANNING_INCOMPLETE", "PLANNING_UNCONFIRMED", "PREMIUM_OVERAGE_PAYMENT_REQUIRED", "PREMIUM_PAYMENT_REQUIRED", "ONE_TIME_ADDON_PAYMENT_REQUIRED", "ADDON_PAYMENT_REQUIRED", "PENDING_ADDON_PAYMENT"].includes(code)) {
     return 422;
   }
   if (code === "NOT_FOUND" || code === "PICKUP_REQUEST_NOT_FOUND") return 404;
@@ -2594,12 +2624,13 @@ function resolvePickupRequestErrorStatus(err) {
 async function createPickupRequest(req, res) {
   try {
     const { id } = req.params;
-    const { date, mealCount, idempotencyKey } = req.body || {};
+    const { date, mealCount, selectedMealSlotIds, idempotencyKey } = req.body || {};
     const result = await createSubscriptionPickupRequestForClient({
       userId: req.userId,
       subscriptionId: id,
       date,
       mealCount,
+      selectedMealSlotIds,
       idempotencyKey,
       lang: getRequestLang(req),
     });
@@ -2610,6 +2641,30 @@ async function createPickupRequest(req, res) {
       resolvePickupRequestErrorStatus(err),
       err.code || "INTERNAL",
       err.message || "Failed to create pickup request",
+      err.details
+    );
+  }
+}
+
+async function getPickupAvailability(req, res) {
+  try {
+    const { id } = req.params;
+    const date = req.query && req.query.date ? String(req.query.date) : "";
+    if (!date) {
+      return errorResponse(res, 400, "INVALID_DATE", "date query parameter is required");
+    }
+    const data = await getPickupAvailabilityForClient({
+      userId: req.userId,
+      subscriptionId: id,
+      date,
+    });
+    return res.status(200).json({ status: true, data });
+  } catch (err) {
+    return errorResponse(
+      res,
+      resolvePickupRequestErrorStatus(err),
+      err.code || "INTERNAL",
+      err.message || "Failed to get pickup availability",
       err.details
     );
   }
@@ -2862,6 +2917,7 @@ module.exports = {
   getSubscriptionToday,
   getSubscriptionDay,
   updateDaySelection,
+  appendDayMeals,
   validateDaySelection,
   updateBulkDaySelections,
   confirmDayPlanning,
@@ -2874,6 +2930,7 @@ module.exports = {
   removeAddonSelection,
   addOneTimeAddon,
   createPickupRequest,
+  getPickupAvailability,
   listPickupRequests,
   getPickupRequestStatus,
   preparePickup,

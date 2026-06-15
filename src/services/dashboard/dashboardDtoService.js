@@ -253,6 +253,24 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
     };
   });
   const preparedAt = pickupRequest.pickupPreparedAt || pickupRequest.preparationStartedAt || null;
+  const snapshotDay = pickupRequest.snapshot
+    ? {
+      status: "open",
+      plannerState: "confirmed",
+      mealSlots: Array.isArray(pickupRequest.snapshot.mealSlots) ? pickupRequest.snapshot.mealSlots : [],
+      addonSelections: Array.isArray(pickupRequest.snapshot.addons) ? pickupRequest.snapshot.addons : [],
+      premiumExtraPayment: pickupRequest.snapshot.premiumExtraPayment || null,
+      plannerMeta: {
+        requiredSlotCount: Number(pickupRequest.mealCount || 0),
+        completeSlotCount: Array.isArray(pickupRequest.snapshot.mealSlots) ? pickupRequest.snapshot.mealSlots.length : 0,
+        partialSlotCount: 0,
+        isDraftValid: true,
+      },
+    }
+    : null;
+  const snapshotPaymentValidity = snapshotDay ? buildPaymentValidityPayload(snapshotDay) : null;
+  const creditsAvailableForOps = Boolean(pickupRequest.creditsReserved) && !pickupRequest.creditsReleasedAt;
+  const paymentBlocksOps = Boolean(snapshotPaymentValidity && snapshotPaymentValidity.pendingUnpaid);
 
   return {
     source: "subscription_pickup_request",
@@ -285,15 +303,19 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
       }
       : buildKitchenDetailsPayload({}, subscription || {}, lang, catalogMaps),
     paymentValidity: {
-      paymentRequired: false,
-      paymentStatus: "reserved",
-      paymentApplied: Boolean(pickupRequest.creditsReserved),
-      pendingUnpaid: false,
-      superseded: false,
-      revisionMismatch: false,
-      canPrepare: ["locked"].includes(status) && Boolean(pickupRequest.creditsReserved),
-      canFulfill: ["ready_for_pickup"].includes(status) && Boolean(pickupRequest.creditsReserved) && !pickupRequest.creditsReleasedAt,
-      reason: pickupRequest.creditsReleasedAt ? "CREDITS_RELEASED" : null,
+      paymentRequired: Boolean(snapshotPaymentValidity && snapshotPaymentValidity.paymentRequired),
+      paymentStatus: paymentBlocksOps
+        ? snapshotPaymentValidity.paymentStatus
+        : "reserved",
+      paymentApplied: Boolean(creditsAvailableForOps && !paymentBlocksOps),
+      pendingUnpaid: paymentBlocksOps,
+      superseded: Boolean(snapshotPaymentValidity && snapshotPaymentValidity.superseded),
+      revisionMismatch: Boolean(snapshotPaymentValidity && snapshotPaymentValidity.revisionMismatch),
+      canPrepare: ["locked"].includes(status) && creditsAvailableForOps && !paymentBlocksOps,
+      canFulfill: ["ready_for_pickup"].includes(status) && creditsAvailableForOps && !paymentBlocksOps,
+      reason: pickupRequest.creditsReleasedAt
+        ? "CREDITS_RELEASED"
+        : (paymentBlocksOps ? snapshotPaymentValidity.reason || "PAYMENT_REQUIRED" : null),
     },
     currentStep: statusPayload.currentStep,
     isReady: statusPayload.isReady,

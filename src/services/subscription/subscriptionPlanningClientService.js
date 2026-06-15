@@ -329,6 +329,89 @@ async function updateDaySelectionForClient({
   }
 }
 
+async function appendDayMealsForClient({
+  subscriptionId,
+  date,
+  body = {},
+  userId,
+  lang,
+  runtime,
+  writeLogSafelyFn,
+  loadWalletCatalogMapsSafelyFn,
+  logWalletIntegrityErrorFn,
+}) {
+  const mealSlots = Array.isArray(body.mealSlots) ? body.mealSlots : undefined;
+  const contractVersion = body.contractVersion || body.plannerContractVersion || body.version;
+  const requestedOneTimeAddonIds =
+    body.addonsOneTime !== undefined ? body.addonsOneTime : body.oneTimeAddonSelections;
+  const shapeError = validateMealSlotsRequestShape({ mealSlots: body.mealSlots, requestedOneTimeAddonIds });
+  if (shapeError) return shapeError;
+
+  try {
+    const result = await performDaySelectionUpdate({
+      userId,
+      subscriptionId,
+      date,
+      mealSlots,
+      contractVersion,
+      requestedOneTimeAddonIds,
+      lang,
+      runtime,
+      appendOnly: true,
+    });
+
+    await writeLogSafelyFn({
+      entityType: "subscription_day",
+      entityId: result.day._id,
+      action: "day_meals_append",
+      byUserId: userId,
+      byRole: "client",
+      meta: {
+        date,
+        appendedMealSlotCount: mealSlots.length,
+      },
+    }, { subscriptionId, date });
+
+    const serializedDay = serializeSubscriptionDayForClient(
+      result.subscription,
+      result.day.toObject ? result.day.toObject() : result.day,
+      runtime
+    );
+    const catalog = await loadWalletCatalogMapsSafelyFn({
+      days: [serializedDay],
+      lang,
+      context: "append_day_meals_result",
+    });
+
+    const shapedDay = shapeMealPlannerReadFields({
+      subscription: result.subscription,
+      day: localizeWriteDayPayload(serializedDay, {
+        lang,
+        addonNames: catalog.addonNames,
+      }),
+      lang,
+    });
+
+    return buildSuccessResult(200, shapedDay, {
+      idempotent: Boolean(result.idempotent),
+    });
+  } catch (err) {
+    if (err && err.code === "DATA_INTEGRITY_ERROR") {
+      logWalletIntegrityErrorFn("append_day_meals_refund", {
+        subscriptionId,
+        date,
+        reason: err.message,
+      });
+      return buildErrorResult(409, "DATA_INTEGRITY_ERROR", err.message);
+    }
+    if (err.status && err.code) {
+      return buildErrorResult(err.status, err.code, resolveClientFacingErrorMessage(err, lang), buildControllerErrorDetails(err));
+    }
+    logger.error("Append day meals failed", { subscriptionId, date, error: err.message, stack: err.stack });
+    return buildErrorResult(500, "INTERNAL", "Append meals failed");
+  }
+}
+
 async function validateDaySelectionForClient({
   subscriptionId,
   date,
@@ -466,6 +549,7 @@ async function confirmDayPlanningForClient({
 }
 
 module.exports = {
+  appendDayMealsForClient,
   confirmDayPlanningForClient,
   updateDaySelectionForClient,
   validateDaySelectionForClient,

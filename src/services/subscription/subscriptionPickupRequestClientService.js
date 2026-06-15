@@ -17,6 +17,14 @@ const { assertRestaurantOpenForOrdering } = require("../restaurantHoursService")
 const {
   assertSubscriptionActiveAndOwned,
 } = require("./subscriptionDateRangeHelperService");
+const {
+  assertSelectedSlotsAvailableForPickup,
+  buildAvailabilityFromDay,
+  buildPickupRequestPayloadHash,
+  findBlockingPickupRequests,
+  normalizeSelectedMealSlotIds,
+  resolveCanonicalPaymentReason,
+} = require("./subscriptionPickupSlotService");
 
 const PICKUP_REQUEST_ALLOWED_DAY_STATUSES = [
   "open",
@@ -95,6 +103,18 @@ function buildPickupRequestSnapshot(day) {
   };
 }
 
+function buildSelectedPickupRequestSnapshot(day, selectedMealSlotIds) {
+  const ids = new Set(normalizeSelectedMealSlotIds(selectedMealSlotIds));
+  const base = buildPickupRequestSnapshot(day);
+  return {
+    ...base,
+    mealSlots: Array.isArray(base.mealSlots)
+      ? base.mealSlots.filter((slot) => ids.has(String(slot.slotKey || slot.slotIndex || "")))
+      : [],
+    selectedMealSlotIds: [...ids],
+  };
+}
+
 function resolvePickupRequestDayStatus(day) {
   return String(day && day.status || "open");
 }
@@ -123,6 +143,8 @@ function mapSubscriptionPickupRequestStatus(pickupRequest, { idempotent = false,
     subscriptionDayId: stringifyId(pickupRequest.subscriptionDayId),
     date: pickupRequest.date,
     mealCount: Number(pickupRequest.mealCount || 0),
+    selectedMealSlotIds: Array.isArray(pickupRequest.selectedMealSlotIds) ? pickupRequest.selectedMealSlotIds : [],
+    selectionMode: pickupRequest.selectionMode || "legacy_meal_count",
     currentStep: copy.currentStep,
     status,
     statusLabel: copy.statusLabel,
@@ -165,6 +187,9 @@ async function createPickupRequestDocument({
   day,
   date,
   mealCount,
+  selectedMealSlotIds = [],
+  requestPayloadHash = null,
+  selectionMode = "legacy_meal_count",
   idempotencyKey,
   session = null,
 }) {
@@ -174,9 +199,14 @@ async function createPickupRequestDocument({
     userId: subscription.userId,
     date,
     mealCount,
+    selectedMealSlotIds,
+    requestPayloadHash,
+    selectionMode,
     status: "locked",
     idempotencyKey: idempotencyKey || null,
-    snapshot: buildPickupRequestSnapshot(day),
+    snapshot: selectionMode === "slot_ids"
+      ? buildSelectedPickupRequestSnapshot(day, selectedMealSlotIds)
+      : buildPickupRequestSnapshot(day),
   };
 
   const created = await SubscriptionPickupRequest.create(
@@ -191,11 +221,16 @@ async function createSubscriptionPickupRequestForClient({
   subscriptionId,
   date,
   mealCount,
+  selectedMealSlotIds,
   idempotencyKey = null,
   lang = "en",
   session = null,
 } = {}) {
-  const normalizedMealCount = Number(mealCount);
+  const normalizedSelectedMealSlotIds = selectedMealSlotIds !== undefined
+    ? normalizeSelectedMealSlotIds(selectedMealSlotIds)
+    : [];
+  const usesSlotSelection = normalizedSelectedMealSlotIds.length > 0;
+  const normalizedMealCount = usesSlotSelection ? normalizedSelectedMealSlotIds.length : Number(mealCount);
   assertValidMealCount(normalizedMealCount);
 
   const normalizedIdempotencyKey = idempotencyKey ? String(idempotencyKey).trim() : null;
@@ -238,7 +273,15 @@ async function createSubscriptionPickupRequestForClient({
     idempotencyKey: normalizedIdempotencyKey,
     session,
   });
+  const requestPayloadHash = buildPickupRequestPayloadHash({
+    date,
+    mealCount: normalizedMealCount,
+    selectedMealSlotIds: normalizedSelectedMealSlotIds,
+  });
   if (existing) {
+    if (existing.requestPayloadHash && existing.requestPayloadHash !== requestPayloadHash) {
+      throw createServiceError("IDEMPOTENCY_CONFLICT", "Idempotency key was already used with a different payload", 409);
+    }
     return {
       pickupRequest: existing,
       data: mapPickupRequestForClient(existing, { lang, idempotent: true }),
@@ -260,6 +303,29 @@ async function createSubscriptionPickupRequestForClient({
   }
 
   assertDateInsideSubscriptionRange({ subscription, date });
+
+  if (usesSlotSelection) {
+    await assertSelectedSlotsAvailableForPickup({
+      subscriptionId: subscription._id,
+      day,
+      selectedMealSlotIds: normalizedSelectedMealSlotIds,
+      session,
+    });
+  } else if (day && Array.isArray(day.mealSlots) && day.mealSlots.length > 0) {
+    const pickupRequests = await findBlockingPickupRequests({ subscriptionId: subscription._id, date, session });
+    const availability = buildAvailabilityFromDay({ day, pickupRequests });
+    const availableCount = availability.availableSlotIds.length;
+    if (availableCount < normalizedMealCount) {
+      const reason = availability.slots.find((slot) => !slot.available)?.unavailableReason || "MEAL_SLOT_UNAVAILABLE";
+      throw createServiceError(
+        reason === "PREMIUM_PAYMENT_REQUIRED" || reason === "ADDON_PAYMENT_REQUIRED" ? reason : "MEAL_SLOT_UNAVAILABLE",
+        "Requested mealCount exceeds available meal slots",
+        422,
+        { availableMealSlots: availableCount, requestedMealCount: normalizedMealCount, availability }
+      );
+    }
+  }
+
   if (Number(subscription.remainingMeals || 0) < normalizedMealCount) {
     throw createServiceError("INSUFFICIENT_CREDITS", "رصيد وجباتك غير كافٍ", 422);
   }
@@ -271,6 +337,9 @@ async function createSubscriptionPickupRequestForClient({
       day,
       date,
       mealCount: normalizedMealCount,
+      selectedMealSlotIds: normalizedSelectedMealSlotIds,
+      requestPayloadHash,
+      selectionMode: usesSlotSelection ? "slot_ids" : "legacy_meal_count",
       idempotencyKey: normalizedIdempotencyKey,
       session,
     });
@@ -283,6 +352,9 @@ async function createSubscriptionPickupRequestForClient({
         session,
       });
       if (racedExisting) {
+        if (racedExisting.requestPayloadHash && racedExisting.requestPayloadHash !== requestPayloadHash) {
+          throw createServiceError("IDEMPOTENCY_CONFLICT", "Idempotency key was already used with a different payload", 409);
+        }
         return {
           pickupRequest: racedExisting,
           data: mapPickupRequestForClient(racedExisting, { lang, idempotent: true }),
@@ -313,6 +385,45 @@ async function createSubscriptionPickupRequestForClient({
     pickupRequest,
     data: mapPickupRequestForClient(pickupRequest, { lang, idempotent: false }),
     idempotent: false,
+  };
+}
+
+async function getPickupAvailabilityForClient({
+  userId,
+  subscriptionId,
+  date,
+  session = null,
+} = {}) {
+  const subscriptionQuery = Subscription.findById(subscriptionId).populate("planId");
+  if (session) subscriptionQuery.session(session);
+  const subscription = await subscriptionQuery;
+  if (!subscription) throw createServiceError("NOT_FOUND", "Subscription not found", 404);
+
+  assertSubscriptionActiveAndOwned({ subscription, userId, date });
+  try {
+    assertFulfillmentMethodAllowed({ subscription, date, requestedMethod: "pickup" });
+  } catch (err) {
+    if (err && err.code === "FULFILLMENT_METHOD_NOT_ALLOWED") {
+      throw createServiceError("INVALID_DELIVERY_MODE", "Delivery mode is not pickup", 400);
+    }
+    throw err;
+  }
+  assertDateInsideSubscriptionRange({ subscription, date });
+
+  const dayQuery = SubscriptionDay.findOne({ subscriptionId: subscription._id, date });
+  if (session) dayQuery.session(session);
+  const day = await dayQuery.lean();
+  const pickupRequests = await findBlockingPickupRequests({ subscriptionId: subscription._id, date, session });
+  const availability = buildAvailabilityFromDay({ day, pickupRequests });
+  return {
+    subscriptionId: stringifyId(subscription._id),
+    date,
+    subscriptionDayId: availability.subscriptionDayId,
+    remainingMeals: Number(subscription.remainingMeals || 0),
+    paymentReason: day ? resolveCanonicalPaymentReason(day) : null,
+    slots: availability.slots,
+    availableSlotIds: availability.availableSlotIds,
+    unavailableSlotIds: availability.unavailableSlotIds,
   };
 }
 
@@ -374,6 +485,7 @@ async function getSubscriptionPickupRequestStatusForClient({
 
 module.exports = {
   createSubscriptionPickupRequestForClient,
+  getPickupAvailabilityForClient,
   getSubscriptionPickupRequestStatusForClient,
   listSubscriptionPickupRequestsForClient,
   mapPickupRequestForClient,

@@ -185,6 +185,10 @@ function createApp() {
     res.type("html");
     res.sendFile(path.join(__dirname, "../public/privacy-policy.html"));
   });
+  app.get("/refund-policy", (_req, res) => {
+    res.type("html");
+    res.sendFile(path.join(__dirname, "../public/refund-policy.html"));
+  });
   app.get("/PRIVACY_POLICY.md", (_req, res) => {
     res.sendFile(path.join(__dirname, "../PRIVACY_POLICY.md"));
   });
