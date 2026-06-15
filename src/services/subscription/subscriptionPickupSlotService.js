@@ -57,6 +57,231 @@ function dayHasUnpaidAddons(day = {}) {
     .some((addon) => addon && addon.source === "pending_payment");
 }
 
+function stringifyId(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value.toHexString === "function") return value.toHexString();
+  if (value && value._id) return stringifyId(value._id);
+  return String(value);
+}
+
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function localizedPair(value, fallback = null) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const en = value.en || value.english || value.nameEn || value.titleEn || value.ar || value.name || fallback;
+    const ar = value.ar || value.arabic || value.nameAr || value.titleAr || value.en || value.name || fallback;
+    return { ar: ar || null, en: en || null };
+  }
+  const text = value === undefined || value === null ? fallback : String(value);
+  return { ar: text || null, en: text || null };
+}
+
+function firstLocalizedPair(...values) {
+  for (const value of values) {
+    const pair = localizedPair(value);
+    if (pair.ar || pair.en) return pair;
+  }
+  return { ar: null, en: null };
+}
+
+function moneyFromHalala(value) {
+  const halala = Number(value || 0);
+  return halala > 0 ? halala / 100 : 0;
+}
+
+function canonicalPaymentStatus({ required, paid }) {
+  if (required) return "pending";
+  if (paid) return "paid";
+  return "not_required";
+}
+
+function resolveReasonCopy(reason) {
+  const copies = {
+    SLOT_ALREADY_RESERVED: {
+      ar: "تم طلب استلام هذه الوجبة بالفعل",
+      en: "This meal has already been requested for pickup",
+    },
+    SLOT_ALREADY_FULFILLED: {
+      ar: "تم استلام هذه الوجبة",
+      en: "This meal has already been picked up",
+    },
+    SLOT_ALREADY_CONSUMED: {
+      ar: "تم استخدام هذه الوجبة بالفعل",
+      en: "This meal has already been consumed",
+    },
+    PREMIUM_PAYMENT_REQUIRED: {
+      ar: "يجب إتمام دفع ترقية الوجبة أولاً",
+      en: "Premium upgrade payment must be completed first",
+    },
+    ADDON_PAYMENT_REQUIRED: {
+      ar: "يجب إتمام دفع الإضافات أولاً",
+      en: "Addon payment must be completed first",
+    },
+    PAYMENT_REQUIRED: {
+      ar: "يجب إتمام الدفع أولاً",
+      en: "Payment must be completed first",
+    },
+    PLANNING_INCOMPLETE: {
+      ar: "يجب إكمال اختيار الوجبة أولاً",
+      en: "Meal selection must be completed first",
+    },
+    INVALID_SLOT: {
+      ar: "هذه الوجبة غير متاحة للاستلام",
+      en: "This meal is not available for pickup",
+    },
+  };
+  return copies[reason] || {
+    ar: "هذه الوجبة غير متاحة للاستلام",
+    en: "This meal is not available for pickup",
+  };
+}
+
+function buildProductPayload(slot = {}) {
+  const confirmation = asObject(slot.confirmationSnapshot);
+  const display = asObject(slot.displaySnapshot);
+  const fulfillment = asObject(slot.fulfillmentSnapshot);
+  const product = asObject(confirmation.product || display.product || fulfillment.product);
+  const macros = asObject(product.macros || display.macros || confirmation.macros || fulfillment.macros);
+  const name = firstLocalizedPair(product.name, product.title, display.productName, fulfillment.productName, slot.productName, slot.productKey);
+  const description = firstLocalizedPair(product.description, display.description, confirmation.description);
+  return {
+    id: stringifyId(slot.productId || product.id || product._id),
+    key: slot.productKey || product.key || null,
+    name,
+    description,
+    image: product.image || product.imageUrl || product.photo || display.image || confirmation.image || fulfillment.image || null,
+    calories: Number(product.calories || display.calories || confirmation.calories || fulfillment.calories || 0),
+    macros: {
+      protein: Number(macros.protein || macros.proteinGrams || 0),
+      carbs: Number(macros.carbs || macros.carbsGrams || 0),
+      fat: Number(macros.fat || macros.fatGrams || 0),
+    },
+  };
+}
+
+function buildOptionPayload(option = {}) {
+  const name = firstLocalizedPair(option.name, option.optionName, option.label, option.optionKey);
+  const groupName = firstLocalizedPair(option.groupName, option.groupLabel, option.groupKey);
+  return {
+    id: stringifyId(option.optionId || option.id || option._id),
+    key: option.optionKey || option.key || null,
+    name,
+    groupKey: option.groupKey || option.canonicalGroupKey || null,
+    groupName,
+    quantity: Number(option.quantity || option.qty || 1),
+  };
+}
+
+function buildAddonPayload(addon = {}) {
+  const paymentRequired = addon.source === "pending_payment";
+  const paid = addon.source === "paid" || addon.source === "wallet" || addon.source === "subscription";
+  return {
+    id: stringifyId(addon.addonId || addon.id || addon._id),
+    key: addon.key || addon.addonKey || null,
+    name: firstLocalizedPair(addon.name, addon.addonName, addon.key || addon.addonKey),
+    quantity: Number(addon.quantity || addon.qty || 1),
+    price: moneyFromHalala(addon.priceHalala || addon.unitPriceHalala || addon.totalPriceHalala),
+    paymentStatus: canonicalPaymentStatus({ required: paymentRequired, paid }),
+    paymentRequired,
+  };
+}
+
+function buildPaymentPayload({ slot = {}, day = {}, reason = null, addons = [] }) {
+  const premiumRequired = reason === "PREMIUM_PAYMENT_REQUIRED";
+  const addonRequired = reason === "ADDON_PAYMENT_REQUIRED" || addons.some((addon) => addon.paymentRequired);
+  const required = premiumRequired || addonRequired || reason === "PAYMENT_REQUIRED";
+  const reasonLabel = reason ? localizedPair(resolveReasonCopy(reason)) : { ar: null, en: null };
+  const premiumDue = premiumRequired
+    ? moneyFromHalala(slot.premiumExtraFeeHalala || (day.premiumExtraPayment && day.premiumExtraPayment.amountHalala))
+    : 0;
+  const addonDue = addonRequired
+    ? addons.filter((addon) => addon.paymentRequired).reduce((sum, addon) => sum + Number(addon.price || 0), 0)
+    : 0;
+  return {
+    required,
+    status: required ? "pending" : (slot.isPremium && ["paid", "paid_extra", "balance"].includes(slot.premiumSource) ? "paid" : "not_required"),
+    reason: required ? reason : null,
+    reasonLabel,
+    amountDue: premiumDue + addonDue,
+    currency: (day.premiumExtraPayment && day.premiumExtraPayment.currency) || "SAR",
+    premiumRequired,
+    addonRequired,
+  };
+}
+
+function buildDisplayPayload({ product, meal, slot = {}, available, unavailableReason, payment }) {
+  const titleAr = meal.title.ar || product.name.ar || slot.slotKey || "وجبة";
+  const titleEn = meal.title.en || product.name.en || slot.slotKey || "Meal";
+  const subtitleAr = meal.subtitle.ar || product.description.ar || null;
+  const subtitleEn = meal.subtitle.en || product.description.en || null;
+  const unavailableCopy = unavailableReason ? resolveReasonCopy(unavailableReason) : { ar: null, en: null };
+  const badgesAr = [];
+  const badgesEn = [];
+  if (slot.isPremium) {
+    badgesAr.push("وجبة مميزة");
+    badgesEn.push("Premium");
+  }
+  if (payment.required) {
+    badgesAr.push("بانتظار الدفع");
+    badgesEn.push("Payment pending");
+  } else if (slot.isPremium && ["balance", "paid", "paid_extra"].includes(slot.premiumSource)) {
+    badgesAr.push("مدفوعة");
+    badgesEn.push("Paid");
+  }
+  return {
+    titleAr,
+    titleEn,
+    subtitleAr,
+    subtitleEn,
+    image: meal.image || product.image || null,
+    badgesAr,
+    badgesEn,
+    statusTextAr: available ? "متاحة للاستلام" : unavailableCopy.ar,
+    statusTextEn: available ? "Available for pickup" : unavailableCopy.en,
+    selectionTextAr: available ? "اختر هذه الوجبة للاستلام" : null,
+    selectionTextEn: available ? "Select this meal for pickup" : null,
+    unavailableTextAr: available ? null : unavailableCopy.ar,
+    unavailableTextEn: available ? null : unavailableCopy.en,
+  };
+}
+
+function buildClientSlotDetails({ slot = {}, day = {}, available, unavailableReason }) {
+  const product = buildProductPayload(slot);
+  const mealTitle = firstLocalizedPair(
+    asObject(slot.displaySnapshot).title,
+    asObject(slot.confirmationSnapshot).title,
+    product.name,
+    slot.productKey
+  );
+  const mealSubtitle = firstLocalizedPair(
+    asObject(slot.displaySnapshot).subtitle,
+    asObject(slot.confirmationSnapshot).subtitle,
+    product.description
+  );
+  const meal = {
+    title: mealTitle,
+    subtitle: mealSubtitle,
+    image: product.image,
+    mealType: slot.selectionType || "standard_meal",
+    quantity: 1,
+  };
+  const options = (Array.isArray(slot.selectedOptions) ? slot.selectedOptions : []).map(buildOptionPayload);
+  const addons = (Array.isArray(day && day.addonSelections) ? day.addonSelections : []).map(buildAddonPayload);
+  const payment = buildPaymentPayload({ slot, day, reason: unavailableReason, addons });
+  return {
+    canSelect: Boolean(available),
+    product,
+    meal,
+    options,
+    addons,
+    payment,
+    display: buildDisplayPayload({ product, meal, slot, available, unavailableReason, payment }),
+  };
+}
+
 function resolveCanonicalPaymentReason(day = {}) {
   const commercial = buildDayCommercialState(day || {});
   return (commercial.paymentRequirement && commercial.paymentRequirement.blockingReason)
@@ -90,9 +315,14 @@ function buildAvailabilityFromDay({ day, pickupRequests = [] }) {
     if (!slotId) reasons.push("INVALID_SLOT");
     if (String(slot.status || "complete") !== "complete") reasons.push("PLANNING_INCOMPLETE");
     if (paymentReason) reasons.push(paymentReason);
-    if (reservation) reasons.push(reservation.consumed ? "SLOT_ALREADY_CONSUMED" : "SLOT_ALREADY_RESERVED");
+    if (reservation) {
+      reasons.push(reservation.status === "fulfilled"
+        ? "SLOT_ALREADY_FULFILLED"
+        : (reservation.consumed ? "SLOT_ALREADY_CONSUMED" : "SLOT_ALREADY_RESERVED"));
+    }
     const available = reasons.length === 0;
     selectedIds.add(slotId);
+    const unavailableReason = available ? null : reasons[0];
     return {
       slotId,
       slotKey: slot.slotKey || null,
@@ -101,9 +331,10 @@ function buildAvailabilityFromDay({ day, pickupRequests = [] }) {
       isPremium: Boolean(slot.isPremium),
       premiumSource: slot.premiumSource || "none",
       available,
-      unavailableReason: available ? null : reasons[0],
+      unavailableReason,
       reasons,
       reservedByPickupRequestId: reservation ? reservation.requestId : null,
+      ...buildClientSlotDetails({ slot, day, available, unavailableReason }),
     };
   });
 

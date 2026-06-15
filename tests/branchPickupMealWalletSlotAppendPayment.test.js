@@ -134,8 +134,24 @@ function mealSlot(slotIndex, overrides = {}) {
     selectionType: "standard_meal",
     productId: new mongoose.Types.ObjectId(),
     productKey: `product_${slotIndex}`,
-    selectedOptions: [],
-    displaySnapshot: { product: { name: { en: `Meal ${slotIndex}`, ar: `Meal ${slotIndex}` } } },
+    selectedOptions: [{
+      groupId: new mongoose.Types.ObjectId(),
+      groupKey: "sauce",
+      optionId: new mongoose.Types.ObjectId(),
+      optionKey: `sauce_${slotIndex}`,
+      name: { en: `Sauce ${slotIndex}`, ar: `صوص ${slotIndex}` },
+      groupName: { en: "Sauce", ar: "الصوص" },
+      quantity: 1,
+    }],
+    displaySnapshot: {
+      product: {
+        name: { en: `Meal ${slotIndex}`, ar: `وجبة ${slotIndex}` },
+        description: { en: `Meal ${slotIndex} description`, ar: `وصف وجبة ${slotIndex}` },
+        image: `https://cdn.example.test/meal-${slotIndex}.jpg`,
+        calories: 420 + slotIndex,
+        macros: { protein: 35, carbs: 45, fat: 12 },
+      },
+    },
     fulfillmentSnapshot: { operationalSku: `sku_${slotIndex}`, kitchenLabel: `Meal ${slotIndex}` },
     isPremium: false,
     premiumSource: "none",
@@ -283,6 +299,118 @@ function legacySlot({ premium = false } = {}) {
       const reasons = new Map(res.body.data.slots.map((slot) => [slot.slotId, slot.unavailableReason]));
       assert.strictEqual(reasons.get("slot_1"), "SLOT_ALREADY_RESERVED");
       assert.strictEqual(reasons.get("slot_2"), "PREMIUM_PAYMENT_REQUIRED");
+    });
+
+    await test("pickup availability slots include UI-ready meal, payment, and display fields", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({
+        label: "availability-ui",
+        slots: [mealSlot(1, { isPremium: true, premiumSource: "paid_extra", premiumExtraFeeHalala: 0 })],
+      });
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(auth(token(user._id)));
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const slot = res.body.data.slots[0];
+      assert.strictEqual(slot.slotId, "slot_1");
+      assert.strictEqual(slot.available, true);
+      assert.strictEqual(slot.canSelect, true);
+      assert.strictEqual(slot.product.name.ar, "وجبة 1");
+      assert.strictEqual(slot.product.name.en, "Meal 1");
+      assert.strictEqual(slot.product.image, "https://cdn.example.test/meal-1.jpg");
+      assert.strictEqual(slot.product.calories, 421);
+      assert.strictEqual(slot.product.macros.protein, 35);
+      assert.strictEqual(slot.meal.title.ar, "وجبة 1");
+      assert.strictEqual(slot.meal.mealType, "standard_meal");
+      assert.strictEqual(slot.options[0].key, "sauce_1");
+      assert.strictEqual(slot.payment.required, false);
+      assert.strictEqual(slot.payment.status, "paid");
+      assert(slot.display.badgesAr.includes("وجبة مميزة"));
+      assert(slot.display.badgesAr.includes("مدفوعة"));
+      assert.strictEqual(slot.display.statusTextAr, "متاحة للاستلام");
+      assert.strictEqual(slot.display.selectionTextAr, "اختر هذه الوجبة للاستلام");
+      assert.strictEqual(res.body.data.wallet.remainingMeals, 5);
+      assert.strictEqual(res.body.data.wallet.totalEntitlement, 10);
+      assert.strictEqual(res.body.data.summary.availableCount, 1);
+      assert.strictEqual(res.body.data.summary.canCreatePickupRequest, true);
+      assert.strictEqual(res.body.data.summary.titleAr, "وجبات متاحة للاستلام");
+    });
+
+    await test("pickup availability unpaid premium slot includes blocking payment UI", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({
+        label: "availability-premium-unpaid",
+        slots: [mealSlot(1, { isPremium: true, premiumSource: "pending_payment", premiumExtraFeeHalala: 1500 })],
+      });
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(auth(token(user._id)));
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const slot = res.body.data.slots[0];
+      assert.strictEqual(slot.available, false);
+      assert.strictEqual(slot.canSelect, false);
+      assert.strictEqual(slot.unavailableReason, "PREMIUM_PAYMENT_REQUIRED");
+      assert.strictEqual(slot.payment.required, true);
+      assert.strictEqual(slot.payment.status, "pending");
+      assert.strictEqual(slot.payment.premiumRequired, true);
+      assert.strictEqual(slot.payment.amountDue, 15);
+      assert.strictEqual(slot.display.unavailableTextAr, "يجب إتمام دفع ترقية الوجبة أولا");
+    });
+
+    await test("pickup availability unpaid addon slot includes blocking payment UI", async () => {
+      const { user, subscription, day } = await seedSubscriptionWithDay({ label: "availability-addon-ui", slots: [mealSlot(1)] });
+      await SubscriptionDay.updateOne(
+        { _id: day._id },
+        {
+          $set: {
+            addonSelections: [{
+              addonId: new mongoose.Types.ObjectId(),
+              key: "protein_bar",
+              name: "Protein Bar",
+              category: "extra",
+              source: "pending_payment",
+              priceHalala: 500,
+              currency: "SAR",
+            }],
+          },
+        }
+      );
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(auth(token(user._id)));
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const slot = res.body.data.slots[0];
+      assert.strictEqual(slot.available, false);
+      assert.strictEqual(slot.canSelect, false);
+      assert.strictEqual(slot.unavailableReason, "ADDON_PAYMENT_REQUIRED");
+      assert.strictEqual(slot.payment.required, true);
+      assert.strictEqual(slot.payment.addonRequired, true);
+      assert.strictEqual(slot.payment.amountDue, 5);
+      assert.strictEqual(slot.addons[0].name.en, "Protein Bar");
+      assert.strictEqual(slot.addons[0].paymentStatus, "pending");
+      assert.strictEqual(slot.display.unavailableTextAr, "يجب إتمام دفع الإضافات أولا");
+    });
+
+    await test("pickup availability reserved slot includes reservation id and Arabic display text", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({ label: "availability-reserved-ui", slots: [mealSlot(1)] });
+      const headers = auth(token(user._id));
+      const created = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`).set(headers).send({ date: TODAY, selectedMealSlotIds: ["slot_1"] });
+      assert.strictEqual(created.status, 200, JSON.stringify(created.body));
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(headers);
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const slot = res.body.data.slots[0];
+      assert.strictEqual(slot.canSelect, false);
+      assert.strictEqual(slot.unavailableReason, "SLOT_ALREADY_RESERVED");
+      assert.strictEqual(slot.reservedByPickupRequestId, created.body.data.requestId);
+      assert.strictEqual(slot.display.unavailableTextAr, "تم طلب استلام هذه الوجبة بالفعل");
+    });
+
+    await test("pickup availability fulfilled slot includes fulfilled Arabic display text", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({ label: "availability-fulfilled-ui", remainingMeals: 2, slots: [mealSlot(1)] });
+      const headers = auth(token(user._id));
+      const created = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`).set(headers).send({ date: TODAY, selectedMealSlotIds: ["slot_1"] });
+      assert.strictEqual(created.status, 200, JSON.stringify(created.body));
+      const fulfill = await fulfillPickupRequest(api, kitchenHeaders, created.body.data.requestId);
+      assert.strictEqual(fulfill.status, 200, JSON.stringify(fulfill.body));
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(headers);
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const slot = res.body.data.slots[0];
+      assert.strictEqual(slot.available, false);
+      assert.strictEqual(slot.canSelect, false);
+      assert.strictEqual(slot.unavailableReason, "SLOT_ALREADY_FULFILLED");
+      assert.strictEqual(slot.display.unavailableTextAr, "تم استلام هذه الوجبة");
     });
 
     await test("idempotency returns same request for same payload and conflicts on changed payload", async () => {

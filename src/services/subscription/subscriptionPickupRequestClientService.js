@@ -85,6 +85,46 @@ function withOptionalSession(options, session) {
   return session ? { ...options, session } : options;
 }
 
+function buildPickupAvailabilityWallet(subscription = {}, availability = {}) {
+  const remainingMeals = Number(subscription.remainingMeals || 0);
+  const reservedMeals = Array.isArray(availability.slots)
+    ? availability.slots.filter((slot) => slot && slot.reservedByPickupRequestId && slot.unavailableReason !== "SLOT_ALREADY_FULFILLED").length
+    : 0;
+  const consumedMeals = Array.isArray(availability.slots)
+    ? availability.slots.filter((slot) => slot && ["SLOT_ALREADY_FULFILLED", "SLOT_ALREADY_CONSUMED"].includes(slot.unavailableReason)).length
+    : 0;
+  return {
+    remainingMeals,
+    availableMeals: remainingMeals,
+    reservedMeals,
+    consumedMeals,
+    totalEntitlement: Number(subscription.totalMeals || subscription.mealCount || 0),
+  };
+}
+
+function buildPickupAvailabilitySummary({ subscription = {}, availability = {} }) {
+  const slots = Array.isArray(availability.slots) ? availability.slots : [];
+  const availableCount = slots.filter((slot) => slot && slot.available).length;
+  const unavailableCount = slots.length - availableCount;
+  const appendLimit = Number(subscription.remainingMeals || 0);
+  const canAppendMeals = appendLimit > 0;
+  return {
+    availableCount,
+    unavailableCount,
+    canCreatePickupRequest: availableCount > 0,
+    canAppendMeals,
+    appendLimit,
+    titleAr: availableCount > 0 ? "وجبات متاحة للاستلام" : "لا توجد وجبات متاحة للاستلام",
+    titleEn: availableCount > 0 ? "Meals available for pickup" : "No meals available for pickup",
+    emptyTextAr: availableCount === 0 && canAppendMeals
+      ? "لا توجد وجبات متاحة للاستلام الآن. يمكنك إضافة وجبات جديدة لهذا اليوم من رصيد اشتراكك."
+      : null,
+    emptyTextEn: availableCount === 0 && canAppendMeals
+      ? "No meals are available for pickup now. You can add new meals for this day from your subscription balance."
+      : null,
+  };
+}
+
 function assertValidMealCount(mealCount) {
   if (!Number.isInteger(mealCount) || mealCount <= 0) {
     throw createServiceError("INVALID_MEAL_COUNT", "mealCount must be a positive integer", 400);
@@ -415,12 +455,16 @@ async function getPickupAvailabilityForClient({
   const day = await dayQuery.lean();
   const pickupRequests = await findBlockingPickupRequests({ subscriptionId: subscription._id, date, session });
   const availability = buildAvailabilityFromDay({ day, pickupRequests });
+  const wallet = buildPickupAvailabilityWallet(subscription, availability);
+  const summary = buildPickupAvailabilitySummary({ subscription, availability });
   return {
     subscriptionId: stringifyId(subscription._id),
     date,
     subscriptionDayId: availability.subscriptionDayId,
     remainingMeals: Number(subscription.remainingMeals || 0),
     paymentReason: day ? resolveCanonicalPaymentReason(day) : null,
+    wallet,
+    summary,
     slots: availability.slots,
     availableSlotIds: availability.availableSlotIds,
     unavailableSlotIds: availability.unavailableSlotIds,
