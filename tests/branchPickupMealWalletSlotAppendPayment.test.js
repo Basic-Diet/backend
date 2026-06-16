@@ -682,8 +682,7 @@ function legacyBuilderSlot(slotIndex, fixture, { premium = false } = {}) {
       assert.strictEqual(sectionByKey.get("addons").titleEn, "Add-ons");
       assert.strictEqual(data.summary.availableSelectableCount, 7);
       assert.strictEqual(data.summary.availableAddonCount, 2);
-      assert.strictEqual(data.slots[0].addons[0].addonScope, "day");
-      assert.strictEqual(data.slots[0].addons[0].inheritedFromDay, true);
+      assert.deepStrictEqual(data.slots.flatMap((slot) => slot.addons || []), []);
     });
 
     await test("pickup item requests hide previously selected meals and addons by default", async () => {
@@ -722,6 +721,8 @@ function legacyBuilderSlot(slotIndex, fixture, { premium = false } = {}) {
         .send({ date: TODAY, selectedPickupItemIds: ["slot_1", "slot_2"] });
       assert.strictEqual(first.status, 200, JSON.stringify(first.body));
       assert.strictEqual(first.body.data.mealCount, 2);
+      assert.strictEqual(first.body.data.addonCount, 0);
+      assert.strictEqual(first.body.data.itemCount, 2);
 
       availability = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(headers);
       assert.strictEqual(availability.status, 200, JSON.stringify(availability.body));
@@ -742,6 +743,11 @@ function legacyBuilderSlot(slotIndex, fixture, { premium = false } = {}) {
         .set(headers)
         .send({ date: TODAY, selectedPickupItemIds: ["slot_3", `addon_${addonA}_1`] });
       assert.strictEqual(second.status, 200, JSON.stringify(second.body));
+      assert.deepStrictEqual(second.body.data.selectedPickupItemIds.sort(), [`addon_${addonA}_1`, "slot_3"].sort());
+      assert.strictEqual(second.body.data.selectedPickupItems.length, 2);
+      assert.strictEqual(second.body.data.mealCount, 1);
+      assert.strictEqual(second.body.data.addonCount, 1);
+      assert.strictEqual(second.body.data.itemCount, 2);
       const stored = await SubscriptionPickupRequest.findById(second.body.data.requestId).lean();
       assert.deepStrictEqual(stored.selectedPickupItemIds.sort(), [`addon_${addonA}_1`, "slot_3"].sort());
       assert.strictEqual(stored.snapshot.addons.length, 1);
@@ -754,6 +760,121 @@ function legacyBuilderSlot(slotIndex, fixture, { premium = false } = {}) {
         .send({ date: TODAY, selectedPickupItemIds: [`addon_${addonA}_1`] });
       assert.strictEqual(reuse.status, 422, JSON.stringify(reuse.body));
       assert.strictEqual(reuse.body.error.code, "PICKUP_ITEM_UNAVAILABLE");
+    });
+
+    await test("pickup item request reserves only explicitly selected add-on units", async () => {
+      const addonA = new mongoose.Types.ObjectId();
+      const addonB = new mongoose.Types.ObjectId();
+      const addonC = new mongoose.Types.ObjectId();
+      const addonD = new mongoose.Types.ObjectId();
+      const { user, subscription, day } = await seedSubscriptionWithDay({
+        label: "pickup-items-addon-ledger",
+        remainingMeals: 2,
+        slots: [mealSlot(1), mealSlot(2)],
+      });
+      await SubscriptionDay.updateOne(
+        { _id: day._id },
+        {
+          $set: {
+            addonSelections: [
+              { addonId: addonA, key: "addon_a", name: "Addon A", category: "extra", source: "subscription", priceHalala: 0, currency: "SAR" },
+              { addonId: addonB, key: "addon_b", name: "Addon B", category: "extra", source: "subscription", priceHalala: 0, currency: "SAR" },
+              { addonId: addonC, key: "addon_c", name: "Addon C", category: "extra", source: "subscription", priceHalala: 0, currency: "SAR" },
+              { addonId: addonD, key: "addon_d", name: "Addon D", category: "extra", source: "subscription", priceHalala: 0, currency: "SAR" },
+            ],
+          },
+        }
+      );
+      const headers = auth(token(user._id));
+      const addonAItemId = `addon_${addonA}_1`;
+      const addonBItemId = `addon_${addonB}_1`;
+      const addonCItemId = `addon_${addonC}_1`;
+      const addonDItemId = `addon_${addonD}_1`;
+
+      let availability = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(headers);
+      assert.strictEqual(availability.status, 200, JSON.stringify(availability.body));
+      assert.deepStrictEqual(availability.body.data.pickupItems.map((item) => item.itemId).sort(), [
+        "slot_1",
+        "slot_2",
+        addonAItemId,
+        addonBItemId,
+        addonCItemId,
+        addonDItemId,
+      ].sort());
+
+      const first = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`)
+        .set(headers)
+        .send({
+          date: TODAY,
+          selectedPickupItemIds: ["slot_1", addonAItemId, addonBItemId],
+          idempotencyKey: `${TEST_TAG}-addon-ledger-1`,
+        });
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.deepStrictEqual(first.body.data.selectedPickupItemIds.sort(), ["slot_1", addonAItemId, addonBItemId].sort());
+      assert.strictEqual(first.body.data.selectedPickupItems.length, 3);
+      assert.strictEqual(first.body.data.mealCount, 1);
+      assert.strictEqual(first.body.data.addonCount, 2);
+      assert.strictEqual(first.body.data.itemCount, 3);
+
+      const list = await api.get(`/api/subscriptions/${subscription._id}/pickup-requests?date=${TODAY}`).set(headers);
+      assert.strictEqual(list.status, 200, JSON.stringify(list.body));
+      assert.deepStrictEqual(list.body.data.requests[0].selectedPickupItemIds.sort(), ["slot_1", addonAItemId, addonBItemId].sort());
+      assert.strictEqual(list.body.data.requests[0].selectedPickupItems.length, 3);
+      assert.strictEqual(list.body.data.requests[0].mealCount, 1);
+      assert.strictEqual(list.body.data.requests[0].addonCount, 2);
+      assert.strictEqual(list.body.data.requests[0].itemCount, 3);
+
+      const storedFirst = await SubscriptionPickupRequest.findById(first.body.data.requestId).lean();
+      assert.strictEqual(storedFirst.snapshot.mealSlots.length, 1);
+      assert.strictEqual(storedFirst.snapshot.addons.length, 2);
+      assert.strictEqual(storedFirst.snapshot.selectedPickupItems.length, 3);
+      assert.strictEqual(await Subscription.findById(subscription._id).then((doc) => Number(doc.remainingMeals || 0)), 1);
+
+      availability = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(headers);
+      assert.strictEqual(availability.status, 200, JSON.stringify(availability.body));
+      assert.deepStrictEqual(availability.body.data.pickupItems.map((item) => item.itemId).sort(), [
+        "slot_2",
+        addonCItemId,
+        addonDItemId,
+      ].sort());
+      assert.deepStrictEqual(availability.body.data.sections.find((section) => section.sectionKey === "addons").items.map((item) => item.itemId).sort(), [addonCItemId, addonDItemId].sort());
+      assert.deepStrictEqual(availability.body.data.dayAddons.map((item) => item.itemId).sort(), [addonCItemId, addonDItemId].sort());
+      assert.deepStrictEqual(availability.body.data.slots.flatMap((slot) => slot.addons || []), []);
+
+      const history = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}&includeUnavailable=true`).set(headers);
+      assert.strictEqual(history.status, 200, JSON.stringify(history.body));
+      assert.strictEqual(history.body.data.pickupItems.length, 6);
+      for (const itemId of ["slot_1", addonAItemId, addonBItemId]) {
+        const item = history.body.data.pickupItems.find((entry) => entry.itemId === itemId);
+        assert(item, `${itemId} should be present in includeUnavailable response`);
+        assert.strictEqual(item.availability.state, "reserved");
+        assert.strictEqual(item.availability.canSelect, false);
+        assert.strictEqual(item.availability.available, false);
+        assert.strictEqual(item.availability.reservedByPickupRequestId, first.body.data.requestId);
+      }
+      const reservedAddon = history.body.data.pickupItems.find((item) => item.itemId === addonAItemId);
+      assert.strictEqual(reservedAddon.display.statusTextAr, "تم طلب استلام هذه الإضافة بالفعل");
+      assert.strictEqual(reservedAddon.display.statusTextEn, "This add-on has already been requested for pickup");
+      assert.strictEqual(history.body.data.pickupItems.find((item) => item.itemId === "slot_2").availability.state, "available");
+      assert.strictEqual(history.body.data.pickupItems.find((item) => item.itemId === addonCItemId).availability.state, "available");
+      assert.strictEqual(history.body.data.pickupItems.find((item) => item.itemId === addonDItemId).availability.state, "available");
+
+      const second = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`)
+        .set(headers)
+        .send({
+          date: TODAY,
+          selectedPickupItemIds: ["slot_2", addonCItemId],
+          idempotencyKey: `${TEST_TAG}-addon-ledger-2`,
+        });
+      assert.strictEqual(second.status, 200, JSON.stringify(second.body));
+      assert.strictEqual(second.body.data.mealCount, 1);
+      assert.strictEqual(second.body.data.addonCount, 1);
+      assert.strictEqual(second.body.data.itemCount, 2);
+
+      availability = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(headers);
+      assert.strictEqual(availability.status, 200, JSON.stringify(availability.body));
+      assert.deepStrictEqual(availability.body.data.pickupItems.map((item) => item.itemId), [addonDItemId]);
+      assert.strictEqual(await Subscription.findById(subscription._id).then((doc) => Number(doc.remainingMeals || 0)), 0);
     });
 
     await test("pickup availability empty state is bilingual when no selectable items remain", async () => {
@@ -877,8 +998,7 @@ function legacyBuilderSlot(slotIndex, fixture, { premium = false } = {}) {
       assert.strictEqual(slot.payment.required, false);
       assert.strictEqual(slot.payment.addonRequired, false);
       assert.strictEqual(slot.payment.amountDue, 0);
-      assert.strictEqual(slot.addons[0].name.en, "Protein Bar");
-      assert.strictEqual(slot.addons[0].paymentStatus, "pending");
+      assert.deepStrictEqual(slot.addons, []);
       assert.strictEqual(slot.display.unavailableTextAr, "");
       assert.strictEqual(res.body.data.dayAddons.length, 1);
       assert.strictEqual(res.body.data.addonSummary.pendingCount, 1);

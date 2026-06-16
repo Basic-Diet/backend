@@ -579,8 +579,9 @@ function buildClientSlotDetails({ slot = {}, day = {}, available, unavailableRea
     quantity: 1,
   };
   const options = optionSources(slot, kitchenSlot).map((option) => buildOptionPayload(option, catalogMaps));
-  const addons = (Array.isArray(day && day.addonSelections) ? day.addonSelections : []).map(buildAddonPayload);
-  const payment = buildPaymentPayload({ slot, day, reason: unavailableReason, addons });
+  const addons = (Array.isArray(slot && slot.addons) ? slot.addons : []).map(buildAddonPayload);
+  const paymentAddons = (Array.isArray(day && day.addonSelections) ? day.addonSelections : []).map(buildAddonPayload);
+  const payment = buildPaymentPayload({ slot, day, reason: unavailableReason, addons: paymentAddons });
   return {
     canSelect: Boolean(available),
     product,
@@ -788,14 +789,14 @@ function buildSections(pickupItems = []) {
 
 function buildAddonSummary(dayAddons = []) {
   const totalCount = dayAddons.reduce((sum, addon) => sum + Number(addon.quantity || 1), 0);
-  const pendingCount = dayAddons.filter((addon) => addon.paymentRequired).length;
+  const pendingCount = dayAddons.filter((addon) => Boolean(addon.paymentRequired || (addon.payment && addon.payment.required))).length;
   const amountDue = dayAddons
-    .filter((addon) => addon.paymentRequired)
-    .reduce((sum, addon) => sum + Number(addon.price || 0), 0);
+    .filter((addon) => Boolean(addon.paymentRequired || (addon.payment && addon.payment.required)))
+    .reduce((sum, addon) => sum + Number(addon.price || (addon.payment && addon.payment.amountDue) || 0), 0);
   return {
     totalCount,
     pendingCount,
-    paidCount: dayAddons.filter((addon) => addon.paymentStatus === "paid").length,
+    paidCount: dayAddons.filter((addon) => addon.paymentStatus === "paid" || (addon.payment && addon.payment.status === "paid")).length,
     amountDue,
     currency: "SAR",
   };
@@ -810,7 +811,10 @@ function resolveCanonicalPaymentReason(day = {}) {
 function buildSlotReservationMap(pickupRequests = []) {
   const map = new Map();
   for (const request of pickupRequests) {
-    const ids = Array.isArray(request && request.selectedMealSlotIds) ? request.selectedMealSlotIds : [];
+    const ids = [
+      ...(Array.isArray(request && request.selectedMealSlotIds) ? request.selectedMealSlotIds : []),
+      ...(Array.isArray(request && request.selectedPickupItemIds) ? request.selectedPickupItemIds : []),
+    ];
     for (const id of ids.map(normalizeSlotId).filter(Boolean)) {
       map.set(id, {
         requestId: String(request._id),
@@ -900,6 +904,7 @@ function filterAvailabilityForVisibility(availability, { includeUnavailable = fa
   const showAll = Boolean(includeUnavailable || includeHistory);
   if (showAll) return availability;
   const pickupItems = (availability.pickupItems || []).filter(isVisibleByDefault);
+  const dayAddons = (availability.dayAddons || []).filter(isVisibleByDefault);
   const visibleSlotIds = new Set(pickupItems.filter((item) => item.slotId).map((item) => item.slotId));
   const slots = (availability.slots || []).filter((slot) => {
     const itemState = stateForReason(slot.unavailableReason);
@@ -908,6 +913,8 @@ function filterAvailabilityForVisibility(availability, { includeUnavailable = fa
   return {
     ...availability,
     slots,
+    dayAddons,
+    addonSummary: buildAddonSummary(dayAddons),
     pickupItems,
     sections: buildSections(pickupItems),
     availableSlotIds: slots.filter((slot) => slot.available).map((slot) => slot.slotId),
@@ -950,11 +957,11 @@ function buildAvailabilityFromDay({ day, pickupRequests = [], subscription = {},
       ...buildClientSlotDetails({ slot, day: resolvedDay, available, unavailableReason, kitchenSlot, productDoc, catalogMaps }),
     };
   });
-  const dayAddons = (Array.isArray(resolvedDay && resolvedDay.addonSelections) ? resolvedDay.addonSelections : [])
-    .map((addon) => buildAddonPayload(addon));
+  const dayAddons = expandDayAddonPickupItems(Array.isArray(resolvedDay && resolvedDay.addonSelections) ? resolvedDay.addonSelections : [])
+    .map((item) => applyReservationToPickupItem(item, itemReservationMap.get(item.itemId)));
   const pickupItems = [
     ...slots.map(buildPickupItemFromSlot),
-    ...expandDayAddonPickupItems(Array.isArray(resolvedDay && resolvedDay.addonSelections) ? resolvedDay.addonSelections : []),
+    ...dayAddons,
   ].map((item) => applyReservationToPickupItem(item, itemReservationMap.get(item.itemId)));
   const sections = buildSections(pickupItems);
 

@@ -352,6 +352,12 @@ function mapSubscriptionPickupRequestStatus(pickupRequest, { idempotent = false,
   const showCode = ["ready_for_pickup", "fulfilled"].includes(pickupRequest.status);
   const isReady = ["ready_for_pickup", "fulfilled"].includes(status);
   const isCompleted = TERMINAL_PICKUP_REQUEST_STATUSES.includes(status);
+  const selectedPickupItems = Array.isArray(pickupRequest.selectedPickupItems) ? pickupRequest.selectedPickupItems : [];
+  const selectedPickupItemIds = Array.isArray(pickupRequest.selectedPickupItemIds) ? pickupRequest.selectedPickupItemIds : [];
+  const addonCount = selectedPickupItems.length
+    ? selectedPickupItems.filter((item) => item && item.itemType === "addon").length
+    : selectedPickupItemIds.filter((id) => String(id || "").startsWith("addon_")).length;
+  const itemCount = selectedPickupItemIds.length || selectedPickupItems.length;
 
   const payload = {
     requestId: stringifyId(pickupRequest._id),
@@ -360,8 +366,10 @@ function mapSubscriptionPickupRequestStatus(pickupRequest, { idempotent = false,
     date: pickupRequest.date,
     mealCount: Number(pickupRequest.mealCount || 0),
     selectedMealSlotIds: Array.isArray(pickupRequest.selectedMealSlotIds) ? pickupRequest.selectedMealSlotIds : [],
-    selectedPickupItemIds: Array.isArray(pickupRequest.selectedPickupItemIds) ? pickupRequest.selectedPickupItemIds : [],
-    selectedPickupItems: Array.isArray(pickupRequest.selectedPickupItems) ? pickupRequest.selectedPickupItems : [],
+    selectedPickupItemIds,
+    selectedPickupItems,
+    addonCount,
+    itemCount,
     selectionMode: pickupRequest.selectionMode || "legacy_meal_count",
     currentStep: copy.currentStep,
     status,
