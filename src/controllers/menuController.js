@@ -21,6 +21,40 @@ const { getMealPlannerCatalog } = require("../services/subscription/mealPlannerC
 
 const SYSTEM_CURRENCY = "SAR";
 
+const CANONICAL_ONETIME_ADDONS = [
+  "orange_juice",
+  "apple_juice",
+  "mango_juice",
+  "protein_snack",
+  "healthy_dessert",
+  "snack_box"
+];
+
+function getCanonicalAddonKey(addon) {
+  if (addon.key) return addon.key;
+  if (addon.product && addon.product.key) return addon.product.key;
+  if (addon.menuProduct && addon.menuProduct.key) return addon.menuProduct.key;
+  if (addon.name && addon.name.en) {
+    return addon.name.en.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  }
+  return null;
+}
+
+function filterAndDedupeCanonicalAddons(addons) {
+  if (!Array.isArray(addons)) return [];
+  const result = [];
+  const seen = new Set();
+  for (const addon of addons) {
+    const key = getCanonicalAddonKey(addon);
+    if (key && CANONICAL_ONETIME_ADDONS.includes(key) && !seen.has(key)) {
+      addon.key = key; // Attach for stable identity if missing
+      result.push(addon);
+      seen.add(key);
+    }
+  }
+  return result;
+}
+
 async function getSettingValue(key, fallback) {
   const setting = await Setting.findOne({ key }).lean();
   return setting ? setting.value : fallback;
@@ -347,7 +381,9 @@ async function getSubscriptionMenu(req, res) {
     return data;
   });
 
-  const enrichedMealPlannerAddons = mealPlannerAddons.map((addon) => {
+  const filteredMealPlannerAddons = filterAndDedupeCanonicalAddons(mealPlannerAddons);
+
+  const enrichedMealPlannerAddons = filteredMealPlannerAddons.map((addon) => {
     const data = { ...addon };
     if (basePlanId) {
       const matrixPrice = priceMap.get(String(addon._id));
@@ -410,7 +446,7 @@ async function getSubscriptionMealPlannerMenu(req, res) {
   const includeV3 = !requestedContractVersion
     || requestedContractVersion === "v3"
     || requestedContractVersion === "meal_planner_menu.v3";
-  const [regularMeals, mealCategories, addons, mealPlannerCatalog] = await Promise.all([
+  const [regularMeals, mealCategories, rawAddons, mealPlannerCatalog] = await Promise.all([
     Meal.find({ type: "regular", isActive: true, availableForSubscription: { $ne: false }, categoryId: { $ne: null } })
       .sort({ sortOrder: 1, createdAt: -1 })
       .lean(),
@@ -418,6 +454,7 @@ async function getSubscriptionMealPlannerMenu(req, res) {
     Addon.find({ isActive: true, kind: "item", billingMode: "flat_once" }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
     getMealPlannerCatalog({ lang, includeV3 }),
   ]);
+  const addons = filterAndDedupeCanonicalAddons(rawAddons);
   const legacyBuilderCatalog = mealPlannerCatalog?.builderCatalog || mealPlannerCatalog || {};
   const builderCatalogV2 = mealPlannerCatalog?.builderCatalogV2 || null;
   const plannerCatalog = mealPlannerCatalog?.plannerCatalog || null;

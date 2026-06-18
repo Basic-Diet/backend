@@ -367,6 +367,12 @@ These two shapes are **intentionally different**. The backend manages the transf
   * Submitting selected item/option IDs.
   * **No** local premium price calculations.
 
+### C. One-Time Add-on Catalog (`addonCatalog`)
+
+* **Scope:** The `addonCatalog` returned by `/api/subscriptions/meal-planner-menu` is strictly reserved for **canonical one-time add-ons** (e.g., orange juice, protein snack).
+* **Subscription Add-ons:** Subscription entitlement add-ons must use `/api/subscriptions/addons/options?planId=<planId>` and must **not** use `addonCatalog`. Flutter must not use `addonCatalog` for entitlement selections.
+* **Filtering:** The backend strictly filters `addonCatalog` using a canonical allowlist and drops test/dev/internal artifacts (e.g. `dash-contract-*`). These items will never be exposed in public app endpoints.
+
 ---
 
 ## 9. Deferred Regression Test Checklist
