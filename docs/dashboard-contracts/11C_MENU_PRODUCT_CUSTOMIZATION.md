@@ -14,9 +14,14 @@ Provides options and option group mapping controls at the specific product level
 * Product-level price override modal.
 
 ## 4. Backend Endpoints
+
+### Verified Read Endpoints
 * `GET /api/dashboard/menu/products/:productId/composer?contractVersion=v4` (fetches hydrated composer data)
+* `GET /api/dashboard/menu/products/:productId/option-groups` (lists product option group links)
+* `GET /api/dashboard/menu/customization-library` (lists all global option groups and options templates)
+
+### Write Endpoints (NOT_TESTED)
 * `PATCH /api/dashboard/menu/products/:productId/customization` (enables/disables customization on the product)
-* `GET /api/dashboard/menu/products/:productId/option-groups` (lists product option groups)
 * `POST /api/dashboard/menu/products/:productId/option-groups` (associates an option group to a product)
 * `PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId` (updates group rules)
 * `PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/selection-rules` (updates group min/max rules)
@@ -31,40 +36,282 @@ Provides options and option group mapping controls at the specific product level
 * `PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/options/:optionId/visibility` (toggles option visibility on this product)
 * `PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/options/:optionId/availability` (toggles option availability on this product)
 * `DELETE /api/dashboard/menu/products/:productId/option-groups/:groupId/options/:optionId` (detaches option from group on this product)
-* `GET /api/dashboard/menu/customization-library` (lists all global option groups and options)
 
-## 5. Request Parameters
-* **Associate Group (`POST /api/dashboard/menu/products/:productId/option-groups`):**
-  * `groupId` (required, string, ObjectId)
-  * `minSelections` (required, integer)
-  * `maxSelections` (optional, integer)
-  * `isRequired` (optional, boolean)
-* **Replace Group Options (`PUT /api/dashboard/menu/products/:productId/option-groups/:groupId/options`):**
-  * `options` (required, array of objects): Each object contains `optionId`, `extraPriceHalala`, `extraWeightUnitGrams`, `extraWeightPriceHalala`.
-* **Update Option Overrides (`PATCH /api/dashboard/menu/products/:productId/option-groups/:groupId/options/:optionId`):**
-  * `extraPriceHalala` (optional, integer)
-  * `extraWeightUnitGrams` (optional, integer)
-  * `extraWeightPriceHalala` (optional, integer)
+---
+
+## 5. Product Flow Rules
+* `isCustomizable = false` (Direct/Simple Product): The product does not require customization. No options/groups apply.
+* `isCustomizable = true` (Customizable Product): Customization is enabled. The UI must call the composer and product option group endpoints to manage options.
+
+---
 
 ## 6. Response Fields Required
-* `status` (boolean): `true` if succeeded.
-* `data` (composer object returned by `GET /products/:productId/composer?contractVersion=v4`):
-  * `productId` (string)
-  * `isCustomizable` (boolean)
-  * `optionGroups` (array of option group objects):
-    * `groupId` (string)
-    * `key` (string)
-    * `name` (object): `{ ar, en }`
-    * `minSelections` (number)
-    * `maxSelections` (number)
-    * `isRequired` (boolean)
-    * `options` (array of option objects):
-      * `optionId` (string)
-      * `key` (string)
-      * `name` (object): `{ ar, en }`
-      * `extraPriceHalala` (number)
-      * `extraWeightUnitGrams` (number)
-      * `extraWeightPriceHalala` (number)
 
-## 7. Status
-`READY_WITH_LIMITATIONS` (Tested using basic read/write integration tests, but lacks comprehensive assertions on all fields).
+### A. Product Composer Response Shape (`GET /api/dashboard/menu/products/:productId/composer?contractVersion=v4`)
+```json
+{
+  "status": true,
+  "data": {
+    "contractVersion": "dashboard_product_composer.v4",
+    "product": {
+      "id": "6a33b0fef7ece2b8078e13f2",
+      "key": "basic_meal",
+      "name": { "ar": "وجبة أساسية", "en": "Basic Meal" },
+      "categoryId": "65b219e9ca7cd69ffb19b8ea",
+      "isCustomizable": true,
+      "isActive": true,
+      "isVisible": true,
+      "isAvailable": true
+    },
+    "category": {
+      "id": "65b219e9ca7cd69ffb19b8ea",
+      "key": "main_meals",
+      "name": { "ar": "وجبات رئيسية", "en": "Main Meals" }
+    },
+    "customization": {
+      "enabled": true,
+      "summary": {
+        "linkedGroupCount": 2,
+        "linkedOptionCount": 14,
+        "requiredGroupCount": 2
+      },
+      "groups": [
+        {
+          "productGroupId": "6a33b0fef7ece2b8078e13f5",
+          "groupId": "6a33b09ff7ece2b8078e10f2",
+          "key": "proteins",
+          "name": { "ar": "خيارات البروتين", "en": "Proteins" },
+          "displayStyle": "radio_cards",
+          "rules": {
+            "minSelections": 1,
+            "maxSelections": 1,
+            "isRequired": true
+          },
+          "status": {
+            "global": { "isActive": true, "isVisible": true, "isAvailable": true },
+            "product": { "isActive": true, "isVisible": true, "isAvailable": true },
+            "effective": { "isActive": true, "isVisible": true, "isAvailable": true }
+          },
+          "sortOrder": 1,
+          "options": [
+            {
+              "productOptionId": "6a33b0fef7ece2b8078e13ff",
+              "optionId": "6a33b0fef7ece2b8078e13fa",
+              "key": "grilled_chicken",
+              "name": { "ar": "دجاج مشوي", "en": "Grilled Chicken" },
+              "description": { "ar": "", "en": "" },
+              "imageUrl": "",
+              "defaultPricing": {
+                "extraPriceHalala": 0,
+                "extraWeightUnitGrams": 0,
+                "extraWeightPriceHalala": 0,
+                "currency": "SAR"
+              },
+              "overridePricing": {
+                "extraPriceHalala": null,
+                "extraWeightUnitGrams": null,
+                "extraWeightPriceHalala": null,
+                "currency": "SAR"
+              },
+              "effectivePricing": {
+                "extraPriceHalala": 0,
+                "extraWeightUnitGrams": 0,
+                "extraWeightPriceHalala": 0,
+                "currency": "SAR"
+              },
+              "nutrition": {
+                "calories": 165,
+                "proteinGrams": 31,
+                "carbGrams": 0,
+                "fatGrams": 3.6
+              },
+              "status": {
+                "global": { "isActive": true, "isVisible": true, "isAvailable": true },
+                "product": { "isActive": true, "isVisible": true, "isAvailable": true },
+                "effective": { "isActive": true, "isVisible": true, "isAvailable": true }
+              },
+              "sortOrder": 0
+            }
+          ],
+          "optionPool": {
+            "linkedCount": 1,
+            "availableCount": 42,
+            "endpoint": "/api/dashboard/menu/products/6a33b0fef7ece2b8078e13f2/option-groups/6a33b09ff7ece2b8078e10f2/option-pool"
+          }
+        }
+      ]
+    },
+    "availableActions": {
+      "canEnableCustomization": true,
+      "canDisableCustomization": true,
+      "canAttachGroup": true,
+      "canDetachGroup": true,
+      "canReplaceGroupOptions": true,
+      "canPatchOptionOverride": true
+    },
+    "validation": {
+      "ok": true,
+      "errors": [],
+      "warnings": []
+    }
+  }
+}
+```
+
+#### Hydrated Composer Specification:
+
+* **Group Status Model (`status`):**
+  * `global`: State of the option group inside the global customization library templates.
+  * `product`: State of the option group link attached to this specific product.
+  * `effective`: Resolved logical state the UI must use for display/selection.
+  * **Rule**: Customer-facing rendering, Flutter, and final admin previews must read `status.effective`. Global/Product states should only be displayed for editing/debugging.
+
+* **Option Status Model (`options[].status`):**
+  * `global`: State of the option inside the global options catalog.
+  * `product`: State of the option inside this product group option relation mapping.
+  * `effective`: Resolved final state (combines global and product relation properties).
+  * **Rule**: Use `status.effective` for availability and visibility of options inside the product customization flow.
+
+* **Option Pricing Model (`options[].*Pricing`):**
+  * `defaultPricing`: Global option prices configured in the options library.
+  * `overridePricing`: Specific product-level override prices (null/default if none applied).
+  * `effectivePricing`: Final computed and resolved prices that must be displayed to customers.
+  * **Rule**: Dashboard and Flutter client apps must display final option customization prices strictly from `effectivePricing`. They **must not** calculate or resolve overrides locally.
+
+* **`availableActions`:**
+  * Represents backend-provided hints for user capabilities. The frontend should check these flags to enable or disable related UI buttons instead of hardcoding permissions rules locally.
+
+* **`validation`:**
+  * `validation.ok = true` means the current customization is valid and eligible for release. Errors contain blocking issues; warnings describe non-blocking layout recommendations.
+
+---
+
+### B. Product Option Groups Endpoint (`GET /api/dashboard/menu/products/:productId/option-groups`)
+Returns a flat array of relations linking the product to global option groups.
+> [!NOTE]
+> This endpoint returns a lightweight link model, whereas the composer endpoint returns the fully hydrated read model.
+
+```json
+[
+  {
+    "id": "6a33b0fef7ece2b8078e13f5",
+    "_id": "6a33b0fef7ece2b8078e13f5",
+    "productId": "6a33b0fef7ece2b8078e13f2",
+    "groupId": "6a33b09ff7ece2b8078e10f2",
+    "minSelections": 1,
+    "maxSelections": 1,
+    "isRequired": true,
+    "isActive": true,
+    "isVisible": true,
+    "isAvailable": true,
+    "sortOrder": 1,
+    "createdAt": "2026-06-18T12:00:00.000Z",
+    "updatedAt": "2026-06-18T12:00:00.000Z"
+  }
+]
+```
+
+---
+
+### C. Customization Library Endpoint (`GET /api/dashboard/menu/customization-library`)
+Returns the master catalogs of global option groups and option templates.
+> [!NOTE]
+> This catalog acts as a global picker source for admin setup screens. It does not represent specific product customizations.
+
+```json
+{
+  "status": true,
+  "data": {
+    "contractVersion": "dashboard_customization_library.v1",
+    "groups": [
+      {
+        "id": "6a33b09ff7ece2b8078e10f2",
+        "key": "proteins",
+        "name": { "ar": "خيارات البروتين", "en": "Proteins" },
+        "description": { "ar": "", "en": "" },
+        "displayStyle": "radio_cards",
+        "enabled": true,
+        "sortOrder": 1
+      }
+    ],
+    "options": [
+      {
+        "id": "6a33b0fef7ece2b8078e13fa",
+        "key": "grilled_chicken",
+        "name": { "ar": "دجاج مشوي", "en": "Grilled Chicken" },
+        "description": { "ar": "", "en": "" },
+        "imageUrl": "",
+        "suggestedGroupId": "6a33b09ff7ece2b8078e10f2",
+        "suggestedGroupKey": "proteins",
+        "defaultPricing": {
+          "extraPriceHalala": 0,
+          "extraWeightUnitGrams": 0,
+          "extraWeightPriceHalala": 0,
+          "currency": "SAR"
+        },
+        "nutrition": {
+          "calories": 165,
+          "proteinGrams": 31,
+          "carbGrams": 0,
+          "fatGrams": 3.6
+        },
+        "enabled": true,
+        "sortOrder": 0
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 7. Verified Configuration Examples
+
+### A. Customizable Product (`basic_meal`)
+* **Product ID:** `6a33b0fef7ece2b8078e13f2`
+* **Customization Status:** `isCustomizable = true`
+* **Composer Summary:**
+  * `contractVersion = dashboard_product_composer.v4`
+  * `customization.enabled = true`
+  * `customization.summary.linkedGroupCount = 2`
+  * `customization.summary.linkedOptionCount = 14`
+  * `customization.summary.requiredGroupCount = 2`
+  * `validation.ok = true`
+* **Linked Groups:**
+  * **carbs**:
+    * `groupId = 6a33b0a9f7ece2b8078e1131`
+    * `displayStyle = chips`
+    * `minSelections = 1`
+    * `maxSelections = 2`
+    * `isRequired = true`
+    * `options count = 7`
+  * **proteins**:
+    * `groupId = 6a33b09ff7ece2b8078e10f2`
+    * `displayStyle = radio_cards`
+    * `minSelections = 1`
+    * `maxSelections = 1`
+    * `isRequired = true`
+    * `options count = 7`
+
+### B. Direct/Simple Product (`small_salad`)
+* **Product ID:** `6a33b11df7ece2b8078e14eb`
+* **Customization Status:** `isCustomizable = false`
+* **Composer Summary:**
+  * `contractVersion = dashboard_product_composer.v4`
+  * `customization.enabled = false`
+  * `customization.summary.linkedGroupCount = 0`
+  * `customization.summary.linkedOptionCount = 0`
+  * `customization.summary.requiredGroupCount = 0`
+  * `customization.groups = []`
+  * `validation.ok = true`
+
+---
+
+## 8. Status
+`PARTIAL_PASS_READ_MODELS_OK_DOCS_MISMATCH`
+
+```txt
+Backend read side = PASS
+Write endpoints = NOT_TESTED
+Overall 11C = PARTIAL_PASS_READ_MODELS_OK_DOCS_MISMATCH
+```

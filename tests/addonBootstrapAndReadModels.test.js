@@ -155,6 +155,107 @@ async function runTests() {
     const internalRowObjIncluded = resPricesInternal.data.data.find(p => String(p.basePlanId) === internalPlan._id.toString());
     assert.ok(internalRowObjIncluded, "Internal plans should be included when includeInternal=true is passed");
 
+    console.log("--- 6. Testing Seeding Idempotency (Running seedCatalog twice) ---");
+    const initialProductCount = await MenuProduct.countDocuments();
+    const initialAddonCount = await Addon.countDocuments();
+    const initialPriceCount = await AddonPlanPrice.countDocuments();
+
+    // Run seed again
+    await seedCatalog({ sync: true });
+
+    const postProductCount = await MenuProduct.countDocuments();
+    const postAddonCount = await Addon.countDocuments();
+    // Re-create internal test price row since seedCatalog deactivates/cleans non-sellable rows
+    await AddonPlanPrice.create({ addonPlanId: juiceSub._id, basePlanId: internalPlan._id, priceHalala: 500, currency: "SAR", isActive: true });
+    const postPriceCount = await AddonPlanPrice.countDocuments();
+
+    assert.strictEqual(postProductCount, initialProductCount, "Product count must not double on second seed run");
+    assert.strictEqual(postAddonCount, initialAddonCount, "Addon count must not double on second seed run");
+    assert.strictEqual(postPriceCount, initialPriceCount, "AddonPlanPrice count must not double on second seed run");
+
+    console.log("--- 7. Testing Customer-Facing GET /addons/options Endpoint ---");
+    const { getAddonSubscriptionOptions } = require("../src/controllers/addonController");
+    const reqCustOpts = { query: { planId: base7Day._id.toString() } };
+    const resCustOpts = mockResponse();
+    await getAddonSubscriptionOptions(reqCustOpts, resCustOpts);
+
+    assert.strictEqual(resCustOpts.statusCode, 200);
+    assert.ok(resCustOpts.data.status);
+    const custOpts = resCustOpts.data.data.addons;
+    assert.strictEqual(custOpts.length, 3, "Should return all 3 seeded addon plans");
+
+    const juiceOpt = custOpts.find(o => o.category === "juice");
+    assert.ok(juiceOpt);
+    assert.strictEqual(juiceOpt.priceHalala, 10000, "Juice matrix price for 7-day must be 10000");
+    assert.strictEqual(juiceOpt.priceSar, 100);
+    assert.strictEqual(juiceOpt.priceLabel, "100 SAR");
+    assert.strictEqual(juiceOpt.pricingMode, "base_plan_matrix");
+    assert.strictEqual(juiceOpt.maxPerDay, 1);
+    assert.strictEqual(juiceOpt.menuProductsCount, 3);
+    assert.ok(juiceOpt.menuProducts.find(p => p.name.en === "Orange Juice"), "Should contain Orange Juice in menuProducts");
+
+    const snackOpt = custOpts.find(o => o.category === "snack");
+    assert.ok(snackOpt);
+    assert.strictEqual(snackOpt.priceHalala, 8000, "Snack matrix price for 7-day must be 8000");
+
+    const saladOpt = custOpts.find(o => o.category === "small_salad");
+    assert.ok(saladOpt);
+    assert.strictEqual(saladOpt.priceHalala, 9000, "Small salad matrix price for 7-day must be 9000");
+
+    console.log("--- 8. Testing Quote Matrix Price Resolution ---");
+    const { resolveCheckoutQuoteOrThrow } = require("../src/services/subscription/subscriptionQuoteService");
+    const quotePayload = {
+      planId: base7Day._id,
+      grams: 100,
+      mealsPerDay: 2,
+      startDate: new Date(Date.now() + 86400000 * 2).toISOString(),
+      addons: [
+        { id: juiceSub._id }
+      ],
+      delivery: {
+        type: "delivery",
+        address: { street: "Test Street", city: "Riyadh" },
+        zoneId: new mongoose.Types.ObjectId(),
+        slot: { slotId: "delivery_slot_1", window: "09:00 - 12:00" },
+      },
+    };
+
+    // Mock dependencies/settings required for quote
+    const Setting = require("../src/models/Setting");
+    await Setting.findOneAndUpdate(
+      { key: "vat_rate" },
+      { $set: { value: 0.15 } },
+      { upsert: true }
+    );
+    await Setting.findOneAndUpdate(
+      { key: "delivery_windows" },
+      { $set: { value: ["09:00 - 12:00"] } },
+      { upsert: true }
+    );
+    const Zone = require("../src/models/Zone");
+    await Zone.create({
+      _id: quotePayload.delivery.zoneId,
+      name: { en: "Test Zone", ar: "منطقة اختبار" },
+      deliveryFeeHalala: 0,
+      isActive: true,
+    });
+
+    const quoteResult = await resolveCheckoutQuoteOrThrow(quotePayload, {
+      enforceActivePlan: true,
+      allowMissingDeliveryAddress: true,
+      lang: "en",
+    });
+    
+    assert.strictEqual(quoteResult.breakdown.addonsTotalHalala, 10000, "Quote must resolve flat matrix price");
+    assert.strictEqual(quoteResult.addonSubscriptions.length, 1);
+    assert.strictEqual(quoteResult.addonSubscriptions[0].priceHalala, 10000);
+    assert.strictEqual(quoteResult.addonSubscriptions[0].name, "Juice Subscription");
+
+    console.log("--- 9. Testing Direct Menu Item Purchases Remains Unaffected ---");
+    const orangeJuiceDoc = await MenuProduct.findOne({ key: "orange_juice" });
+    assert.ok(orangeJuiceDoc);
+    assert.strictEqual(orangeJuiceDoc.priceHalala, 1000, "Direct price must remain 1000 halala");
+
     console.log("All catalog bootstrap and read model verification tests passed successfully!");
   } catch (err) {
     console.error("Test failed:", err);
@@ -165,3 +266,4 @@ async function runTests() {
 }
 
 runTests();
+

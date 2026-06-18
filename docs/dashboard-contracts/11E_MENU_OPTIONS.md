@@ -17,41 +17,89 @@ Provides CRUD operations, toggling, reordering, and visibility/availability cont
 * `PATCH /api/dashboard/menu/options/reorder` (reorders options sortOrder)
 * `GET /api/dashboard/menu/options/:id` (gets option detail)
 * `PATCH /api/dashboard/menu/options/:id` (updates option fields)
-* `PATCH /api/dashboard/menu/options/:id/visibility` (toggles isVisible)
-* `PATCH /api/dashboard/menu/options/:id/availability` (toggles isAvailable)
-* `DELETE /api/dashboard/menu/options/:id` (soft-deletes option)
-* `PATCH /api/dashboard/menu/options/:id/toggle` (toggles isActive)
+* `PATCH /api/dashboard/menu/options/:id/visibility` (toggles `isVisible` state)
+* `PATCH /api/dashboard/menu/options/:id/availability` (toggles `isAvailable` state)
+* `DELETE /api/dashboard/menu/options/:id` (soft-deletes option by setting `isActive` to `false`)
+* `PATCH /api/dashboard/menu/options/:id/toggle` (toggles option `isActive` state)
 
 ## 5. Request Parameters
 * **Create Option (`POST /api/dashboard/menu/options`):**
   * `groupId` (required, string, ObjectId): Parent group ID.
+  * `catalogItemId` (optional, string, ObjectId)
   * `name` (required, object): `{ ar: string, en: string }`
+  * `description` (optional, object): `{ ar: string, en: string }`
   * `key` (optional, string): If empty, auto-generated.
   * `extraPriceHalala` (optional, integer, default 0)
   * `extraWeightUnitGrams` (optional, integer, default 0)
   * `extraWeightPriceHalala` (optional, integer, default 0)
   * `imageUrl` (optional, string)
+  * `availableFor` (optional, array of strings): `["one_time", "subscription"]`
+  * `availableForSubscription` (optional, boolean, default true)
+  * `nutrition` (optional, object): `{ calories, proteinGrams, carbGrams, fatGrams }`
+  * `proteinFamilyKey` (optional, string)
+  * `displayCategoryKey` (optional, string)
+  * `premiumKey` (optional, string)
+  * `ruleTags` (optional, array of strings)
+  * `selectionType` (optional, string)
+  * `extraFeeHalala` (optional, integer)
   * `isVisible` (optional, boolean)
   * `isAvailable` (optional, boolean)
+  * `sortOrder` (optional, number)
 * **Update Option (`PATCH /api/dashboard/menu/options/:id`):** Same parameters as create.
 * **Reorder Options (`PATCH /api/dashboard/menu/options/reorder`):**
-  * `items` (required, array of strings/ObjectIds): Ordered list of Option IDs.
+  * `items` (required, array of objects): `[{ id: string, sortOrder: number }]`
 
 ## 6. Response Fields Required
-* `status` (boolean): `true` if request succeeded.
-* `data` (option object or array):
-  * `_id` (string, ObjectId)
-  * `groupId` (string, ObjectId)
-  * `key` (string)
-  * `name` (object): `{ ar, en }`
-  * `extraPriceHalala` (number)
-  * `extraWeightUnitGrams` (number)
-  * `extraWeightPriceHalala` (number)
-  * `imageUrl` (string)
-  * `isVisible` (boolean)
-  * `isAvailable` (boolean)
-  * `isActive` (boolean)
-  * `sortOrder` (number)
+Option response objects must match the following serialized schema:
+```json
+{
+  "id": "65b21ad9ca7cd69ffb19b91c",
+  "_id": "65b21ad9ca7cd69ffb19b91c",
+  "groupId": "65b21a8dca7cd69ffb19b90a",
+  "catalogItemId": null,
+  "key": "extra_chicken",
+  "name": {
+    "ar": "دجاج إضافي",
+    "en": "Extra Chicken"
+  },
+  "description": {
+    "ar": "إضافة ٥٠ جرام بروتين دجاج",
+    "en": "Add 50g chicken protein"
+  },
+  "imageUrl": "https://example.com/extra-chicken.jpg",
+  "extraPriceHalala": 1000,
+  "extraWeightUnitGrams": 50,
+  "extraWeightPriceHalala": 1000,
+  "currency": "SAR",
+  "availableFor": ["one_time", "subscription"],
+  "availableForSubscription": true,
+  "nutrition": {
+    "calories": 110,
+    "proteinGrams": 15,
+    "carbGrams": 0,
+    "fatGrams": 3
+  },
+  "proteinFamilyKey": "chicken",
+  "displayCategoryKey": "proteins",
+  "premiumKey": "chicken_extra",
+  "ruleTags": ["extra_protein"],
+  "selectionType": "protein",
+  "extraFeeHalala": 1000,
+  "isVisible": true,
+  "isAvailable": true,
+  "isActive": true,
+  "sortOrder": 0,
+  "publishedAt": null,
+  "createdAt": "2026-06-18T12:00:00.000Z",
+  "updatedAt": "2026-06-18T12:00:00.000Z"
+}
+```
 
-## 7. Status
-`READY_WITH_LIMITATIONS` (Tested using basic read/write integration tests, but lacks comprehensive assertions on all fields).
+---
+
+## 7. Explicit Business Rules
+
+> [!IMPORTANT]
+> **Key Option Properties & Rules:**
+> 1. **`extraFeeHalala` Invariant**: `extraFeeHalala` must mirror the effective extra fee used by dashboard read models. If not explicitly specified on write, the backend defaults/mirrors it to `extraPriceHalala`.
+> 2. **Flag Independence**: `isVisible` (visibility on public apps), `isAvailable` (orderability), and `isActive` (soft-deletion) are completely independent flags. Updating one must not change or affect the others.

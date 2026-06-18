@@ -37,20 +37,40 @@ function expectStatus(res, status, label) {
   assert.strictEqual(res.status, status, `${label}: expected ${status}, got ${res.status} ${JSON.stringify(res.body)}`);
 }
 
-const DEPRECATED_OPTION_FIELDS = [
-  "displayCategoryKey",
+const EXPECTED_OPTION_FIELDS = [
+  "id",
+  "_id",
+  "groupId",
+  "catalogItemId",
+  "key",
+  "name",
+  "description",
+  "imageUrl",
+  "extraPriceHalala",
+  "extraWeightUnitGrams",
+  "extraWeightPriceHalala",
+  "currency",
+  "availableFor",
+  "availableForSubscription",
+  "nutrition",
   "proteinFamilyKey",
+  "displayCategoryKey",
   "premiumKey",
-  "selectionType",
   "ruleTags",
+  "selectionType",
+  "extraFeeHalala",
   "isVisible",
   "isAvailable",
-  "availableForSubscription",
+  "isActive",
+  "sortOrder",
+  "createdAt",
+  "updatedAt",
 ];
 
-function assertNoDeprecatedOptionFields(payload, label) {
-  for (const field of DEPRECATED_OPTION_FIELDS) {
-    assert(!Object.prototype.hasOwnProperty.call(payload, field), `${label} omits ${field}`);
+function assertConsistentOptionFields(payload, label) {
+  assert(payload, `${label}: payload must be defined`);
+  for (const field of EXPECTED_OPTION_FIELDS) {
+    assert(Object.prototype.hasOwnProperty.call(payload, field), `${label} must contain ${field}`);
   }
 }
 
@@ -234,7 +254,7 @@ async function main() {
     });
     expectStatus(res, 201, "create option");
     const option = res.body.data;
-    assertNoDeprecatedOptionFields(option, "created dashboard option");
+    assertConsistentOptionFields(option, "created dashboard option");
     let optionDoc = await mongoose.model("MenuOption").findById(option.id).lean();
     assert.strictEqual(optionDoc.displayCategoryKey, "", "deprecated displayCategoryKey input is ignored");
     assert.strictEqual(optionDoc.proteinFamilyKey, "", "deprecated proteinFamilyKey input is ignored");
@@ -242,8 +262,8 @@ async function main() {
     assert.strictEqual(optionDoc.selectionType, "", "deprecated selectionType input is ignored");
     assert.deepStrictEqual(optionDoc.ruleTags, [], "deprecated ruleTags input is ignored");
     assert.strictEqual(optionDoc.isActive, true, "isActive defaults to true");
-    assert.strictEqual(optionDoc.isVisible, true, "isVisible is derived from isActive on create");
-    assert.strictEqual(optionDoc.isAvailable, true, "isAvailable is derived from isActive on create");
+    assert.strictEqual(optionDoc.isVisible, false, "isVisible is decoupled on create");
+    assert.strictEqual(optionDoc.isAvailable, false, "isAvailable is decoupled on create");
     assert.deepStrictEqual(option.availableFor, ["subscription"], "created dashboard option includes availableFor");
     assert.deepStrictEqual(optionDoc.availableFor, ["subscription"], "availableFor input is stored");
     assert.strictEqual(optionDoc.availableForSubscription, true, "deprecated availableForSubscription input is ignored");
@@ -258,11 +278,11 @@ async function main() {
       availableForSubscription: false,
     });
     expectStatus(res, 201, "create inactive option with simplified status");
-    assertNoDeprecatedOptionFields(res.body.data, "inactive dashboard option");
+    assertConsistentOptionFields(res.body.data, "inactive dashboard option");
     const inactiveOptionDoc = await mongoose.model("MenuOption").findById(res.body.data.id).lean();
     assert.strictEqual(inactiveOptionDoc.isActive, false, "isActive controls dashboard option status");
-    assert.strictEqual(inactiveOptionDoc.isVisible, false, "isVisible is derived from inactive status");
-    assert.strictEqual(inactiveOptionDoc.isAvailable, false, "isAvailable is derived from inactive status");
+    assert.strictEqual(inactiveOptionDoc.isVisible, true, "isVisible is decoupled from active status on create");
+    assert.strictEqual(inactiveOptionDoc.isAvailable, true, "isAvailable is decoupled from active status on create");
     assert.deepStrictEqual(inactiveOptionDoc.availableFor, ["subscription"], "availableFor is controlled by dashboard option form");
 
     res = await api.post(`/api/dashboard/menu/products/${directProduct.id}/option-groups`).set(adminHeaders).send({
@@ -310,7 +330,7 @@ async function main() {
     assert(!Object.prototype.hasOwnProperty.call(res.body.data, "id"), "v3 removes option group root field duplication");
     assert.strictEqual(res.body.data.optionGroup.id, group.id);
     assert(res.body.data.options.some((row) => row.id === option.id));
-    assertNoDeprecatedOptionFields(res.body.data.options.find((row) => row.id === option.id), "option group detail option");
+    assertConsistentOptionFields(res.body.data.options.find((row) => row.id === option.id), "option group detail option");
     assert.strictEqual(res.body.data.usage.linkedProductsCount, 1);
     assert.strictEqual(res.body.data.actions.canAddOptions, true);
 
@@ -319,7 +339,7 @@ async function main() {
     assert.strictEqual(res.body.data.contractVersion, "dashboard_option_detail.v3");
     assert(!Object.prototype.hasOwnProperty.call(res.body.data, "id"), "v3 removes option root field duplication");
     assert.strictEqual(res.body.data.option.id, option.id);
-    assertNoDeprecatedOptionFields(res.body.data.option, "option detail");
+    assertConsistentOptionFields(res.body.data.option, "option detail");
     assert.strictEqual(res.body.data.optionGroup.id, group.id);
     assert.strictEqual(res.body.data.usage.linkedProductsCount, 1);
 
@@ -336,7 +356,7 @@ async function main() {
       extraPriceHalala: 100,
     });
     expectStatus(res, 200, "update option ignores deprecated dashboard fields");
-    assertNoDeprecatedOptionFields(res.body.data, "updated dashboard option");
+    assertConsistentOptionFields(res.body.data, "updated dashboard option");
     optionDoc = await mongoose.model("MenuOption").findById(option.id).lean();
     assert.strictEqual(optionDoc.displayCategoryKey, "", "deprecated displayCategoryKey update is ignored");
     assert.strictEqual(optionDoc.proteinFamilyKey, "", "deprecated proteinFamilyKey update is ignored");
@@ -344,8 +364,8 @@ async function main() {
     assert.strictEqual(optionDoc.selectionType, "", "deprecated selectionType update is ignored");
     assert.deepStrictEqual(optionDoc.ruleTags, [], "deprecated ruleTags update is ignored");
     assert.strictEqual(optionDoc.isActive, true, "omitting isActive preserves current active status");
-    assert.strictEqual(optionDoc.isVisible, true, "isVisible update is ignored and derived from isActive");
-    assert.strictEqual(optionDoc.isAvailable, true, "isAvailable update is ignored and derived from isActive");
+    assert.strictEqual(optionDoc.isVisible, false, "isVisible update is independent");
+    assert.strictEqual(optionDoc.isAvailable, false, "isAvailable update is independent");
     assert.deepStrictEqual(res.body.data.availableFor, ["subscription"], "updated dashboard option includes availableFor");
     assert.deepStrictEqual(optionDoc.availableFor, ["subscription"], "availableFor update is stored");
     assert.strictEqual(optionDoc.availableForSubscription, true, "availableForSubscription update is ignored");
@@ -353,27 +373,29 @@ async function main() {
 
     res = await api.patch(`/api/dashboard/menu/options/${option.id}`).set(adminHeaders).send({ isActive: false });
     expectStatus(res, 200, "update option inactive with simplified status");
-    assertNoDeprecatedOptionFields(res.body.data, "inactive updated dashboard option");
+    assertConsistentOptionFields(res.body.data, "inactive updated dashboard option");
     optionDoc = await mongoose.model("MenuOption").findById(option.id).lean();
     assert.strictEqual(optionDoc.isActive, false, "isActive update applies");
-    assert.strictEqual(optionDoc.isVisible, false, "isVisible follows isActive update");
-    assert.strictEqual(optionDoc.isAvailable, false, "isAvailable follows isActive update");
+    assert.strictEqual(optionDoc.isVisible, false, "isVisible remains false");
+    assert.strictEqual(optionDoc.isAvailable, false, "isAvailable remains false");
 
     res = await api.patch(`/api/dashboard/menu/options/${option.id}`).set(adminHeaders).send({ isActive: true });
     expectStatus(res, 200, "reactivate option with simplified status");
     optionDoc = await mongoose.model("MenuOption").findById(option.id).lean();
     assert.strictEqual(optionDoc.isActive, true, "isActive reactivation applies");
-    assert.strictEqual(optionDoc.isVisible, true, "isVisible follows active status");
-    assert.strictEqual(optionDoc.isAvailable, true, "isAvailable follows active status");
+    assert.strictEqual(optionDoc.isVisible, false, "isVisible remains false");
+    assert.strictEqual(optionDoc.isAvailable, false, "isAvailable remains false");
 
     res = await api.patch(`/api/dashboard/menu/options/${option.id}`).set(adminHeaders).send({
       availableFor: ["one_time", "subscription"],
+      isVisible: true,
+      isAvailable: true,
     });
     expectStatus(res, 200, "restore option channels for preview");
 
     res = await api.get("/api/dashboard/menu/options").set(adminHeaders);
     expectStatus(res, 200, "option list");
-    assertNoDeprecatedOptionFields(res.body.data.find((row) => row.id === option.id), "option list item");
+    assertConsistentOptionFields(res.body.data.find((row) => row.id === option.id), "option list item");
 
     res = await api.get("/api/dashboard/menu/preview").set(adminHeaders);
     expectStatus(res, 200, "dashboard preview");
@@ -463,6 +485,81 @@ async function main() {
     assert.strictEqual(res.body.data.isCustomizable, false);
     assert.strictEqual(await ProductOptionGroup.countDocuments({ productId: directProduct.id, isActive: true }), 0);
     assert.strictEqual(await ProductGroupOption.countDocuments({ productId: directProduct.id, isActive: true }), 0);
+
+    // --- Regression Tests for Menu Option Contracts ---
+    console.log("Running menu option contract regression tests...");
+
+    // Create a new option specifically for this test block
+    res = await api.post(`/api/dashboard/menu/option-groups/${group.id}/options`).set(adminHeaders).send({
+      key: `${TEST_KEY_TAG}_temp_opt`,
+      name: { en: "Temp Option", ar: "Temp Option" },
+      extraPriceHalala: 500,
+    });
+    expectStatus(res, 201, "create temp option for regression tests");
+    const tempOpt = res.body.data;
+    assertConsistentOptionFields(tempOpt, "temp option POST response");
+
+    // 1. GET /api/dashboard/menu/options
+    res = await api.get("/api/dashboard/menu/options").set(adminHeaders);
+    expectStatus(res, 200, "GET options list");
+    const foundInList = res.body.data.find(o => o.id === tempOpt.id);
+    assert(foundInList, "temp option must be found in options list");
+    assertConsistentOptionFields(foundInList, "temp option in list");
+    assert.strictEqual(foundInList.isVisible, true);
+    assert.strictEqual(foundInList.isAvailable, true);
+    assert.strictEqual(foundInList.isActive, true);
+    assert.strictEqual(foundInList.extraFeeHalala, 500, "extraFeeHalala must fall back to extraPriceHalala (500)");
+
+    // 2. GET /api/dashboard/menu/options/:id
+    res = await api.get(`/api/dashboard/menu/options/${tempOpt.id}`).set(adminHeaders);
+    expectStatus(res, 200, "GET option detail");
+    const foundInDetail = res.body.data.option;
+    assertConsistentOptionFields(foundInDetail, "temp option in detail");
+    assert.strictEqual(foundInDetail.isVisible, true);
+    assert.strictEqual(foundInDetail.isAvailable, true);
+    assert.strictEqual(foundInDetail.isActive, true);
+    assert.strictEqual(foundInDetail.extraFeeHalala, 500, "extraFeeHalala detail fallback to 500");
+
+    // 3. GET /api/dashboard/menu/option-groups/:groupId/options
+    res = await api.get(`/api/dashboard/menu/option-groups/${group.id}/options`).set(adminHeaders);
+    expectStatus(res, 200, "GET group-options");
+    const foundInGroup = res.body.data.find(o => o.id === tempOpt.id);
+    assert(foundInGroup, "temp option must be found in group-options list");
+    assertConsistentOptionFields(foundInGroup, "temp option in group-options");
+    assert.strictEqual(foundInGroup.isVisible, true);
+    assert.strictEqual(foundInGroup.isAvailable, true);
+    assert.strictEqual(foundInGroup.isActive, true);
+    assert.strictEqual(foundInGroup.extraFeeHalala, 500, "extraFeeHalala group-options fallback to 500");
+
+    // 4. PATCH /api/dashboard/menu/options/:id/visibility changes only isVisible
+    res = await api.patch(`/api/dashboard/menu/options/${tempOpt.id}/visibility`).set(adminHeaders).send({ isVisible: false });
+    expectStatus(res, 200, "PATCH option visibility");
+    const afterVis = res.body.data;
+    assertConsistentOptionFields(afterVis, "temp option after visibility patch");
+    assert.strictEqual(afterVis.isVisible, false);
+    assert.strictEqual(afterVis.isAvailable, true, "isAvailable must remain unchanged");
+    assert.strictEqual(afterVis.isActive, true, "isActive must remain unchanged");
+    assert.strictEqual(afterVis.extraFeeHalala, 500, "extraFeeHalala remains 500");
+
+    // 5. PATCH /api/dashboard/menu/options/:id/availability changes only isAvailable
+    res = await api.patch(`/api/dashboard/menu/options/${tempOpt.id}/availability`).set(adminHeaders).send({ isAvailable: false });
+    expectStatus(res, 200, "PATCH option availability");
+    const afterAvail = res.body.data;
+    assertConsistentOptionFields(afterAvail, "temp option after availability patch");
+    assert.strictEqual(afterAvail.isVisible, false, "isVisible must remain false");
+    assert.strictEqual(afterAvail.isAvailable, false);
+    assert.strictEqual(afterAvail.isActive, true, "isActive must remain unchanged");
+    assert.strictEqual(afterAvail.extraFeeHalala, 500, "extraFeeHalala remains 500");
+
+    // 6. PATCH /api/dashboard/menu/options/:id/toggle changes only isActive
+    res = await api.patch(`/api/dashboard/menu/options/${tempOpt.id}/toggle`).set(adminHeaders);
+    expectStatus(res, 200, "PATCH option toggle");
+    const afterToggle = res.body.data;
+    assertConsistentOptionFields(afterToggle, "temp option after toggle");
+    assert.strictEqual(afterToggle.isVisible, false, "isVisible must remain false");
+    assert.strictEqual(afterToggle.isAvailable, false, "isAvailable must remain false");
+    assert.strictEqual(afterToggle.isActive, false);
+    assert.strictEqual(afterToggle.extraFeeHalala, 500, "extraFeeHalala remains 500");
 
     console.log("dashboard menu product-centered contract test passed");
   } finally {

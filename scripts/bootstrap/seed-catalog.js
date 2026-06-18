@@ -28,6 +28,7 @@ const {
   CUSTOMER_VISIBLE_CARB_KEYS,
   PREMIUM_MEAL_PROTEIN_KEYS,
   STANDARD_MEAL_PROTEIN_KEYS,
+  STANDARD_MEAL_EXTENDED_PROTEIN_KEYS,
   SUBSCRIPTION_COLD_SANDWICH_KEYS,
   SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS,
   SUBSCRIPTION_PREMIUM_LARGE_SALAD_PROTEIN_KEYS,
@@ -633,7 +634,7 @@ const productGroupAllowedOptionKeys = {
   },
   basic_meal: {
     carbs: [...CUSTOMER_VISIBLE_CARB_KEYS],
-    proteins: [...standardProteinOptionKeys, ...PREMIUM_MEAL_PROTEIN_KEYS],
+    proteins: [...STANDARD_MEAL_EXTENDED_PROTEIN_KEYS],
   },
   premium_large_salad: {
     ...customSaladAllowedOptions,

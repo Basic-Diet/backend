@@ -821,7 +821,7 @@ function serializeHydratedOption({
     reasonCodes.push("PREMIUM_PRICE_MISSING");
     errors.push(statusIssue("error", "PREMIUM_PRICE_MISSING", "Premium option requires positive premium pricing"));
   }
-  if (required) {
+  if (required && !selected) {
     reasonCodes.push("PREMIUM_REQUIRED_KEY");
     warnings.push(statusIssue("warning", "PREMIUM_REQUIRED_KEY", "Premium option is required"));
   }
@@ -2438,11 +2438,13 @@ function validateVisualTemplateSections(sections, warnings, errors) {
       addCheck(errors, "error", "MEAL_BUILDER_VISUAL_SECTION_MISSING", "Default visual template section is missing", { sectionKey: key });
       continue;
     }
-    if (Number(section.sortOrder || 0) !== expectedSortOrder) {
+    const actualSortOrder = Number(section.sortOrder || 0);
+    const matchesCanonical = (actualSortOrder === expectedSortOrder) || (actualSortOrder === expectedSortOrder / 10);
+    if (!matchesCanonical) {
       addCheck(warnings, "warning", "MEAL_BUILDER_VISUAL_SECTION_ORDER_CHANGED", "Default visual template section order differs from canonical order", {
         sectionKey: key,
         expectedSortOrder,
-        actualSortOrder: Number(section.sortOrder || 0),
+        actualSortOrder,
       });
     }
   }

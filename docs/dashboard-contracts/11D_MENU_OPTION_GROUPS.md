@@ -31,21 +31,44 @@ Provides CRUD operations, reordering, and visibility/availability controls for g
   * `description` (optional, object): `{ ar: string, en: string }`
   * `isVisible` (optional, boolean)
   * `isAvailable` (optional, boolean)
+  * `ui` (optional, object): `{ displayStyle }` where `displayStyle` is one of `chips`, `radio_cards`, `checkbox_grid`, `dropdown`, `stepper`.
 * **Update Option Group (`PATCH /api/dashboard/menu/option-groups/:id`):** Same parameters as create.
 * **Reorder Option Groups (`PATCH /api/dashboard/menu/option-groups/reorder`):**
-  * `items` (required, array of strings/ObjectIds): Ordered list of Option Group IDs.
+  * `items` (required, array of objects): `[{ id: string, sortOrder: number }]`
 
 ## 6. Response Fields Required
-* `status` (boolean): `true` if request succeeded.
-* `data` (option group object or array):
-  * `_id` (string, ObjectId)
-  * `key` (string)
-  * `name` (object): `{ ar, en }`
-  * `description` (object): `{ ar, en }`
-  * `isVisible` (boolean)
-  * `isAvailable` (boolean)
-  * `sortOrder` (number)
-  * `isActive` (boolean)
+Every returned option group in lists or detail views includes:
+```json
+{
+  "id": "65b21a8dca7cd69ffb19b90a",
+  "_id": "65b21a8dca7cd69ffb19b90a",
+  "key": "protein_options",
+  "name": {
+    "ar": "خيارات البروتين",
+    "en": "Protein Options"
+  },
+  "description": {
+    "ar": "اختر البروتين المفضل لديك",
+    "en": "Select your preferred protein"
+  },
+  "isVisible": true,
+  "isAvailable": true,
+  "isActive": true,
+  "sortOrder": 0,
+  "ui": {
+    "displayStyle": "chips"
+  },
+  "publishedAt": null,
+  "createdAt": "2026-06-18T12:00:00.000Z",
+  "updatedAt": "2026-06-18T12:00:00.000Z"
+}
+```
+
+---
 
 ## 7. Status
-`READY_WITH_LIMITATIONS` (Tested using basic read/write integration tests, but lacks comprehensive assertions on all fields).
+`PASS_WITH_NOTES`
+
+> [!NOTE]
+> **Notes & Verification Flags:**
+> * `ui.displayStyle` is fully supported by the backend model and must be consumed by the UI/Dashboard where needed to control the selector component rendering style (e.g. chips, radio cards, or grids).

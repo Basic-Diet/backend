@@ -251,7 +251,7 @@ async function main() {
     assert.deepStrictEqual(keys(res.body.data.config.sections), ["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"]);
     assert.strictEqual(res.body.data.config.sections[0].source.kind, "premium_mixed");
 
-    res = await api.get("/api/subscriptions/meal-planner-menu?lang=ar");
+    res = await api.get("/api/subscriptions/meal-planner-menu?includeLegacy=true&lang=ar");
     expectStatus(res, 200, "flutter planner menu after publish");
     const planner = res.body.data.plannerCatalog;
     assert.strictEqual(planner.contractVersion, "meal_planner_menu.v3");

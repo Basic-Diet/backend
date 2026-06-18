@@ -231,15 +231,42 @@ function serializeDoc(doc) {
 function serializeDashboardOption(option) {
   const payload = serializeDoc(option);
   if (!payload) return null;
-  delete payload.displayCategoryKey;
-  delete payload.proteinFamilyKey;
-  delete payload.premiumKey;
-  delete payload.selectionType;
-  delete payload.ruleTags;
-  delete payload.isVisible;
-  delete payload.isAvailable;
-  delete payload.availableForSubscription;
-  return payload;
+
+  const extraPrice = payload.extraPriceHalala || 0;
+  const extraFee = (payload.extraFeeHalala !== undefined && payload.extraFeeHalala !== null && payload.extraFeeHalala !== 0)
+    ? payload.extraFeeHalala
+    : extraPrice;
+
+  return {
+    id: payload.id || String(payload._id),
+    _id: payload._id,
+    groupId: payload.groupId,
+    catalogItemId: payload.catalogItemId !== undefined ? payload.catalogItemId : null,
+    key: payload.key || "",
+    name: payload.name || { ar: "", en: "" },
+    description: payload.description || { ar: "", en: "" },
+    imageUrl: payload.imageUrl || "",
+    extraPriceHalala: extraPrice,
+    extraWeightUnitGrams: payload.extraWeightUnitGrams || 0,
+    extraWeightPriceHalala: payload.extraWeightPriceHalala || 0,
+    currency: payload.currency || SYSTEM_CURRENCY,
+    availableFor: payload.availableFor || ["one_time", "subscription"],
+    availableForSubscription: payload.availableForSubscription !== undefined ? payload.availableForSubscription : true,
+    nutrition: payload.nutrition || { calories: 0, proteinGrams: 0, carbGrams: 0, fatGrams: 0 },
+    proteinFamilyKey: payload.proteinFamilyKey || "",
+    displayCategoryKey: payload.displayCategoryKey || "",
+    premiumKey: payload.premiumKey || "",
+    ruleTags: payload.ruleTags || [],
+    selectionType: payload.selectionType || "",
+    extraFeeHalala: extraFee,
+    isVisible: payload.isVisible !== undefined ? payload.isVisible : true,
+    isAvailable: payload.isAvailable !== undefined ? payload.isAvailable : true,
+    isActive: payload.isActive !== undefined ? payload.isActive : true,
+    sortOrder: payload.sortOrder || 0,
+    publishedAt: payload.publishedAt || null,
+    createdAt: payload.createdAt,
+    updatedAt: payload.updatedAt,
+  };
 }
 
 function parsePaginationOptions(options = {}) {
@@ -1251,6 +1278,8 @@ function normalizeOptionPayload(body = {}, existing = null) {
     extraPriceHalala = extraFeeHalala;
   }
   const isActive = normalizeBoolean(body.isActive, "isActive", existing ? existing.isActive : true);
+  const isVisible = normalizeBoolean(body.isVisible, "isVisible", existing ? truthyByDefault(existing.isVisible) : true);
+  const isAvailable = normalizeBoolean(body.isAvailable, "isAvailable", existing ? truthyByDefault(existing.isAvailable) : true);
 
   return {
     groupId: body.groupId === undefined && existing ? existing.groupId : assertObjectId(body.groupId, "groupId"),
@@ -1266,8 +1295,8 @@ function normalizeOptionPayload(body = {}, existing = null) {
     availableFor: normalizeAvailableFor(body.availableFor, "availableFor", existing ? (existing.availableFor || []) : ["one_time", "subscription"]),
     extraFeeHalala,
     isActive,
-    isVisible: isActive,
-    isAvailable: isActive,
+    isVisible,
+    isAvailable,
     sortOrder: normalizeNonNegativeInteger(body.sortOrder, "sortOrder", existing ? existing.sortOrder : 0),
   };
 }
@@ -2467,9 +2496,13 @@ async function updateEntityField(Model, id, fieldName, value, { entityType, acto
   }
   const existing = await Model.findById(id).lean();
   if (!existing) throw new MenuNotFoundError();
-  return updateEntity(Model, id, {
+  const updated = await updateEntity(Model, id, {
     [fieldName]: normalizeBoolean(value, fieldName, truthyByDefault(existing[fieldName])),
   }, { entityType, actor, action });
+  if (Model === MenuOption) {
+    return serializeDashboardOption(updated);
+  }
+  return serializeDoc(updated);
 }
 
 async function publishMenu({ actor = {}, notes = "" } = {}) {
@@ -3088,7 +3121,8 @@ module.exports = {
   toggleOption: async (id, actor) => {
     const existing = await MenuOption.findById(assertObjectId(id)).lean();
     if (!existing) throw new MenuNotFoundError();
-    return updateEntity(MenuOption, id, { isActive: !existing.isActive }, { entityType: "menu_option", actor, action: "toggle_active" });
+    const updated = await updateEntity(MenuOption, id, { isActive: !existing.isActive }, { entityType: "menu_option", actor, action: "toggle_active" });
+    return serializeDashboardOption(updated);
   },
   bulkAssignProductsToCategory,
   bulkUpdateProducts,
