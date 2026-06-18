@@ -3,6 +3,7 @@ const BuilderProtein = require("../../models/BuilderProtein");
 const MenuOption = require("../../models/MenuOption");
 const MenuOptionGroup = require("../../models/MenuOptionGroup");
 const Addon = require("../../models/Addon");
+const AddonPlanPrice = require("../../models/AddonPlanPrice");
 const Zone = require("../../models/Zone");
 const Setting = require("../../models/Setting");
 const dateUtils = require("../../utils/date");
@@ -628,8 +629,26 @@ async function resolveCheckoutQuoteOrThrow(
       err.code = "INVALID_SELECTION";
       throw err;
     }
-    const unit = resolveAddonUnitPriceHalala(doc);
-    assertSystemCurrencyOrThrow(doc.currency || SYSTEM_CURRENCY, `Addon plan ${item.id} currency`);
+
+    let unit;
+    if (doc.kind === "plan") {
+      const matrixPrice = await AddonPlanPrice.findOne({
+        addonPlanId: doc._id,
+        basePlanId: plan._id,
+        isActive: true,
+      }).lean();
+
+      if (!matrixPrice) {
+        const err = new Error(`Addon plan ${doc.name.en || doc._id} has no active price resolved for the base plan ${plan.name.en || plan._id}`);
+        err.code = "PRICE_MATRIX_NOT_FOUND";
+        throw err;
+      }
+      unit = matrixPrice.priceHalala;
+      assertSystemCurrencyOrThrow(matrixPrice.currency || SYSTEM_CURRENCY, `Addon plan price matrix currency`);
+    } else {
+      unit = resolveAddonUnitPriceHalala(doc);
+      assertSystemCurrencyOrThrow(doc.currency || SYSTEM_CURRENCY, `Addon plan ${item.id} currency`);
+    }
 
     const lineTotal = resolveAddonChargeTotalHalala({
       unitPriceHalala: unit,
@@ -749,11 +768,16 @@ async function resolveCheckoutQuoteOrThrow(
   const basePlanNetHalala = divisor > 0 ? Math.round(basePlanPriceHalala / divisor) : basePlanPriceHalala;
   const addonSubscriptions = resolvedAddonItems.map((item) => ({
     addonId: item.addon._id,
+    addonPlanId: item.addon._id,
     name: pickLang(item.addon.name, lang),
+    addonPlanName: pickLang(item.addon.name, lang),
     category: item.category || item.addon.category,
-    maxPerDay: 1,
+    maxPerDay: item.addon.maxPerDay || 1,
+    basePlanId: plan._id,
     priceHalala: Number(item.unitPriceHalala || 0),
     currency: item.currency || SYSTEM_CURRENCY,
+    menuProductIds: item.addon.menuProductIds || [],
+    priceSource: "base_plan_addon_price",
   }));
 
   let quote = {

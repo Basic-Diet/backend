@@ -5,6 +5,7 @@ const mealIngredientController = require("../controllers/mealIngredientControlle
 const mealController = require("../controllers/mealController");
 const mealCategoryController = require("../controllers/mealCategoryController");
 const addonController = require("../controllers/addonController");
+const addonPlanPriceController = require("../controllers/addonPlanPriceController");
 const builderPremiumMealController = require("../controllers/builderPremiumMealController");
 const promoCodeController = require("../controllers/promoCodeController");
 const uploadController = require("../controllers/uploadController");
@@ -245,6 +246,13 @@ router.patch("/addon-items/:id/toggle", asyncHandler(addonController.toggleAddon
 router.get("/addon-items/:id", asyncHandler(addonController.getAddonItemAdmin));
 router.put("/addon-items/:id", adminImageUploadMiddleware, asyncHandler(addonController.updateAddonItem));
 router.delete("/addon-items/:id", asyncHandler(addonController.deleteAddonItem));
+
+router.get("/addon-prices", asyncHandler(addonPlanPriceController.listAddonPrices));
+router.post("/addon-prices", asyncHandler(addonPlanPriceController.createAddonPrice));
+router.get("/addon-prices/:id", asyncHandler(addonPlanPriceController.getAddonPrice));
+router.put("/addon-prices/:id", asyncHandler(addonPlanPriceController.updateAddonPrice));
+router.delete("/addon-prices/:id", asyncHandler(addonPlanPriceController.deleteAddonPrice));
+router.patch("/addon-prices/:id/toggle", asyncHandler(addonPlanPriceController.toggleAddonPriceActive));
 router.get("/builder-premium-meals", asyncHandler(builderPremiumMealController.listBuilderPremiumMealsAdmin));
 router.get("/builder-premium-meals/:id", asyncHandler(builderPremiumMealController.getBuilderPremiumMealAdmin));
 router.post(

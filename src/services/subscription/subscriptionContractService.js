@@ -133,10 +133,16 @@ function buildPhase1SubscriptionContract({ payload = {}, resolvedQuote, actorCon
     : null;
   const addonSubscriptions = (resolvedQuote.addonSubscriptions || []).map((as) => ({
     addonId: String(as.addon && as.addon._id ? as.addon._id : as.addonId || ""),
+    addonPlanId: String(as.addonPlanId || as.addonId || ""),
     name: as.name || "",
+    addonPlanName: as.addonPlanName || as.name || "",
     category: as.category || "",
+    maxPerDay: as.maxPerDay || 1,
+    basePlanId: as.basePlanId || null,
     priceHalala: Number(as.priceHalala || 0),
     currency: String(as.currency || "SAR"),
+    menuProductIds: as.menuProductIds || [],
+    priceSource: as.priceSource || "",
   }));
 
   const contractSnapshot = {

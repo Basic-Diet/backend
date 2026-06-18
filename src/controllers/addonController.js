@@ -184,6 +184,19 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null } = {}) {
     ? validateObjectId(payload.menuProductId, "menuProductId")
     : null;
 
+  const menuProductIds = Array.isArray(payload.menuProductIds)
+    ? payload.menuProductIds.map((id) => validateObjectId(id, "menuProductIds"))
+    : [];
+
+  let maxPerDay = 1;
+  if (payload.maxPerDay !== undefined && payload.maxPerDay !== null) {
+    const parsedMax = Number(payload.maxPerDay);
+    if (!Number.isInteger(parsedMax) || parsedMax < 1) {
+      throw { status: 400, code: "INVALID", message: "maxPerDay must be an integer >= 1" };
+    }
+    maxPerDay = parsedMax;
+  }
+
   return {
     name,
     description,
@@ -198,6 +211,8 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null } = {}) {
     isActive,
     sortOrder,
     menuProductId,
+    menuProductIds,
+    maxPerDay,
     ...derivedBillingFields,
     billingMode,
   };
@@ -291,6 +306,21 @@ async function listAddons(req, res) {
     return errorResponse(res, err.status || 400, err.code || "INVALID", err.message || "Invalid addon filters");
   }
 
+  const basePlanId = req.query.basePlanId || req.query.planId;
+  const AddonPlanPrice = require("../models/AddonPlanPrice");
+  let priceMap = new Map();
+  if (basePlanId) {
+    try {
+      validateObjectId(basePlanId, "basePlanId");
+      const prices = await AddonPlanPrice.find({ basePlanId, isActive: true }).lean();
+      for (const p of prices) {
+        priceMap.set(String(p.addonPlanId), p.priceHalala);
+      }
+    } catch (err) {
+      // ignore invalid basePlanId parameter in listing
+    }
+  }
+
   const rows = await Addon.find(filters)
     .populate("menuProductId")
     .sort({ sortOrder: 1, createdAt: -1 })
@@ -305,7 +335,24 @@ async function listAddons(req, res) {
       data.priceLabel = `${data.priceSar} SAR`;
       data.menuProductId = String(row.menuProductId._id);
     }
-    return resolveAddonCatalogEntry(data, lang);
+
+    if (row.kind === "plan" && basePlanId) {
+      const matrixPrice = priceMap.get(String(row._id));
+      if (matrixPrice !== undefined) {
+        data.priceHalala = matrixPrice;
+        data.price = matrixPrice / 100;
+        data.priceSar = matrixPrice / 100;
+        data.priceLabel = `${matrixPrice / 100} SAR`;
+      } else {
+        data.isAvailable = false;
+      }
+    }
+    
+    const entry = resolveAddonCatalogEntry(data, lang);
+    if (data.isAvailable === false) {
+      entry.isAvailable = false;
+    }
+    return entry;
   });
   
   return res.status(200).json({ status: true, data: mapped });
@@ -315,7 +362,56 @@ async function listAddonsAdmin(req, res, options = {}) {
   try {
     const filters = resolveAdminAddonFilters(req.query || {}, options);
     const rows = await Addon.find(filters).sort({ sortOrder: 1, createdAt: -1 }).lean();
-    return res.status(200).json({ status: true, data: rows, meta: { filters, totalCount: rows.length } });
+
+    const AddonPlanPrice = require("../models/AddonPlanPrice");
+    const Plan = require("../models/Plan");
+    const { includeInternal } = req.query || {};
+    const matchQuery = includeInternal === "true" ? {} : Plan.getSellableQuery();
+    const validBasePlans = await Plan.find(matchQuery).select("_id").lean();
+    const validBasePlanIds = validBasePlans.map(p => String(p._id));
+
+    const addonPlanPrices = await AddonPlanPrice.find({ isActive: true }).lean();
+    const validAddonPlanPrices = addonPlanPrices.filter(p => validBasePlanIds.includes(String(p.basePlanId)));
+
+    const mapped = rows.map((row) => {
+      const menuProductIds = row.menuProductIds || [];
+      const menuProductsCount = menuProductIds.length;
+      
+      let planPricesCount = 0;
+      if (row.kind === "plan") {
+        planPricesCount = validAddonPlanPrices.filter(p => String(p.addonPlanId) === String(row._id)).length;
+      }
+
+      const {
+        priceHalala, priceSar, priceLabel, billingMode, billingUnit, price, menuProductId,
+        ...cleanRow
+      } = row;
+
+      if (row.kind === "plan") {
+        cleanRow.legacyCompatibility = {
+          priceHalala, priceSar, priceLabel, billingMode, billingUnit, price, menuProductId,
+        };
+      } else {
+        cleanRow.priceHalala = priceHalala;
+        cleanRow.priceSar = priceSar;
+        cleanRow.priceLabel = priceLabel;
+        cleanRow.billingMode = billingMode;
+        cleanRow.billingUnit = billingUnit;
+        cleanRow.price = price;
+        cleanRow.menuProductId = menuProductId;
+      }
+
+      return {
+        id: String(row._id),
+        ...cleanRow,
+        menuProductIds,
+        menuProductsCount,
+        planPricesCount,
+        pricingMode: row.kind === "plan" ? "base_plan_matrix" : undefined,
+      };
+    });
+
+    return res.status(200).json({ status: true, data: mapped, meta: { filters, totalCount: rows.length } });
   } catch (err) {
     if (err && err.status) {
       return errorResponse(res, err.status, err.code, err.message);
@@ -338,7 +434,86 @@ async function getAddonAdmin(req, res, options = {}) {
   if (!row) {
     return errorResponse(res, 404, "NOT_FOUND", "Addon not found");
   }
-  return res.status(200).json({ status: true, data: row });
+
+  const {
+    priceHalala, priceSar, priceLabel, billingMode, billingUnit, price, menuProductId,
+    ...cleanRow
+  } = row;
+
+  const data = { ...cleanRow };
+  data.id = String(row._id);
+  data.menuProductIds = row.menuProductIds || [];
+  data.menuProductsCount = data.menuProductIds.length;
+
+  if (row.kind === "plan") {
+    data.legacyCompatibility = {
+      priceHalala, priceSar, priceLabel, billingMode, billingUnit, price, menuProductId,
+    };
+    // 1. Fetch menuProducts
+    const prods = await MenuProduct.find({ _id: { $in: data.menuProductIds } }).populate("categoryId");
+    data.menuProducts = prods.map((p) => ({
+      id: String(p._id),
+      _id: p._id,
+      name: p.name,
+      image: p.imageUrl || "",
+      category: p.categoryId ? p.categoryId.key : "",
+      isActive: p.isActive,
+    }));
+
+    // 2. Fetch planPrices
+    const AddonPlanPrice = require("../models/AddonPlanPrice");
+    const Plan = require("../models/Plan");
+    const { includeInternal } = req.query || {};
+    const matchQuery = includeInternal === "true" ? {} : Plan.getSellableQuery();
+
+    const prices = await AddonPlanPrice.find({ addonPlanId: row._id })
+      .populate({ path: "basePlanId", match: matchQuery })
+      .lean();
+    
+    const validPrices = prices.filter(p => p.basePlanId != null);
+    data.planPrices = validPrices.map((p) => {
+      const basePlan = p.basePlanId || {};
+      const daysCount = basePlan.daysCount || 0;
+      let mealsCount = daysCount * 2;
+      let basePlanPriceHalala = 0;
+
+      if (basePlan.gramsOptions && basePlan.gramsOptions.length > 0) {
+        const gramsOpt = basePlan.gramsOptions.find((g) => g.grams === 100) || basePlan.gramsOptions[0];
+        if (gramsOpt && gramsOpt.mealsOptions && gramsOpt.mealsOptions.length > 0) {
+          const mealOpt = gramsOpt.mealsOptions.find((m) => m.mealsPerDay === 2) || gramsOpt.mealsOptions[0];
+          if (mealOpt) {
+            mealsCount = daysCount * mealOpt.mealsPerDay;
+            basePlanPriceHalala = mealOpt.priceHalala;
+          }
+        }
+      }
+
+      return {
+        id: String(p._id),
+        _id: p._id,
+        addonPlanId: p.addonPlanId || row._id,
+        basePlanId: basePlan._id || p.basePlanId,
+        basePlanName: basePlan.name || { ar: "", en: "" },
+        daysCount,
+        mealsCount,
+        basePlanPriceHalala,
+        priceHalala: p.priceHalala,
+        priceSar: p.priceHalala / 100,
+        priceLabel: `${p.priceHalala / 100} SAR`,
+        currency: p.currency || SYSTEM_CURRENCY,
+        isActive: p.isActive !== false,
+      };
+    });
+
+    data.planPricesCount = data.planPrices.length;
+    data.pricingMode = "base_plan_matrix";
+  } else {
+    data.menuProducts = [];
+    data.planPrices = [];
+    data.planPricesCount = 0;
+  }
+
+  return res.status(200).json({ status: true, data });
 }
 
 async function createAddon(req, res, options = {}) {
@@ -428,6 +603,21 @@ async function patchAddon(req, res, options = {}) {
       payload.menuProductId = req.body.menuProductId && String(req.body.menuProductId).trim() !== ""
         ? validateObjectId(req.body.menuProductId, "menuProductId")
         : null;
+    }
+
+    if (req.body.menuProductIds !== undefined) {
+      if (!Array.isArray(req.body.menuProductIds)) {
+        return errorResponse(res, 400, "INVALID", "menuProductIds must be an array");
+      }
+      payload.menuProductIds = req.body.menuProductIds.map((id) => validateObjectId(id, "menuProductIds"));
+    }
+
+    if (req.body.maxPerDay !== undefined && req.body.maxPerDay !== null) {
+      const parsedMax = Number(req.body.maxPerDay);
+      if (!Number.isInteger(parsedMax) || parsedMax < 1) {
+        return errorResponse(res, 400, "INVALID", "maxPerDay must be an integer >= 1");
+      }
+      payload.maxPerDay = parsedMax;
     }
     
     // Support basic fields in patch
@@ -606,7 +796,113 @@ async function deleteAddonItem(req, res) {
   return deleteAddon(req, res, forceItemKind);
 }
 
+/**
+ * GET /api/subscriptions/addons/options?planId=:planId
+ *
+ * Customer-facing endpoint that returns active add-on subscription plans
+ * with backend-resolved flat matrix prices for the selected base plan.
+ * Flutter uses this to display add-on options and prices before calling quote.
+ */
+async function getAddonSubscriptionOptions(req, res) {
+  const lang = getRequestLang(req);
+  const planId = req.query.planId;
+
+  if (!planId || !String(planId).trim()) {
+    return errorResponse(res, 400, "VALIDATION_ERROR", "planId query parameter is required");
+  }
+  try {
+    validateObjectId(planId, "planId");
+  } catch (err) {
+    return errorResponse(res, 400, "VALIDATION_ERROR", "planId must be a valid ObjectId");
+  }
+
+  const Plan = require("../models/Plan");
+  const plan = await Plan.findOne({ _id: planId, isActive: true }).lean();
+  if (!plan) {
+    return errorResponse(res, 404, "NOT_FOUND", "Base plan not found or inactive");
+  }
+
+  const AddonPlanPrice = require("../models/AddonPlanPrice");
+  const matrixRows = await AddonPlanPrice.find({ basePlanId: planId, isActive: true }).lean();
+
+  if (!matrixRows.length) {
+    return res.status(200).json({
+      status: true,
+      data: { planId: String(plan._id), addons: [] },
+    });
+  }
+
+  const priceByAddonId = new Map();
+  const addonIds = [];
+  for (const row of matrixRows) {
+    const key = String(row.addonPlanId);
+    priceByAddonId.set(key, row.priceHalala);
+    addonIds.push(row.addonPlanId);
+  }
+
+  const addonDocs = await Addon.find({
+    _id: { $in: addonIds },
+    kind: "plan",
+    isActive: true,
+  }).lean();
+
+  // Collect all menuProductIds across all addons for a single batch query
+  const allMenuProductIds = [];
+  for (const doc of addonDocs) {
+    if (Array.isArray(doc.menuProductIds)) {
+      for (const pid of doc.menuProductIds) allMenuProductIds.push(pid);
+    }
+  }
+
+  const menuProductDocs = allMenuProductIds.length
+    ? await MenuProduct.find({ _id: { $in: allMenuProductIds } }).populate("categoryId").lean()
+    : [];
+  const menuProductById = new Map(
+    menuProductDocs.map((p) => [String(p._id), p])
+  );
+
+  const addons = addonDocs.map((doc) => {
+    const matrixPrice = priceByAddonId.get(String(doc._id));
+    const priceSar = matrixPrice / 100;
+    const productIds = Array.isArray(doc.menuProductIds) ? doc.menuProductIds : [];
+    const menuProducts = productIds
+      .map((pid) => menuProductById.get(String(pid)))
+      .filter(Boolean)
+      .map((p) => ({
+        id: String(p._id),
+        _id: p._id,
+        name: p.name,
+        image: p.imageUrl || "",
+        category: p.categoryId ? p.categoryId.key : "",
+        isActive: p.isActive !== false,
+      }));
+
+    return {
+      id: String(doc._id),
+      addonPlanId: String(doc._id),
+      name: doc.name,
+      category: doc.category || "",
+      maxPerDay: doc.maxPerDay || 1,
+      pricingMode: "base_plan_matrix",
+      priceHalala: matrixPrice,
+      priceSar,
+      priceLabel: `${priceSar} SAR`,
+      currency: doc.currency || SYSTEM_CURRENCY,
+      isAvailable: true,
+      menuProductIds: productIds.map(String),
+      menuProductsCount: menuProducts.length,
+      menuProducts,
+    };
+  });
+
+  return res.status(200).json({
+    status: true,
+    data: { planId: String(plan._id), addons },
+  });
+}
+
 module.exports = {
+  getAddonSubscriptionOptions,
   listAddons,
   listAddonsAdmin,
   getAddonAdmin,

@@ -1062,6 +1062,9 @@ async function quoteSubscription(req, res, runtimeOverrides = null) {
     if (err.code === "INVALID_PREMIUM_ITEM" || err.code === "UNKNOWN_PREMIUM_KEY") {
       return errorResponse(res, 422, "INVALID_PREMIUM_ITEM", err.message);
     }
+    if (err.code === "PRICE_MATRIX_NOT_FOUND") {
+      return errorResponse(res, err.status || 400, err.code, err.message);
+    }
     throw err;
   }
 }
@@ -1111,8 +1114,8 @@ async function checkoutSubscription(req, res, runtimeOverrides = null) {
     if (err.status === 409 && err.code === "IDEMPOTENCY_CONFLICT") {
       return errorResponse(res, 409, "IDEMPOTENCY_CONFLICT", err.message);
     }
-    if (err.status === 400 && err.code === "CHECKOUT_FAILED") {
-      return errorResponse(res, 400, "CHECKOUT_FAILED", err.message);
+    if (err.code === "PRICE_MATRIX_NOT_FOUND") {
+      return errorResponse(res, err.status || 400, err.code, err.message);
     }
     logger.error("Subscription checkout failed", { error: err.message, stack: err.stack });
     return errorResponse(
@@ -2361,6 +2364,7 @@ async function getSubscriptionAddonChoices(req, res) {
     const data = await buildAddonChoicesCatalog({
       lang,
       category: req.query && req.query.category,
+      subscriptionId: req.query && req.query.subscriptionId,
     });
     return res.status(200).json({ status: true, data });
   } catch (err) {

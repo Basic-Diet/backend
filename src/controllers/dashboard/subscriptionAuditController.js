@@ -8,6 +8,7 @@ const Delivery = require("../../models/Delivery");
 const Payment = require("../../models/Payment");
 const ActivityLog = require("../../models/ActivityLog");
 const errorResponse = require("../../utils/errorResponse");
+const subscriptionPickupSlotService = require("../../services/subscription/subscriptionPickupSlotService");
 
 /**
  * Audit-Only Invariant Logic:
@@ -279,8 +280,42 @@ async function getSubscriptionAudit(req, res) {
     if (day) {
       const addonCount = (pr.selectedPickupItemIds || []).filter(id => String(id || "").startsWith("addon_")).length;
       pickedAddonsCount += addonCount;
-      if (day.status !== "fulfilled") {
-        warnings.push(`Fulfillment mismatch: Pickup request for date ${pr.date} is fulfilled, but day status is ${day.status} (picked items reappear as editable).`);
+
+      const availability = subscriptionPickupSlotService.buildAvailabilityFromDay({
+        day,
+        pickupRequests: prsActive,
+        subscription,
+      });
+
+      const selectedIds = [
+        ...(pr.selectedPickupItemIds || []),
+        ...(pr.selectedMealSlotIds || [])
+      ].map(id => String(id || "").trim()).filter(Boolean);
+
+      if (selectedIds.length > 0) {
+        let hasSelectableFulfilledItem = false;
+        const selectableItemIds = (availability.pickupItems || [])
+          .filter(item => item.availability && item.availability.canSelect)
+          .map(item => String(item.itemId || "").trim());
+
+        const selectableSlotIds = (availability.slots || [])
+          .filter(slot => slot.canSelect || slot.available)
+          .map(slot => String(slot.slotId || "").trim());
+
+        for (const id of selectedIds) {
+          if (selectableItemIds.includes(id) || selectableSlotIds.includes(id)) {
+            hasSelectableFulfilledItem = true;
+            break;
+          }
+        }
+
+        if (hasSelectableFulfilledItem) {
+          warnings.push(`Fulfillment mismatch: Pickup request for date ${pr.date} is fulfilled, but day status is ${day.status} (picked items reappear as editable).`);
+        }
+      } else {
+        if (day.status !== "fulfilled") {
+          warnings.push(`Fulfillment mismatch: Pickup request for date ${pr.date} is fulfilled, but day status is ${day.status} (picked items reappear as editable).`);
+        }
       }
     }
   }

@@ -60,9 +60,16 @@ const AddonSelectionSchema = new mongoose.Schema(
 const AddonSubscriptionEntitlementSchema = new mongoose.Schema(
   {
     addonId: { type: mongoose.Schema.Types.ObjectId, ref: "Addon" }, // The Category Plan ID
+    addonPlanId: { type: mongoose.Schema.Types.ObjectId, ref: "Addon" },
     name: { type: String, default: "" },
+    addonPlanName: { type: String, default: "" },
     category: { type: String, required: true },
     maxPerDay: { type: Number, min: 1, default: 1 },
+    basePlanId: { type: mongoose.Schema.Types.ObjectId, ref: "Plan" },
+    priceHalala: { type: Number, default: 0 },
+    currency: { type: String, default: "SAR" },
+    menuProductIds: { type: [mongoose.Schema.Types.ObjectId], ref: "MenuProduct", default: [] },
+    priceSource: { type: String, default: "" },
   },
   { _id: false }
 );

@@ -136,8 +136,24 @@ async function findMappedProducts(categoryRows, mapping, { MenuProductModel = Me
 async function buildAddonChoicesCatalog({
   lang = "en",
   category,
+  subscriptionId = null,
   models = {},
 } = {}) {
+  let allowedProductIdsByCat = new Map();
+  let hasSubscriptionFilter = false;
+  if (subscriptionId) {
+    const SubscriptionModel = models.SubscriptionModel || mongoose.model("Subscription");
+    const sub = await SubscriptionModel.findById(subscriptionId).lean();
+    if (sub && Array.isArray(sub.addonSubscriptions)) {
+      hasSubscriptionFilter = true;
+      for (const ent of sub.addonSubscriptions) {
+        if (Array.isArray(ent.menuProductIds) && ent.menuProductIds.length > 0) {
+          allowedProductIdsByCat.set(ent.category, ent.menuProductIds.map((id) => String(id)));
+        }
+      }
+    }
+  }
+
   const categories = normalizeCategoryFilter(category);
   const sourceCategoryKeys = [
     ...new Set(categories.flatMap((key) => SUBSCRIPTION_ADDON_CHOICE_MAPPINGS[key].sourceCategories)),
@@ -154,13 +170,20 @@ async function buildAddonChoicesCatalog({
       .map((key) => categoriesByKey.get(key))
       .filter(Boolean);
     const productRows = await findMappedProducts(mappedCategoryRows, mapping, models);
-    const choices = productRows
+    let choices = productRows
       .map((product) => {
         const sourceCategory = categoriesById.get(String(product.categoryId));
         if (!sourceCategory) return null;
         return serializeChoice(product, sourceCategory.key, lang);
       })
       .filter(Boolean);
+
+    if (hasSubscriptionFilter) {
+      const allowedIds = allowedProductIdsByCat.get(addonCategory);
+      if (allowedIds) {
+        choices = choices.filter((choice) => allowedIds.includes(String(choice.id)));
+      }
+    }
 
     data[addonCategory] = {
       category: addonCategory,

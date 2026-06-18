@@ -68,6 +68,7 @@ Provides a detailed view and lifecycle management for client subscriptions. Allo
 * `remainingQty` remains `0` after fulfillment of partial pickup requests (unpicked planned addons are not refunded).
 * Audit endpoint correctly computes `pickedQty` from fulfilled pickup requests' `selectedPickupItemIds`.
 * `remainingPlannedQty = usedQty - pickedQty - deliveredQty` is always correct.
+* Audit endpoint warns only if a fulfilled item is returned as selectable in pickup availability.
 
 ## Subscription-Critical Invariant Rules
 > **These rules are canonical and enforced by the backend. The dashboard must display these values verbatim without recalculation.**

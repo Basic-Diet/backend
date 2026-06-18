@@ -71,4 +71,17 @@ PlanSchema.methods.isViable = function () {
   return this.constructor.isViable(this);
 };
 
+// Define the rule for sellable / customer-facing base plans.
+// This excludes test, dev, contract, and internal delivery plans.
+PlanSchema.statics.getSellableQuery = function () {
+  return {
+    isActive: true,
+    isAvailable: { $ne: false },
+    active: { $ne: false },
+    available: { $ne: false },
+    durationDays: { $gte: 1 },
+    "name.en": { $not: /(delivery|contract|test|dev|unpaid|happy|empty)/i }
+  };
+};
+
 module.exports = mongoose.model("Plan", PlanSchema);

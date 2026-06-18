@@ -123,6 +123,16 @@ async function reconcileAddonInclusions(
     // Check if inclusive
     const used = entitlementUsage.get(category) || 0;
     if (entitlement && used < (entitlement.maxPerDay || 1)) {
+      if (Array.isArray(entitlement.menuProductIds) && entitlement.menuProductIds.length > 0) {
+        const allowedIds = entitlement.menuProductIds.map((id) => String(id));
+        if (!allowedIds.includes(String(doc._id))) {
+          throw {
+            status: 400,
+            code: "INVALID_ADDON_SELECTION",
+            message: `Selected product ${doc.name?.en || doc._id} is not allowed for addon entitlement category ${category}`,
+          };
+        }
+      }
       source = "subscription";
       priceHalala = 0;
       entitlementUsage.set(category, used + 1);

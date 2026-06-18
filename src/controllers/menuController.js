@@ -131,9 +131,21 @@ function buildSubscriptionMealCatalog({
   customMealBasePrice,
 } = {}) {
   const mappedPremiumMeals = premiumMeals.map((meal) => resolvePremiumMealCatalogEntry(meal, lang));
-  const mappedAddons = addons.map((addon) => resolveAddonCatalogEntry(addon, lang));
+  const mappedAddons = addons.map((addon) => {
+    const entry = resolveAddonCatalogEntry(addon, lang);
+    if (addon.isAvailable === false) {
+      entry.isAvailable = false;
+    }
+    return entry;
+  });
   const mappedMealPlannerAddons = (Array.isArray(mealPlannerAddons) ? mealPlannerAddons : addons)
-    .map((addon) => resolveAddonCatalogEntry(addon, lang));
+    .map((addon) => {
+      const entry = resolveAddonCatalogEntry(addon, lang);
+      if (addon.isAvailable === false) {
+        entry.isAvailable = false;
+      }
+      return entry;
+    });
   const mealCategoryMap = buildMealCategoryMap(mealCategories, lang);
   const resolvedRegularMeals = regularMeals.map((meal) => {
     const category = resolveMealCategoryForKey(
@@ -303,6 +315,54 @@ async function getSubscriptionMenu(req, res) {
     getSettingValue("custom_meal_base_price", 0),
   ]);
 
+  const basePlanId = req.query?.basePlanId || req.query?.planId;
+  let priceMap = new Map();
+  if (basePlanId) {
+    try {
+      const AddonPlanPrice = require("../models/AddonPlanPrice");
+      const validateObjectId = require("../utils/validateObjectId");
+      validateObjectId(basePlanId, "basePlanId");
+      const prices = await AddonPlanPrice.find({ basePlanId, isActive: true }).lean();
+      for (const p of prices) {
+        priceMap.set(String(p.addonPlanId), p.priceHalala);
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  const enrichedAddons = addons.map((addon) => {
+    const data = { ...addon };
+    if (basePlanId) {
+      const matrixPrice = priceMap.get(String(addon._id));
+      if (matrixPrice !== undefined) {
+        data.priceHalala = matrixPrice;
+        data.price = matrixPrice / 100;
+        data.priceSar = matrixPrice / 100;
+        data.priceLabel = `${matrixPrice / 100} SAR`;
+      } else {
+        data.isAvailable = false;
+      }
+    }
+    return data;
+  });
+
+  const enrichedMealPlannerAddons = mealPlannerAddons.map((addon) => {
+    const data = { ...addon };
+    if (basePlanId) {
+      const matrixPrice = priceMap.get(String(addon._id));
+      if (matrixPrice !== undefined) {
+        data.priceHalala = matrixPrice;
+        data.price = matrixPrice / 100;
+        data.priceSar = matrixPrice / 100;
+        data.priceLabel = `${matrixPrice / 100} SAR`;
+      } else {
+        data.isAvailable = false;
+      }
+    }
+    return data;
+  });
+
   const builderCatalog = mealPlannerCatalog?.builderCatalog || mealPlannerCatalog || {};
   const mappedPlans = plans.map((plan) => resolvePlanCatalogEntry(plan, lang));
   const premiumMeals = mapBuilderPremiumProteinsToLegacyRows(builderCatalog);
@@ -318,8 +378,8 @@ async function getSubscriptionMenu(req, res) {
     regularMeals,
     mealCategories,
     premiumMeals,
-    addons,
-    mealPlannerAddons,
+    addons: enrichedAddons,
+    mealPlannerAddons: enrichedMealPlannerAddons,
     customSaladBasePrice,
     customMealBasePrice,
   });

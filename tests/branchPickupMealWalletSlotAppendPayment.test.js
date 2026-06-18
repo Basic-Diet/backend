@@ -144,12 +144,12 @@ async function cleanup() {
     MenuOptionGroup.deleteMany({ key: { $regex: `^${TEST_KEY_PREFIX}` } }),
     BuilderProtein.deleteMany({ key: { $regex: `^${TEST_KEY_PREFIX}` } }),
     BuilderCarb.deleteMany({ key: { $regex: `^${TEST_KEY_PREFIX}` } }),
-    Setting.deleteMany({ key: { $in: ["restaurant_open_time", "restaurant_close_time", "restaurant_is_open"] } }),
+    Setting.deleteMany({ key: { $in: ["restaurant_open_time", "restaurant_close_time", "restaurant_is_open", "pickup_locations"] } }),
   ]);
 }
 
 async function seedSettings() {
-  await Setting.deleteMany({ key: { $in: ["restaurant_open_time", "restaurant_close_time", "restaurant_is_open"] } });
+  await Setting.deleteMany({ key: { $in: ["restaurant_open_time", "restaurant_close_time", "restaurant_is_open", "pickup_locations"] } });
   await Setting.create([
     { key: "restaurant_open_time", value: "00:00" },
     { key: "restaurant_close_time", value: "00:00" },

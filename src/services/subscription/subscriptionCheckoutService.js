@@ -441,11 +441,18 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
         premiumUpgradeLimit: quote.premiumUpgradeLimit || null,
         premiumCount: Number(quote.premiumCount || 0),
         premiumUnitPriceHalala: Number(quote.premiumUnitPriceHalala || 0),
-        addonSubscriptions: (quote.addonItems || []).map((item) => ({
-          addonId: item.addon._id,
-          name: pickLang(item.addon.name, lang),
-          category: item.category || item.addon.category,
-          maxPerDay: 1,
+        addonSubscriptions: (quote.addonSubscriptions || []).map((sub) => ({
+          addonId: sub.addonId,
+          addonPlanId: sub.addonPlanId,
+          name: sub.name,
+          addonPlanName: sub.addonPlanName,
+          category: sub.category,
+          maxPerDay: sub.maxPerDay,
+          basePlanId: sub.basePlanId,
+          priceHalala: sub.priceHalala,
+          currency: sub.currency,
+          menuProductIds: sub.menuProductIds,
+          priceSource: sub.priceSource,
         })),
         promo: quote.promoCode
           ? {

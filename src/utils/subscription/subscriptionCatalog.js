@@ -83,6 +83,11 @@ function resolveAddonChargeTotalHalala({ unitPriceHalala, qty, daysCount, mealsP
   const unit = toMoneyParts(unitPriceHalala).halala;
   const parsedQty = Number(qty);
   const normalizedQty = Number.isFinite(parsedQty) ? Math.max(0, Math.round(parsedQty)) : 0;
+
+  if (addon.pricingMode === "base_plan_matrix" || addon.kind === "plan") {
+    return unit * normalizedQty;
+  }
+
   const mode = resolveSubscriptionAddonBillingMode(addon, { defaultMode: "per_day" });
 
   if (mode === "per_meal") {
@@ -96,6 +101,9 @@ function resolveAddonChargeTotalHalala({ unitPriceHalala, qty, daysCount, mealsP
 
 function formatAddonUnitLabel(halala, currency = SYSTEM_CURRENCY, addon = {}, lang = "ar") {
   const baseLabel = formatCurrencyLabel(halala, currency);
+  if (addon.pricingMode === "base_plan_matrix" || addon.kind === "plan") {
+    return baseLabel;
+  }
   const mode = resolveSubscriptionAddonBillingMode(addon, { defaultMode: "per_day" });
 
   if (mode === "per_day") return localizeText(lang, `${baseLabel} / يوم`, `${baseLabel} / day`);
@@ -110,6 +118,12 @@ function formatAddonFormulaLabel({ unitPriceHalala, currency = SYSTEM_CURRENCY, 
   if (normalizedQty <= 0) return "";
 
   const compactUnitLabel = formatCompactMoney(unit.sar);
+
+  if (addon.pricingMode === "base_plan_matrix" || addon.kind === "plan") {
+    const unitLabel = `${compactUnitLabel} ${currency}`;
+    return normalizedQty > 1 ? `${unitLabel} × ${normalizedQty}` : unitLabel;
+  }
+
   const mode = resolveSubscriptionAddonBillingMode(addon, { defaultMode: "per_day" });
 
   if (mode === "per_day") {

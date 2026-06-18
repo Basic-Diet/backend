@@ -673,6 +673,114 @@ async function runTests() {
     await SubscriptionPickupRequest.deleteMany({ subscriptionId: sub._id });
   });
 
+  await test("Test: fulfilled pickup request with day status open does not warn if items are hidden", async () => {
+    const today = dateUtils.getTodayKSADate();
+    const nextMonth = dateUtils.addDaysToKSADateString(today, 30);
+    const sub = await Subscription.create({
+      userId: customer._id,
+      planId: new mongoose.Types.ObjectId(),
+      status: "active",
+      totalMeals: 10,
+      remainingMeals: 9,
+      deliveryMode: "pickup",
+      startDate: today,
+      endDate: nextMonth,
+    });
+
+    const day = await SubscriptionDay.create({
+      subscriptionId: sub._id,
+      date: today,
+      status: "open",
+      mealSlots: [
+        { slotIndex: 1, slotKey: "slot_1", selectionType: "standard_meal", status: "complete" }
+      ]
+    });
+
+    const pr = await SubscriptionPickupRequest.create({
+      subscriptionId: sub._id,
+      userId: customer._id,
+      date: today,
+      mealCount: 1,
+      selectedPickupItemIds: ["slot_1"],
+      selectedMealSlotIds: ["slot_1"],
+      status: "fulfilled",
+      idempotencyKey: `${TEST_TAG}-audit-open-day-fulfilled`,
+    });
+
+    const res = await request(app)
+      .get(`/api/dashboard/subscriptions/${sub._id}/audit`)
+      .set(auth("admin"));
+
+    expectStatus(res, 200, "audit retrieve");
+    const matchingWarnings = res.body.data.warnings.filter(w => w.includes("Fulfillment mismatch"));
+    assert.strictEqual(matchingWarnings.length, 0, `Expected 0 fulfillment mismatch warnings, got: ${JSON.stringify(matchingWarnings)}`);
+
+    await Subscription.deleteOne({ _id: sub._id });
+    await SubscriptionDay.deleteOne({ _id: day._id });
+    await SubscriptionPickupRequest.deleteOne({ _id: pr._id });
+  });
+
+  await test("Test: fulfilled pickup request warns if fulfilled items reappear as selectable", async () => {
+    const today = dateUtils.getTodayKSADate();
+    const nextMonth = dateUtils.addDaysToKSADateString(today, 30);
+    const sub = await Subscription.create({
+      userId: customer._id,
+      planId: new mongoose.Types.ObjectId(),
+      status: "active",
+      totalMeals: 10,
+      remainingMeals: 9,
+      deliveryMode: "pickup",
+      startDate: today,
+      endDate: nextMonth,
+    });
+
+    const day = await SubscriptionDay.create({
+      subscriptionId: sub._id,
+      date: today,
+      status: "open",
+      mealSlots: [
+        { slotIndex: 1, slotKey: "slot_1", selectionType: "standard_meal", status: "complete" }
+      ]
+    });
+
+    const pr = await SubscriptionPickupRequest.create({
+      subscriptionId: sub._id,
+      userId: customer._id,
+      date: today,
+      mealCount: 1,
+      selectedPickupItemIds: ["slot_1"],
+      selectedMealSlotIds: ["slot_1"],
+      status: "fulfilled",
+      idempotencyKey: `${TEST_TAG}-audit-open-day-selectable`,
+    });
+
+    const pickupSlotService = require("../src/services/subscription/subscriptionPickupSlotService");
+    const originalBuild = pickupSlotService.buildAvailabilityFromDay;
+    pickupSlotService.buildAvailabilityFromDay = (opts) => {
+      const avail = originalBuild(opts);
+      if (avail.pickupItems && avail.pickupItems.length > 0) {
+        avail.pickupItems[0].availability.canSelect = true;
+      }
+      return avail;
+    };
+
+    try {
+      const res = await request(app)
+        .get(`/api/dashboard/subscriptions/${sub._id}/audit`)
+        .set(auth("admin"));
+
+      expectStatus(res, 200, "audit retrieve");
+      const matchingWarnings = res.body.data.warnings.filter(w => w.includes("Fulfillment mismatch"));
+      assert.strictEqual(matchingWarnings.length, 1, `Expected 1 fulfillment mismatch warning, got: ${JSON.stringify(matchingWarnings)}`);
+    } finally {
+      pickupSlotService.buildAvailabilityFromDay = originalBuild;
+    }
+
+    await Subscription.deleteOne({ _id: sub._id });
+    await SubscriptionDay.deleteOne({ _id: day._id });
+    await SubscriptionPickupRequest.deleteOne({ _id: pr._id });
+  });
+
   console.log(`\n==========================================`);
   console.log(`RESULTS: ${results.passed} passed, ${results.failed} failed`);
   console.log(`==========================================\n`);

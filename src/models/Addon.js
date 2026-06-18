@@ -70,6 +70,22 @@ const AddonSchema = new mongoose.Schema(
       index: true 
     },
 
+    menuProductIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "MenuProduct" }],
+      default: [],
+    },
+
+    maxPerDay: {
+      type: Number,
+      default: 1,
+    },
+
+    pricingMode: {
+      type: String,
+      enum: ["base_plan_matrix"],
+      default: undefined,
+    },
+
     // Backward-compat fields.
     price: { type: Number, default: 0 },
   },

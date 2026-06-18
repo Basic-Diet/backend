@@ -32,7 +32,8 @@ const { ensureSafeForDestructiveOp } = require('../src/utils/dbSafety');
 const { VAT_PERCENTAGE } = require('../src/config/vat');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
-const BASE_URL = 'http://localhost:3000';
+const PORT = process.env.PORT || 3000;
+const BASE_URL = `http://localhost:${PORT}`;
 
 function issueAppAccessToken(userId) {
   return jwt.sign(
@@ -325,6 +326,18 @@ if (proteinsWithoutKey.length >= 2) {
     });
     await addonItemJuice.save();
   }
+
+  const AddonPlanPrice = require('../src/models/AddonPlanPrice');
+  await AddonPlanPrice.findOneAndUpdate(
+    { addonPlanId: addonPlanJuice._id, basePlanId: testPlan._id },
+    { $set: { priceHalala: 1100, isActive: true } },
+    { upsert: true }
+  );
+  await AddonPlanPrice.findOneAndUpdate(
+    { addonPlanId: addonPlanSnack._id, basePlanId: testPlan._id },
+    { $set: { priceHalala: 500, isActive: true } },
+    { upsert: true }
+  );
 }
 
 async function cleanupTestData() {
@@ -343,7 +356,7 @@ async function startServer() {
   return new Promise((resolve, reject) => {
     app = createApp();
     server = http.createServer(app);
-    server.listen(3000, () => { resolve(); });
+    server.listen(PORT, () => { resolve(); });
     server.on('error', reject);
   });
 }
@@ -470,15 +483,15 @@ async function runTests() {
     const res = await makeRequest('POST', '/api/subscriptions/quote', quotePayload);
     assertEqual(res.status, 200, 'quote status');
     assertEqual(res.body.status, true, 'status');
-    const expectedAddonsTotal = Number(addonPlanJuice.priceHalala || 0) * Number(testPlan.daysCount || 0);
-    assertEqual(Number(res.body.data?.breakdown?.addonsTotalHalala || 0), expectedAddonsTotal, 'plan add-on total uses per-day pricing');
+    const expectedAddonsTotal = Number(addonPlanJuice.priceHalala || 0);
+    assertEqual(Number(res.body.data?.breakdown?.addonsTotalHalala || 0), expectedAddonsTotal, 'plan add-on total uses flat pricing');
     assertInclusiveVatBreakdown(res.body.data?.breakdown, 'subscription quote with add-on');
     const summaryAddon = res.body.data?.summary?.addons?.[0];
     assertNotNull(summaryAddon, 'summary addon exists');
     assertEqual(summaryAddon.qty, 1, 'summary addon qty reflects selected addon');
     assertEqual(summaryAddon.durationDays, Number(testPlan.daysCount || 0), 'summary addon duration reflects plan days');
     assertEqual(summaryAddon.unitPriceSar, Number(addonPlanJuice.priceHalala || 0) / 100, 'summary addon unit price reflects catalog price');
-    assertEqual(summaryAddon.totalSar, expectedAddonsTotal / 100, 'summary addon total uses unit price times duration');
+    assertEqual(summaryAddon.totalSar, expectedAddonsTotal / 100, 'summary addon total uses flat price');
     assertEqual(summaryAddon.totalLabel, `${expectedAddonsTotal / 100} SAR`, 'summary addon total label matches total');
   });
 

@@ -337,7 +337,10 @@ function buildCanonicalActivationPayload({ userId, planId, contractVersion, cont
     premiumUpgradeCount: countPremiumItemsQty(premiumBalanceRows.map((row) => ({ qty: row.purchasedQty }))),
     totalSubscriptionMeals: totalMeals,
   });
-  const addonSubscriptions = legacyRuntimeData.addonSubscriptions || [];
+  let addonSubscriptions = legacyRuntimeData.addonSubscriptions || [];
+  if ((!addonSubscriptions || addonSubscriptions.length === 0) && snapshot.entitlementContract && Array.isArray(snapshot.entitlementContract.addonSubscriptions)) {
+    addonSubscriptions = snapshot.entitlementContract.addonSubscriptions;
+  }
   const end = addDays(start, daysCount - 1);
 
   const subscriptionPayload = {

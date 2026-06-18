@@ -18,6 +18,7 @@ const BuilderProtein = require("../../src/models/BuilderProtein");
 const CatalogItem = require("../../src/models/CatalogItem");
 const SaladIngredient = require("../../src/models/SaladIngredient");
 const Sandwich = require("../../src/models/Sandwich");
+const MealBuilderConfig = require("../../src/models/MealBuilderConfig");
 const { getSubscriptionBuilderCatalogWithV2 } = require("../../src/services/catalog/CatalogService");
 const { publishMenu } = require("../../src/services/orders/menuCatalogService");
 const { getOneTimeOrderMenu } = require("../../src/services/orders/orderMenuService");
@@ -967,6 +968,22 @@ const productRows = [
   // Legacy subscription sandwich retained separately from the external grilled chicken row.
   { key: "chicken_sandwich", category: "cold_sandwiches", itemType: "cold_sandwich", name: name("ساندويتش دجاج", "Chicken Sandwich"), pricingModel: "fixed", priceHalala: 1300, availableFor: ["subscription"], ui: { cardVariant: "standard", cardSize: "small" }, proteinFamilyKey: "chicken" },
   { key: "sourdough_turkey", category: "sourdough", itemType: "sourdough", name: name("ساوردو تركي", "Sourdough Turkey"), pricingModel: "fixed", priceHalala: 2300, availableFor: ["subscription"], ui: { cardVariant: "standard", cardSize: "small" }, proteinFamilyKey: "other" },
+
+  // Addon menu products for Juice subscription
+  { key: "orange_juice", category: "juices", itemType: "juice", name: name("عصير برتقال", "Orange Juice"), pricingModel: "fixed", priceHalala: 1000, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon_card", cardSize: "small" } },
+  { key: "apple_juice", category: "juices", itemType: "juice", name: name("عصير تفاح", "Apple Juice"), pricingModel: "fixed", priceHalala: 1000, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon_card", cardSize: "small" } },
+  { key: "mango_juice", category: "juices", itemType: "juice", name: name("عصير مانجو", "Mango Juice"), pricingModel: "fixed", priceHalala: 1000, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon_card", cardSize: "small" } },
+
+  // Addon menu products for Small Salad subscription
+  { key: "greek_salad", category: "light_options", itemType: "green_salad", name: name("سلطة يونانية", "Greek Salad"), pricingModel: "fixed", priceHalala: 1200, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon", cardSize: "small" } },
+  { key: "fruit_salad_addon", category: "light_options", itemType: "fruit_salad", name: name("سلطة فواكه", "Fruit Salad"), pricingModel: "fixed", priceHalala: 1200, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon", cardSize: "small" } },
+  { key: "vegetable_salad", category: "light_options", itemType: "green_salad", name: name("سلطة خضار", "Vegetable Salad"), pricingModel: "fixed", priceHalala: 1200, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon", cardSize: "small" } },
+
+  // Addon menu products for Snack subscription
+  { key: "protein_snack", category: "desserts", itemType: "dessert", name: name("سناك بروتين", "Protein Snack"), pricingModel: "fixed", priceHalala: 1500, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon_card", cardSize: "small" } },
+  { key: "healthy_dessert", category: "desserts", itemType: "dessert", name: name("حلوى صحية", "Healthy Dessert"), pricingModel: "fixed", priceHalala: 1500, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon_card", cardSize: "small" } },
+  { key: "snack_box", category: "desserts", itemType: "dessert", name: name("صندوق سناك", "Snack Box"), pricingModel: "fixed", priceHalala: 1500, availableFor: ["subscription", "one_time"], ui: { cardVariant: "addon_card", cardSize: "small" } },
+
   ...externalProductRows,
   ...mealProductRows,
   ...carbProductRows,
@@ -999,6 +1016,7 @@ async function resetCatalogData() {
     BuilderCategory.deleteMany({}),
     Sandwich.deleteMany({}),
     SaladIngredient.deleteMany({}),
+    MealBuilderConfig.deleteMany({}),
   ]);
 }
 
@@ -1396,14 +1414,51 @@ async function seedSubscriptionAddons(productMap, { sync = false } = {}) {
     );
   }
 
+  const MenuProduct = require("../../src/models/MenuProduct");
+  const AddonPlanPrice = require("../../src/models/AddonPlanPrice");
+  const Plan = require("../../src/models/Plan");
+
+  const juiceProducts = await MenuProduct.find({ key: { $in: ["orange_juice", "apple_juice", "mango_juice"] } }).lean();
+  const saladProducts = await MenuProduct.find({ key: { $in: ["greek_salad", "fruit_salad_addon", "vegetable_salad"] } }).lean();
+  const snackProducts = await MenuProduct.find({ key: { $in: ["protein_snack", "healthy_dessert", "snack_box"] } }).lean();
+
+  const juiceProductIds = juiceProducts.map((p) => p._id);
+  const saladProductIds = saladProducts.map((p) => p._id);
+  const snackProductIds = snackProducts.map((p) => p._id);
+
   const planAddons = [
-    { name: name("اشتراك العصير", "Juice Subscription"), priceHalala: 1100, category: "juice", sortOrder: 1 },
-    { name: name("اشتراك السناك", "Snack Subscription"), priceHalala: 1200, category: "snack", sortOrder: 2 },
-    { name: name("اشتراك السلطة الصغيرة", "Small Salad Subscription"), priceHalala: 1200, category: "small_salad", sortOrder: 3 },
+    {
+      name: name("اشتراك العصير", "Juice Subscription"),
+      priceHalala: 1100,
+      category: "juice",
+      sortOrder: 1,
+      menuProductIds: juiceProductIds,
+      maxPerDay: 1,
+      pricingMode: "base_plan_matrix",
+    },
+    {
+      name: name("اشتراك السناك", "Snack Subscription"),
+      priceHalala: 1200,
+      category: "snack",
+      sortOrder: 2,
+      menuProductIds: snackProductIds,
+      maxPerDay: 1,
+      pricingMode: "base_plan_matrix",
+    },
+    {
+      name: name("اشتراك السلطة الصغيرة", "Small Salad Subscription"),
+      priceHalala: 1200,
+      category: "small_salad",
+      sortOrder: 3,
+      menuProductIds: saladProductIds,
+      maxPerDay: 1,
+      pricingMode: "base_plan_matrix",
+    },
   ];
 
+  const seededAddonPlans = [];
   for (const plan of planAddons) {
-    await upsertByMode(
+    const doc = await upsertByMode(
       Addon,
       { kind: "plan", category: plan.category },
       {
@@ -1419,8 +1474,59 @@ async function seedSubscriptionAddons(productMap, { sync = false } = {}) {
         currency: SYSTEM_CURRENCY,
         isActive: true,
       },
-      { label: "Subscription addons", sync }
+      { label: "Subscription addons", sync: true }
     );
+    seededAddonPlans.push(doc);
+  }
+
+  // Seed active price matrix rows for the base subscription plans
+  const sellableQuery = Plan.getSellableQuery();
+  const basePlans = await Plan.find(sellableQuery).lean();
+  const basePlanIds = basePlans.map(p => p._id);
+
+  // Clean existing local/dev seeded matrix data linked to non-sellable base plans
+  await AddonPlanPrice.deleteMany({ basePlanId: { $nin: basePlanIds } });
+  
+  const matrixPrices = {
+    juice: {
+      7: 10000,
+      26: 18000,
+      30: 30000,
+    },
+    small_salad: {
+      7: 9000,
+      26: 16000,
+      30: 27000,
+    },
+    snack: {
+      7: 8000,
+      26: 15000,
+      30: 25000,
+    },
+  };
+
+  const getMatrixPrice = (category, daysCount) => {
+    const pricesObj = matrixPrices[category] || {};
+    return pricesObj[daysCount] !== undefined ? pricesObj[daysCount] : null;
+  };
+
+  for (const addonDoc of seededAddonPlans) {
+    for (const basePlanDoc of basePlans) {
+      const priceHalala = getMatrixPrice(addonDoc.category, basePlanDoc.daysCount);
+      if (priceHalala === null) continue; // Do not use loose fallback mapping
+
+      await AddonPlanPrice.findOneAndUpdate(
+        { addonPlanId: addonDoc._id, basePlanId: basePlanDoc._id },
+        {
+          $set: {
+            priceHalala,
+            currency: SYSTEM_CURRENCY,
+            isActive: true,
+          }
+        },
+        { upsert: true, new: true }
+      );
+    }
   }
 }
 
