@@ -85,6 +85,7 @@ async function startMongo() {
   process.env.MONGO_URI = uri;
   process.env.MONGODB_URI = uri;
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
+  await Promise.all(Object.values(mongoose.models).map(model => model.ensureIndexes().catch(() => {})));
 }
 
 async function stopMongo() {
@@ -365,9 +366,12 @@ async function run() {
     });
 
     await test("kitchen output returns entitlement and selected MenuProduct", async () => {
-      const res = await requestWithRetry("GET", `/api/dashboard/kitchen/production-days/subscription/${date}/all`, null, fixtures.dashboardToken);
+      const res = await requestWithRetry("GET", `/api/kitchen/days/${date}`, null, fixtures.dashboardToken);
       assert.strictEqual(res.status, 200, "kitchen detail status");
-      const subRow = (res.body.data || []).find((r) => String(r.subscriptionId) === String(fixtures.subscription._id));
+      const subRow = (res.body.data || []).find((r) => {
+        const subIdStr = r.subscriptionId && r.subscriptionId._id ? String(r.subscriptionId._id) : String(r.subscriptionId);
+        return subIdStr === String(fixtures.subscription._id);
+      });
       assert(subRow, "kitchen row exists for subscription");
       assertSelectedJuice(subRow, catalog.juiceProduct._id, "kitchen row");
     });

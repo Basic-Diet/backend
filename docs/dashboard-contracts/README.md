@@ -111,7 +111,7 @@ The frontend/dashboard must use and respect the following independent backend fi
 | [11_MENU_CATALOG.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11_MENU_CATALOG.md) | **NEEDS_TEST** | Overview/index pointing to detailed sub-contracts. |
 | [11A_MENU_CATEGORIES.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11A_MENU_CATEGORIES.md) | **PASS_WITH_NOTES** | Categories CRUD, reordering, toggling, assignment. |
 | [11B_MENU_PRODUCTS.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11B_MENU_PRODUCTS.md) | **PASS_WITH_NOTES** | Products CRUD, reordering, duplication, toggling. |
-| [11C_MENU_PRODUCT_CUSTOMIZATION.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11C_MENU_PRODUCT_CUSTOMIZATION.md) | **PARTIAL_PASS_READ_MODELS_OK_DOCS_MISMATCH** | Linking options, composer rules, selection limits. |
+| [11C_MENU_PRODUCT_CUSTOMIZATION.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11C_MENU_PRODUCT_CUSTOMIZATION.md) | **PASS_WITH_COMPATIBILITY_DOCS** | Linking options, composer rules, selection limits. |
 | [11D_MENU_OPTION_GROUPS.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11D_MENU_OPTION_GROUPS.md) | **PASS_WITH_NOTES** | Option Groups CRUD, reordering, UI styles. |
 | [11E_MENU_OPTIONS.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11E_MENU_OPTIONS.md) | **PASS** | Options CRUD, toggling, pricing, fees, and rules. |
 | [11F_MENU_PREVIEW_RELEASE.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11F_MENU_PREVIEW_RELEASE.md) | **NOT_REVIEWED_YET / NEEDS_TEST** | Releases, publishing diffs, version rollbacks. |

@@ -871,6 +871,7 @@ async function getAddonSubscriptionOptions(req, res) {
       .map((p) => ({
         id: String(p._id),
         _id: p._id,
+        key: p.key,
         name: p.name,
         image: p.imageUrl || "",
         category: p.categoryId ? p.categoryId.key : "",

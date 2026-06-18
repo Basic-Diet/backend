@@ -175,6 +175,46 @@ async function deactivateWrongFlatPlans({ log = console } = {}) {
   return { matched, modified };
 }
 
+async function deactivatePollutedCustomerPlans({ log = console } = {}) {
+  const pollutionQuery = {
+    $or: [
+      { key: /^dash-contract-/ },
+      { key: /^postman-home-delivery-cycle-/ },
+      { key: /^test-/ },
+      {
+        key: null,
+        $or: [
+          { "name.en": /test|dev|dash-contract|postman|empty/i },
+          { "name.ar": /test|dev|dash-contract|postman|empty/i }
+        ]
+      }
+    ],
+    isActive: true,
+    key: { $nin: subscriptionPlanKeys }
+  };
+
+  const result = await Plan.updateMany(
+    pollutionQuery,
+    {
+      $set: {
+        active: false,
+        isActive: false,
+        available: false,
+        isAvailable: false,
+      },
+    },
+    { runValidators: true }
+  );
+
+  const matched = Number(result.matchedCount || result.n || 0);
+  const modified = Number(result.modifiedCount || result.nModified || 0);
+  if (matched > 0) {
+    log.log(`Polluted test/dev subscription plans matched for deactivation: ${matched}`);
+    log.log(`Polluted test/dev subscription plans deactivated: ${modified}`);
+  }
+  return { matched, modified };
+}
+
 async function seedSubscriptionPlans({ cleanupFlatPlans = false, sync = false, log = console } = {}) {
   assertSubscriptionPlanRows();
 
@@ -209,6 +249,9 @@ async function seedSubscriptionPlans({ cleanupFlatPlans = false, sync = false, l
   let cleanup = { matched: 0, modified: 0 };
   if (cleanupFlatPlans) {
     cleanup = await deactivateWrongFlatPlans({ log });
+    const pollutedCleanup = await deactivatePollutedCustomerPlans({ log });
+    cleanup.matched += pollutedCleanup.matched;
+    cleanup.modified += pollutedCleanup.modified;
   } else {
     log.log("Wrong flat subscription plans cleanup skipped.");
   }
@@ -294,6 +337,7 @@ module.exports = {
   countNestedPricePoints,
   createFlatPlanKey,
   createPlanKey,
+  deactivatePollutedCustomerPlans,
   deactivateWrongFlatPlans,
   main,
   priceMatrixHalala,

@@ -307,11 +307,108 @@ Returns the master catalogs of global option groups and option templates.
 
 ---
 
-## 8. Status
-`PARTIAL_PASS_READ_MODELS_OK_DOCS_MISMATCH`
+## 8. Dashboard Meal Builder / plannerCatalog Compatibility
+
+To support legacy Dashboard clients while offering a canonical modern structure to mobile/app clients, the backend maintains two distinct catalog representations for meal plans.
+
+### A. Core Differences
+
+* **Dashboard Editorial Visual Model (Legacy Compatibility):**
+  * Displays option categories directly.
+  * Sections:
+    * `premium`
+    * `sandwich`
+    * `chicken`
+    * `beef`
+    * `fish`
+    * `eggs`
+    * `carbs`
+  * Represents an editorial view mapping for dashboard layout styling.
+
+* **App-Facing Planner Catalog Model (Canonical V3):**
+  * Built around selections/meals.
+  * Sections:
+    * `standard_meal` (product key = `basic_meal`, action = `open_builder`, requiresBuilder = `true`)
+    * `premium_meal` (product key = `basic_meal`, action = `open_builder`, requiresBuilder = `true`, keeps extraFeeHalala = `2000` for premium options)
+    * `sandwich` (type = `product_list`, action = `direct_add`, requiresBuilder = `false`)
+    * `premium_large_salad` (product key = `premium_large_salad`, selectionType = `premium_large_salad`, action = `open_builder`, requiresBuilder = `true`, extraFeeHalala = `2900`)
+
+These two shapes are **intentionally different**. The backend manages the transformation and aliases dynamically.
+
+### B. Catalog Roles & Ownership
+
+* **`builderCatalog`:**
+  * The canonical app-facing meal planner catalog.
+  * Used by Flutter/mobile app where supported.
+* **`plannerCatalog`:**
+  * Legacy/dashboard-compatible alias/projection.
+  * **Rule:** Must be returned by `/api/subscriptions/meal-planner-menu` by default, without requiring `includeLegacy=true`.
+
+* **Dashboard Readiness Status:**
+  * Must not show `MEAL_BUILDER_NOT_PUBLISHED` when the backend has an app-usable planner catalog or an allowed dashboard fallback.
+  * Must not hide real validation errors (all backend validation codes must propagate to the UI).
+* **Dashboard-Only Virtual Fallback:**
+  * Allowed only for dashboard state/readiness compatibility when no database configuration is published.
+  * Must **not** leak into mobile/app validation as a real published user config.
+
+#### Responsibility Matrix
+
+* **Backend Responsibility:**
+  * Catalog shape, validation rules, and schema structure.
+  * `plannerCatalog` legacy compatibility translation.
+  * Readiness checks, status code determinations, and validation messages.
+  * Premium price validation and membership criteria.
+* **Dashboard Responsibility:**
+  * Pure display/visual representation.
+  * **No** local premium pricing calculations.
+  * **No** suppression of backend validation codes/errors.
+* **Flutter (Mobile App) Responsibility:**
+  * Rendering the backend-provided catalog.
+  * Submitting selected item/option IDs.
+  * **No** local premium price calculations.
+
+---
+
+## 9. Deferred Regression Test Checklist
+
+To verify changes without running heavy test suites during local development, use this test checklist before deployment.
+
+### A. Integration / Unit Tests
+Run the following test commands to verify contract compliance and full-cycle planner compatibility:
+```bash
+NODE_ENV=test node tests/dashboardMealBuilderRegression.test.js
+NODE_ENV=test node tests/dashboardMealBuilderFullCycle.test.js
+NODE_ENV=test node tests/dashboardMealBuilderDefaultTemplate.test.js
+NODE_ENV=test node tests/dashboardMealBuilderComposer.test.js
+NODE_ENV=test node tests/dashboardMealBuilderHydratedDraft.test.js
+NODE_ENV=test node tests/dashboardMealBuilderPickers.test.js
+NODE_ENV=test node tests/subscriptionPlannerDashboardToFlutter.e2e.test.js
+NODE_ENV=test node tests/dashboardSubscriptionMenuReadiness.test.js
+NODE_ENV=test node tests/dashboardMenuProductCenteredContract.test.js
+NODE_ENV=test node tests/verify_menu_fixes.test.js
+NODE_ENV=test node tests/dashboardContracts.test.js
+```
+
+### B. Manual Verification (Postman / cURL)
+Query the subscriptions planner endpoint:
+```http
+GET /api/subscriptions/meal-planner-menu
+GET /api/subscriptions/meal-planner-menu?includeLegacy=true
+```
+
+**Expected JSON validation:**
+1. Response status is success (`status = true`).
+2. Both `builderCatalog` and `plannerCatalog` sections are returned and populated:
+   * `data.builderCatalog.sections.length > 0`
+   * `data.plannerCatalog.sections.length > 0`
+
+---
+
+## 10. Status
+`PASS_WITH_COMPATIBILITY_DOCS`
 
 ```txt
 Backend read side = PASS
 Write endpoints = NOT_TESTED
-Overall 11C = PARTIAL_PASS_READ_MODELS_OK_DOCS_MISMATCH
+Overall 11C = PASS_WITH_COMPATIBILITY_DOCS
 ```

@@ -201,6 +201,55 @@ async function runTests() {
     const saladOpt = custOpts.find(o => o.category === "small_salad");
     assert.ok(saladOpt);
     assert.strictEqual(saladOpt.priceHalala, 9000, "Small salad matrix price for 7-day must be 9000");
+    const greenSaladProd = saladOpt.menuProducts.find(p => p.key === "green_salad");
+    assert.ok(greenSaladProd, "Small Salad Subscription must include Green Salad - 100g");
+    assert.strictEqual(greenSaladProd.isActive, true, "Green Salad must be active");
+
+    console.log("--- 7.5 Testing Daily selection validation ---");
+    const { reconcileAddonInclusions } = require("../src/services/subscription/subscriptionSelectionService");
+    const { resolveAddonChoiceProductById } = require("../src/services/subscription/subscriptionAddonChoicesService");
+
+    const saladSubDoc = await Addon.findOne({ kind: "plan", category: "small_salad" });
+    const greenSaladDoc = await MenuProduct.findOne({ key: "green_salad" });
+    const disallowedDoc = await MenuProduct.findOne({ key: "greek_yogurt" });
+
+    const clientSub = {
+      addonSubscriptions: [
+        {
+          addonId: saladSubDoc._id,
+          category: "small_salad",
+          name: "Small Salad Subscription",
+          maxPerDay: 1,
+        }
+      ]
+    };
+
+    // Daily selection validation accepts Green Salad - 100g
+    const selectionDay = { addonSelections: [] };
+    await reconcileAddonInclusions(
+      clientSub,
+      selectionDay,
+      [greenSaladDoc._id.toString()],
+      { resolveChoiceProductById: resolveAddonChoiceProductById }
+    );
+    assert.strictEqual(selectionDay.addonSelections.length, 1);
+    assert.strictEqual(String(selectionDay.addonSelections[0].addonId), String(greenSaladDoc._id));
+    assert.strictEqual(selectionDay.addonSelections[0].source, "subscription");
+    assert.strictEqual(selectionDay.addonSelections[0].priceHalala, 0);
+
+    // Daily selection validation rejects products outside the entitlement
+    const invalidSelectionDay = { addonSelections: [] };
+    try {
+      await reconcileAddonInclusions(
+        clientSub,
+        invalidSelectionDay,
+        [disallowedDoc._id.toString()],
+        { resolveChoiceProductById: resolveAddonChoiceProductById }
+      );
+      assert.fail("Should have rejected yogurt for small salad subscription");
+    } catch (err) {
+      assert.strictEqual(err.code, "INVALID_ONE_TIME_ADDON_SELECTION");
+    }
 
     console.log("--- 8. Testing Quote Matrix Price Resolution ---");
     const { resolveCheckoutQuoteOrThrow } = require("../src/services/subscription/subscriptionQuoteService");

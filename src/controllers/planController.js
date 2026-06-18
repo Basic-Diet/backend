@@ -5,9 +5,16 @@ const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
 
 const { logger } = require("../utils/logger");
+
+const CANONICAL_PUBLIC_PLAN_KEYS = [
+  "subscription_7_days",
+  "subscription_26_days",
+  "subscription_30_days",
+];
+
 async function listPlans(req, res) {
   const lang = getRequestLang(req);
-  const rawPlans = await Plan.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).lean();
+  const rawPlans = await Plan.find({ isActive: true, key: { $in: CANONICAL_PUBLIC_PLAN_KEYS } }).sort({ sortOrder: 1, createdAt: -1 }).lean();
 
   const viablePlans = [];
   for (const plan of rawPlans) {
@@ -33,7 +40,7 @@ async function getPlan(req, res) {
     return errorResponse(res, err.status, err.code, err.message);
   }
 
-  const plan = await Plan.findOne({ _id: req.params.id, isActive: true }).lean();
+  const plan = await Plan.findOne({ _id: req.params.id, isActive: true, key: { $in: CANONICAL_PUBLIC_PLAN_KEYS } }).lean();
   if (!plan) {
     return errorResponse(res, 404, "NOT_FOUND", "Plan not found");
   }

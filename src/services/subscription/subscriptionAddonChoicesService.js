@@ -23,7 +23,7 @@ const SUBSCRIPTION_ADDON_CHOICE_MAPPINGS = Object.freeze({
   small_salad: Object.freeze({
     category: "small_salad",
     sourceCategories: Object.freeze(["light_options"]),
-    productKeys: Object.freeze(["green_salad", "fruit_salad"]),
+    productKeys: Object.freeze(["green_salad", "small_salad", "fruit_salad", "greek_salad", "vegetable_salad", "fruit_salad_addon"]),
   }),
 });
 

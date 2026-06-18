@@ -46,10 +46,12 @@ Provides CRUD operations for subscription packages (plans). Confgures plan prici
 
 ## 9. Frontend Restrictions
 * **No Pricing calculations**: The pricing rules, currency formatting, and tax additions are determined by the backend database configuration.
+* **Dashboard vs Customer Separation**: The dashboard endpoints (`/api/dashboard/plans`) return all plans including internal/test ones for administrative management. However, customer-facing endpoints (e.g. `GET /api/plans`) MUST NOT be manually filtered by Flutter; the Backend is the absolute source of truth and enforces a canonical allowlist (`subscription_7_days`, `subscription_26_days`, `subscription_30_days`).
 
 ## 10. Backend Acceptance Criteria
 * Validate nested gram combination formats.
 * Prevent conflicts or duplicate options.
+* **Customer-facing Public Endpoint**: The backend strictly gates `GET /api/plans` to only return canonical, sellable plans to prevent leaking internal testing setups.
 
 ## 11. Contract Tests Required
 * List endpoint returns valid array of packages.

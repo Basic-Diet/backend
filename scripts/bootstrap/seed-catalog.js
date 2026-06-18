@@ -1384,13 +1384,20 @@ async function seedSandwichCompatibility(productMap, { sync = false } = {}) {
 }
 
 async function seedSubscriptionAddons(productMap, { sync = false } = {}) {
+  let activeProductMap = productMap;
+  if (!activeProductMap) {
+    const MenuProductModel = require("../../src/models/MenuProduct");
+    const products = await MenuProductModel.find({}).lean();
+    activeProductMap = new Map(products.map((p) => [p.key, p]));
+  }
+
   const addonProducts = productRows.filter((row) => (
     row.availableFor.includes("subscription")
     && ["juice", "dessert"].includes(row.itemType)
   ));
 
   for (const row of addonProducts) {
-    const product = productMap.get(row.key);
+    const product = activeProductMap.get(row.key);
     const query = product ? { menuProductId: product._id } : { name: row.name };
     await upsertByMode(
       Addon,
@@ -1419,9 +1426,29 @@ async function seedSubscriptionAddons(productMap, { sync = false } = {}) {
   const AddonPlanPrice = require("../../src/models/AddonPlanPrice");
   const Plan = require("../../src/models/Plan");
 
-  const juiceProducts = await MenuProduct.find({ key: { $in: ["orange_juice", "apple_juice", "mango_juice"] } }).lean();
-  const saladProducts = await MenuProduct.find({ key: { $in: ["greek_salad", "fruit_salad_addon", "vegetable_salad"] } }).lean();
-  const snackProducts = await MenuProduct.find({ key: { $in: ["protein_snack", "healthy_dessert", "snack_box"] } }).lean();
+  // Fetch relevant products by key
+  const juiceProducts = await MenuProduct.find({
+    key: { $in: ["orange_juice", "apple_juice", "mango_juice"] }
+  }).lean();
+
+  const snackProducts = await MenuProduct.find({
+    key: { $in: ["protein_snack", "healthy_dessert", "snack_box"] }
+  }).lean();
+
+  const saladCategory = await MenuCategory.findOne({ key: "light_options" }).lean();
+  const saladProducts = await MenuProduct.find({
+    $or: [
+      {
+        categoryId: saladCategory ? saladCategory._id : null,
+        itemType: { $in: ["green_salad", "fruit_salad"] },
+        isActive: true
+      },
+      {
+        key: { $in: ["greek_salad", "fruit_salad_addon", "vegetable_salad", "green_salad", "fruit_salad"] },
+        isActive: true
+      }
+    ]
+  }).lean();
 
   const juiceProductIds = juiceProducts.map((p) => p._id);
   const saladProductIds = saladProducts.map((p) => p._id);
@@ -1508,7 +1535,12 @@ async function seedSubscriptionAddons(productMap, { sync = false } = {}) {
 
   const getMatrixPrice = (category, daysCount) => {
     const pricesObj = matrixPrices[category] || {};
-    return pricesObj[daysCount] !== undefined ? pricesObj[daysCount] : null;
+    if (pricesObj[daysCount] !== undefined) {
+      return pricesObj[daysCount];
+    }
+    // Proportional fallback placeholder based on days count
+    const perDayRate = category === "juice" ? 1000 : (category === "snack" ? 800 : 900);
+    return perDayRate * (daysCount || 30);
   };
 
   for (const addonDoc of seededAddonPlans) {

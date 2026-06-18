@@ -80,6 +80,10 @@ async function runBootstrap(options = {}) {
       sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
       cleanupFlatPlans: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
     });
+    // Ensure AddonPlanPrice records are populated now that base plans are seeded/synced
+    const { seedSubscriptionAddons } = require("./seed-catalog");
+    await seedSubscriptionAddons(null, { sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC) });
+
     if (args.includeMealBuilder) {
       await seedMealBuilderConfig({
         sync: args.sync && isTruthy(process.env.MEAL_BUILDER_BOOTSTRAP_SYNC),
