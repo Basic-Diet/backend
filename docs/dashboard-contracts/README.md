@@ -115,6 +115,7 @@ The frontend/dashboard must use and respect the following independent backend fi
 | [11D_MENU_OPTION_GROUPS.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11D_MENU_OPTION_GROUPS.md) | **PASS_WITH_NOTES** | Option Groups CRUD, reordering, UI styles. |
 | [11E_MENU_OPTIONS.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11E_MENU_OPTIONS.md) | **PASS** | Options CRUD, toggling, pricing, fees, and rules. |
 | [11F_MENU_PREVIEW_RELEASE.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11F_MENU_PREVIEW_RELEASE.md) | **NOT_REVIEWED_YET / NEEDS_TEST** | Releases, publishing diffs, version rollbacks. |
+| [11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md) | **BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI** | Dashboard handoff for the new Subscription Planner Upgrades screen. Covers premium_meal and premium_large_salad admin configuration, confirms these are planner upgrades, not add-ons, and that Flutter keys must remain stable. |
 
 ---
 

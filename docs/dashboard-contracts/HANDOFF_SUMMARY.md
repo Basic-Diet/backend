@@ -41,6 +41,7 @@ Status values are read directly from the current contract files.
 | `NEEDS_BACKEND_FIX` | 0 | — |
 | `LEGACY_OR_UNCLEAR` | 0 | — |
 | `OUT_OF_SCOPE` | 0 | — |
+| `BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI` | 1 | `11G_SUBSCRIPTION_PLANNER_UPGRADES` |
 
 ---
 
@@ -63,6 +64,13 @@ These invariants are enforced by the backend. The dashboard must display backend
 ### General Frontend Rules
 - **Dashboard must consume backend read models only.** No balance calculations, status transitions, or invariant checks belong in the frontend.
 - **Flutter must remain untouched.** The Flutter mobile client uses `/api/subscriptions/` endpoints, not dashboard endpoints. No Flutter changes are required or permitted as part of dashboard work.
+
+### Menu & Subscription Planner Upgrades
+New dashboard screen handoff added:
+- `11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md`
+- Purpose: Subscription Planner Upgrades screen for controlling `premium_meal` and `premium_large_salad`.
+- Status: `BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI` (Backend foundation is ready through MealBuilderConfig rules).
+- Dashboard UI should preserve existing Flutter-facing section keys and product key.
 
 ---
 

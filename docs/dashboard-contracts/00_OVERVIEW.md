@@ -27,6 +27,7 @@ The dashboard screens are divided into three phases based on operational and fin
     * **11D: Menu Option Groups**: Global customization option groups (proteins, carbs, add-ons).
     * **11E: Menu Options**: Global customization options and toggle statuses.
     * **11F: Menu Preview & Release**: Catalog preview, validation, publishing, and rollback history.
+    * **11G: Subscription Planner Upgrades**: Dashboard handoff for the new Subscription Planner Upgrades screen (`BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI`).
 11. **Promo Codes** (`/promo-codes`): Discount codes, validation rules, and usage metrics.
 12. **Settings** (`/settings`): CUTOFF times, skip allowances, and global VAT rules.
 13. **Restaurant Hours** (`/restaurant-hours`): Operating hours and instant open/close controls.
@@ -65,6 +66,12 @@ The backend enforces a strict item-based reservation model for branch pickup sub
 > The canonical partial pickup scenario (4 add-ons planned → pick 2 → future availability returns exactly 2) is fully documented and verified. See:
 > [SUBSCRIPTION_BACKEND_PARTIAL_PICKUP_VERIFICATION.md](file:///home/hema/Projects/basicdiet145/docs/SUBSCRIPTION_BACKEND_PARTIAL_PICKUP_VERIFICATION.md)
 
+### 4. Subscription Planner Upgrades
+For subscription planner upgrade admin controls, see:
+[11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md)
+
+This covers admin configuration for `premium_meal` and `premium_large_salad`.
+
 ---
 
 ## Summary Matrix
@@ -87,6 +94,7 @@ The backend enforces a strict item-based reservation model for branch pickup sub
 | 11D | Menu Option Groups | `/menu` (Groups) | `GET /api/dashboard/menu/option-groups`, `POST .../option-groups` | `READY_WITH_LIMITATIONS` | Test #10 | |
 | 11E | Menu Options | `/menu` (Options) | `GET /api/dashboard/menu/options`, `POST .../options` | `READY_WITH_LIMITATIONS` | Test #10 | |
 | 11F | Menu Preview/Release | `/menu` (Preview/Release) | `GET /api/dashboard/menu/preview`, `POST .../publish`, `POST .../rollback/:versionId`, `POST .../validate` | `READY_WITH_LIMITATIONS` | Test #10 | ⚠️ Mismatch: Frontend references `/validation` but backend has `/validate` |
+| 11G | Subscription Planner Upgrades | `/menu` (Upgrades) | `GET /api/subscriptions/meal-planner-menu` | `BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI` | Test #21 | Covers admin configuration for `premium_meal` and `premium_large_salad`. |
 | 12 | Delivery | `/delivery` | `GET /api/courier/deliveries/today` | `NEEDS_TESTS` | Test #11 (Smoke) | No E2E fulfillment flow tests |
 | 13 | Delivery Zones | `/zones` | `GET /api/dashboard/zones` | `READY_WITH_LIMITATIONS` | Test #12 | Smoke tests only |
 | 14 | App Users | `/users` | `GET /api/dashboard/users` | `READY_WITH_LIMITATIONS` | Test #13 | Smoke tests only |
@@ -134,3 +142,4 @@ The backend enforces a strict item-based reservation model for branch pickup sub
 | #18 | Subscription Invariant: 4 planned addons → pick 2 → future availability returns exactly 2 | Partial pickup scenario, no wallet refund |
 | #19 | Subscription Invariant: Premium upgrades do not create extra meals | `totalMeals` unchanged, slot count invariant |
 | #20 | Subscription Invariant: Add-ons are independent entitlements | `mealSlots.length === 1`, `addonSelections.length === 1` |
+| #21 | Subscription Planner Upgrades | Verifies dynamic rules override (fees, enabled, blocked groups, allowed options) for premium meal and large salad configurations |
