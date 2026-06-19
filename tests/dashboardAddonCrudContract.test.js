@@ -90,6 +90,17 @@ async function runTests() {
     });
 
     const basePlan2 = await Plan.create({
+      name: { en: "26 Days Plan", ar: "26 يوم" },
+      daysCount: 26,
+      durationDays: 26,
+      active: true,
+      available: true,
+      isAvailable: true,
+      currency: "SAR",
+      isActive: true,
+    });
+
+    const basePlan3 = await Plan.create({
       name: { en: "30 Days Plan", ar: "30 يوم" },
       daysCount: 30,
       durationDays: 30,
@@ -106,41 +117,56 @@ async function runTests() {
       const res = mockResponse();
       await listAddonsAdmin(req, res);
       assert.strictEqual(res.statusCode, 200);
-      assert.deepStrictEqual(res.data.data.items, []);
+      assert.strictEqual(res.data.data.items, undefined, "items should be completely absent by default");
       assert.deepStrictEqual(res.data.data.plans, []);
       assert.deepStrictEqual(res.data.data.meta.addonPlanCategories, [
         {
           key: "juice",
           label: { ar: "اشتراك العصير", en: "Juice Subscription" },
-          description: { ar: "اختيارات العصائر والمشروبات", en: "Juice and drink entitlement" },
         },
         {
           key: "small_salad",
           label: { ar: "اشتراك السلطة الصغيرة", en: "Small Salad Subscription" },
-          description: { ar: "اختيارات السلطة الصغيرة", en: "Small salad entitlement" },
         },
         {
           key: "snack",
           label: { ar: "اشتراك السناك", en: "Snack Subscription" },
-          description: { ar: "اختيارات السناك والحلويات الصحية", en: "Snack and healthy dessert entitlement" },
         },
       ]);
-      assert.strictEqual(res.data.data.summary.totalItems, 0);
-      assert.strictEqual(res.data.data.summary.totalPlans, 0);
+      assert.strictEqual(res.data.data.summary.totalItems, undefined);
+      assert.strictEqual(res.data.data.summary.totalPlans, undefined);
+      assert.strictEqual(res.data.data.summary.plansCount, 0);
     }
 
     console.log("--- 3. POST /api/dashboard/addons (Create Subscription Plan) ---");
     let createdPlanId;
     {
+      // Create decoy records which should be ignored
+      await Addon.create({ name: { en: "Healthy Dessert" }, kind: "plan", category: "snack", isActive: true });
+      await Addon.create({ name: { en: "Protein Snack" }, kind: "plan", category: "snack", isActive: true });
+      await Addon.create({ name: { en: "Snack Box" }, kind: "item", category: "snack", isActive: true });
+
+      // Create pre-existing Snack Subscription
+      const snackPlan = await Addon.create({ name: { en: "Snack Subscription" }, kind: "plan", category: "snack", menuProductIds: [juice1._id], isActive: true });
+      await AddonPlanPrice.create({ addonPlanId: snackPlan._id, basePlanId: basePlan1._id, priceHalala: 1000, isActive: true });
+      await AddonPlanPrice.create({ addonPlanId: snackPlan._id, basePlanId: basePlan2._id, priceHalala: 2000, isActive: true });
+      await AddonPlanPrice.create({ addonPlanId: snackPlan._id, basePlanId: basePlan3._id, priceHalala: 3000, isActive: true });
+
+      // Create pre-existing Small Salad Subscription, missing 30-day row
+      const saladPlan = await Addon.create({ name: { en: "Small Salad Subscription" }, kind: "plan", category: "small_salad", menuProductIds: [juice2._id], isActive: true });
+      await AddonPlanPrice.create({ addonPlanId: saladPlan._id, basePlanId: basePlan1._id, priceHalala: 9000, isActive: true });
+      await AddonPlanPrice.create({ addonPlanId: saladPlan._id, basePlanId: basePlan2._id, priceHalala: 16000, isActive: true });
+
       const req = {
         body: {
-          name: { en: "Fresh Juice Subscription", ar: "اشتراك عصير طازج" },
+          name: { en: "Juice Subscription", ar: "اشتراك عصير طازج" },
           kind: "plan",
           category: "juice",
           menuProductIds: [juice1._id, juice2._id],
           planPrices: [
             { basePlanId: basePlan1._id, priceHalala: 7000, isActive: true },
-            { basePlanId: basePlan2._id, priceHalala: 26000, isActive: true }
+            { basePlanId: basePlan2._id, priceHalala: 26000, isActive: true },
+            { basePlanId: basePlan3._id, priceHalala: 30000, isActive: true }
           ]
         }
       };
@@ -148,12 +174,13 @@ async function runTests() {
       await createAddon(req, res);
       assert.strictEqual(res.statusCode, 201);
       assert.strictEqual(res.data.status, true);
-      assert.strictEqual(res.data.data.name.en, "Fresh Juice Subscription");
+      assert.strictEqual(res.data.data.name.en, "Juice Subscription");
       assert.strictEqual(res.data.data.kind, "plan");
       assert.strictEqual(res.data.data.category, "juice");
       assert.strictEqual(res.data.data.menuProducts.length, 2);
       assert.strictEqual(res.data.data.menuProducts[0].name.en, "Orange Juice");
-      assert.strictEqual(res.data.data.planPrices.length, 2);
+      assert.strictEqual(res.data.data.menuProducts[0].key, "orange_juice_test");
+      assert.strictEqual(res.data.data.planPrices.length, 3);
       assert.strictEqual(res.data.data.planPrices[0].priceHalala, 7000);
       assert.strictEqual(res.data.data.planPrices[0].priceSar, 70);
       assert.strictEqual(res.data.data.pricingMode, "base_plan_matrix");
@@ -166,11 +193,40 @@ async function runTests() {
       const res = mockResponse();
       await listAddonsAdmin(req, res);
       assert.strictEqual(res.statusCode, 200);
-      assert.strictEqual(res.data.data.plans.length, 1);
-      assert.strictEqual(res.data.data.plans[0].name.en, "Fresh Juice Subscription");
-      assert.strictEqual(res.data.data.plans[0].menuProducts.length, 2);
-      assert.strictEqual(res.data.data.plans[0].planPrices.length, 2);
-      assert.strictEqual(res.data.data.summary.totalPlans, 1);
+      assert.strictEqual(res.data.data.items, undefined);
+      assert.strictEqual(res.data.data.plans.length, 3);
+      
+      const planNames = res.data.data.plans.map(p => p.name.en).sort();
+      assert.deepStrictEqual(planNames, ["Juice Subscription", "Small Salad Subscription", "Snack Subscription"]);
+      assert.ok(!planNames.includes("Healthy Dessert"));
+      assert.ok(!planNames.includes("Protein Snack"));
+      assert.ok(!planNames.includes("Snack Box"));
+
+      // Verification of internal fields exclusion by checking EXACT keys
+      const plan = res.data.data.plans[0];
+      const expectedPlanKeys = ["id", "name", "category", "maxPerDay", "isActive", "menuProductIds", "menuProducts", "planPrices"];
+      assert.deepStrictEqual(Object.keys(plan).sort(), expectedPlanKeys.sort(), "Plan keys must match EXACTLY");
+
+      // Verify menuProducts
+      assert.ok(plan.menuProducts.length > 0);
+      const expectedProductKeys = ["id", "key", "name", "category", "image", "isActive"];
+      assert.deepStrictEqual(Object.keys(plan.menuProducts[0]).sort(), expectedProductKeys.sort(), "Menu product keys must match EXACTLY");
+
+      // Verify planPrices
+      assert.ok(plan.planPrices.length === 3, "Each plan must have exactly 3 price rows");
+      const expectedPriceKeys = ["basePlanId", "basePlanName", "daysCount", "mealsCount", "priceHalala", "priceSar", "priceLabel", "isActive"];
+      assert.deepStrictEqual(Object.keys(plan.planPrices[0]).sort(), expectedPriceKeys.sort(), "Plan price keys must match EXACTLY");
+
+      const expectedSummaryKeys = ["plansCount", "matrixRowsCount", "currency"];
+      assert.deepStrictEqual(Object.keys(res.data.data.summary).sort(), expectedSummaryKeys.sort(), "Summary keys must match EXACTLY");
+      assert.strictEqual(res.data.data.summary.plansCount, 3);
+      assert.strictEqual(res.data.data.summary.matrixRowsCount, 9);
+      assert.strictEqual(res.data.data.summary.currency, "SAR");
+
+      // Verify meta structure (no description)
+      const cats = res.data.data.meta.addonPlanCategories;
+      assert.ok(cats.every(c => c.description === undefined), "Description must be removed from lean meta categories");
+      assert.ok(cats.every(c => c.key && c.label), "Categories must retain key and label");
     }
 
     console.log("--- 5. PUT /api/dashboard/addons/:id (Update Subscription Plan) ---");
@@ -179,8 +235,7 @@ async function runTests() {
         params: { id: createdPlanId },
         body: {
           name: { en: "Super Juice Subscription", ar: "اشتراك عصير سوبر" },
-          kind: "plan",
-          category: "juice",
+          category: "juice", // kind is intentionally omitted
           menuProductIds: [juice2._id], // Remove juice1
           planPrices: [
             { basePlanId: basePlan1._id, priceHalala: 8000, isActive: true } // Update price, remove basePlan2 price
@@ -195,6 +250,10 @@ async function runTests() {
       assert.strictEqual(res.data.data.menuProducts[0].name.en, "Apple Juice");
       assert.strictEqual(res.data.data.planPrices.length, 1);
       assert.strictEqual(res.data.data.planPrices[0].priceHalala, 8000);
+
+      // Verify that PUT also returns the exact lean shape
+      const putPlanKeys = ["id", "name", "category", "maxPerDay", "isActive", "menuProductIds", "menuProducts", "planPrices"];
+      assert.deepStrictEqual(Object.keys(res.data.data).sort(), putPlanKeys.sort(), "PUT Plan keys must match EXACTLY");
     }
 
     console.log("--- 6. POST /api/dashboard/addons (Create Item) ---");
@@ -217,16 +276,16 @@ async function runTests() {
       assert.strictEqual(res.data.data.priceSar, 15);
     }
 
-    console.log("--- 7. GET /api/dashboard/addons (Populated structured payload) ---");
+    console.log("--- 7. GET /api/dashboard/addons?view=full (Populated structured payload with items) ---");
     {
-      const req = { query: {} };
+      const req = { query: { view: "full" } };
       const res = mockResponse();
       await listAddonsAdmin(req, res);
       assert.strictEqual(res.statusCode, 200);
-      assert.strictEqual(res.data.data.items.length, 1);
-      assert.strictEqual(res.data.data.plans.length, 1);
-      assert.strictEqual(res.data.data.summary.totalItems, 1);
-      assert.strictEqual(res.data.data.summary.totalPlans, 1);
+      assert.strictEqual(res.data.data.items.length, 2);
+      assert.strictEqual(res.data.data.plans.length, 5);
+      assert.strictEqual(res.data.data.summary.itemsCount, 2);
+      assert.strictEqual(res.data.data.summary.plansCount, 5);
 
       // Verify legacyCompatibility block in plan
       const plan = res.data.data.plans[0];
@@ -395,7 +454,7 @@ async function runTests() {
         currency: "SAR",
       });
 
-      const req = { query: {} };
+      const req = { query: { view: "full" } };
       const res = mockResponse();
       await listAddonsAdmin(req, res);
       assert.strictEqual(res.statusCode, 200);
@@ -423,7 +482,7 @@ async function runTests() {
       for (const cat of cats) {
         assert.ok(cat.key, `category must have key`);
         assert.ok(cat.label && cat.label.en && cat.label.ar, `category must have label.en and label.ar`);
-        assert.ok(cat.description && cat.description.en && cat.description.ar, `category must have description.en and description.ar`);
+        assert.strictEqual(cat.description, undefined, `category must NOT have description by default`);
       }
     }
 

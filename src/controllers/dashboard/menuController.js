@@ -27,6 +27,7 @@ function listOptions(req) {
     page: req.query.page,
     limit: req.query.limit,
     contractVersion: req.query.contractVersion,
+    view: req.query.view,
   };
 }
 

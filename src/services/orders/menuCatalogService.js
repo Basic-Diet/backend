@@ -978,16 +978,36 @@ async function listModel(Model, options = {}, extraQuery = {}, serializer = seri
   };
 }
 
+function serializeDashboardPickerProduct(row) {
+  return {
+    id: String(row._id),
+    key: row.key,
+    name: row.name,
+    category: row.categoryId ? row.categoryId.key : (row.category || ""),
+    image: row.imageUrl || "",
+    isActive: row.isActive !== false,
+  };
+}
+
 async function listProducts(options = {}) {
   const query = buildProductFilter(options);
+  if (options.view === "picker") {
+    query.isActive = true;
+  }
+  
   const pagination = parsePaginationOptions(options);
-  const find = MenuProduct.find(query)
-    .sort({ sortOrder: 1, createdAt: -1 })
-    .lean();
+  let find = MenuProduct.find(query).sort({ sortOrder: 1, createdAt: -1 });
+  
+  if (options.view === "picker") {
+    find = find.populate("categoryId");
+  }
+  
+  find = find.lean();
+  const serializeFn = options.view === "picker" ? serializeDashboardPickerProduct : serializeDoc;
 
   if (!pagination) {
     const rows = await find;
-    return rows.map(serializeDoc);
+    return rows.map(serializeFn);
   }
 
   const [rows, total] = await Promise.all([
@@ -996,7 +1016,7 @@ async function listProducts(options = {}) {
   ]);
 
   return {
-    items: rows.map(serializeDoc),
+    items: rows.map(serializeFn),
     pagination: {
       page: pagination.page,
       limit: pagination.limit,

@@ -2094,10 +2094,42 @@ async function getTodayReport(req, res) {
   return res.status(200).json({ status: true, data: payload });
 }
 
+function serializeDashboardPickerPlan(plan, lang) {
+  const daysCount = Number(plan.daysCount || 0);
+  let mealsCount = daysCount * 2;
+  if (plan.gramsOptions && plan.gramsOptions.length > 0) {
+    const gramsOpt = plan.gramsOptions.find((g) => g.grams === 100) || plan.gramsOptions[0];
+    if (gramsOpt && gramsOpt.mealsOptions && gramsOpt.mealsOptions.length > 0) {
+      const mealOpt = gramsOpt.mealsOptions.find((m) => m.mealsPerDay === 2) || gramsOpt.mealsOptions[0];
+      if (mealOpt) mealsCount = daysCount * mealOpt.mealsPerDay;
+    }
+  }
+
+  return {
+    id: String(plan._id),
+    name: pickLang(plan.name, lang) || { ar: "", en: "" },
+    daysCount,
+    mealsCount,
+    isActive: plan.isActive !== false,
+  };
+}
+
 async function listPlansAdmin(req, res) {
   try {
+    const isPicker = req.query && req.query.view === "picker";
+    if (isPicker && req.query.isActive === undefined && req.query.status === undefined) {
+      req.query.isActive = "true";
+    }
+
     const filters = resolveAdminPlanFiltersOrThrow(req.query || {});
     const plans = await Plan.find().sort({ sortOrder: 1, createdAt: -1 }).lean();
+    
+    if (isPicker) {
+      const lang = getRequestLang(req);
+      const filteredPlans = filterAdminPlans(plans, filters).map((plan) => serializeDashboardPickerPlan(plan, lang));
+      return res.status(200).json({ status: true, data: filteredPlans });
+    }
+
     const filteredPlans = filterAdminPlans(plans, filters).map((plan) => serializeAdminPlan(plan));
 
     return res.status(200).json({
