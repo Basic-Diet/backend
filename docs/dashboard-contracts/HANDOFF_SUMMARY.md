@@ -42,6 +42,7 @@ Status values are read directly from the current contract files.
 | `LEGACY_OR_UNCLEAR` | 0 | — |
 | `OUT_OF_SCOPE` | 0 | — |
 | `BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI` | 1 | `11G_SUBSCRIPTION_PLANNER_UPGRADES` |
+| `READY_FOR_DASHBOARD_HANDOFF` | 1 | `MENU_SYSTEM_DASHBOARD_USER_STORIES` |
 
 ---
 
@@ -66,11 +67,10 @@ These invariants are enforced by the backend. The dashboard must display backend
 - **Flutter must remain untouched.** The Flutter mobile client uses `/api/subscriptions/` endpoints, not dashboard endpoints. No Flutter changes are required or permitted as part of dashboard work.
 
 ### Menu & Subscription Planner Upgrades
-New dashboard screen handoff added:
-- `11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md`
-- Purpose: Subscription Planner Upgrades screen for controlling `premium_meal` and `premium_large_salad`.
-- Status: `BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI` (Backend foundation is ready through MealBuilderConfig rules).
-- Dashboard UI should preserve existing Flutter-facing section keys and product key.
+New dashboard screen handoffs added:
+- [11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md](11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md) (Status: `BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI`): Covers subscription planner upgrade screens.
+- [MENU_SYSTEM_DASHBOARD_USER_STORIES.md](MENU_SYSTEM_DASHBOARD_USER_STORIES.md) (Status: `READY_FOR_DASHBOARD_HANDOFF`): Comprehensive menu catalog user stories and developer mappings.
+- **Rule:** Dashboard UI must preserve existing Flutter-facing section/product keys and make no local price/balance calculations.
 
 ---
 

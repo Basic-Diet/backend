@@ -28,6 +28,7 @@ The dashboard screens are divided into three phases based on operational and fin
     * **11E: Menu Options**: Global customization options and toggle statuses.
     * **11F: Menu Preview & Release**: Catalog preview, validation, publishing, and rollback history.
     * **11G: Subscription Planner Upgrades**: Dashboard handoff for the new Subscription Planner Upgrades screen (`BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI`).
+    * **11H: Menu System User Stories**: Full Menu System user stories and source map for the Dashboard team (`READY_FOR_DASHBOARD_HANDOFF`).
 11. **Promo Codes** (`/promo-codes`): Discount codes, validation rules, and usage metrics.
 12. **Settings** (`/settings`): CUTOFF times, skip allowances, and global VAT rules.
 13. **Restaurant Hours** (`/restaurant-hours`): Operating hours and instant open/close controls.
@@ -50,7 +51,7 @@ The dashboard screens are divided into three phases based on operational and fin
 * **VAT Logic**: Pricing and VAT behavior must follow backend settings/accounting contracts only.
 
 ### 2. Unified Branch Pickup & Partial Fulfillment
-The backend enforces a strict item-based reservation model for branch pickup subscription days, detailed in [BRANCH_PICKUP_FLUTTER_PICKUP_ITEMS_README.md](file:///home/hema/Projects/basicdiet145/docs/BRANCH_PICKUP_FLUTTER_PICKUP_ITEMS_README.md).
+The backend enforces a strict item-based reservation model for branch pickup subscription days, detailed in [BRANCH_PICKUP_FLUTTER_PICKUP_ITEMS_README.md](../BRANCH_PICKUP_FLUTTER_PICKUP_ITEMS_README.md).
 * **Unified Field**: `selectedPickupItemIds` is the single source of truth for items requested for pickup (e.g. `["slot_1", "addon_64f000000000000000000001_1"]`).
 * **Fulfillment**: Fulfillment consumes **only** items in `selectedPickupItemIds`. No other planned items on the day are pruned or mutated.
 * **Wallet Refund Rules**:
@@ -64,13 +65,14 @@ The backend enforces a strict item-based reservation model for branch pickup sub
 
 ### 3. Partial Pickup Verification Reference
 > The canonical partial pickup scenario (4 add-ons planned → pick 2 → future availability returns exactly 2) is fully documented and verified. See:
-> [SUBSCRIPTION_BACKEND_PARTIAL_PICKUP_VERIFICATION.md](file:///home/hema/Projects/basicdiet145/docs/SUBSCRIPTION_BACKEND_PARTIAL_PICKUP_VERIFICATION.md)
+> [SUBSCRIPTION_BACKEND_PARTIAL_PICKUP_VERIFICATION.md](../SUBSCRIPTION_BACKEND_PARTIAL_PICKUP_VERIFICATION.md)
 
-### 4. Subscription Planner Upgrades
-For subscription planner upgrade admin controls, see:
-[11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md](file:///home/hema/Projects/basicdiet145/docs/dashboard-contracts/11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md)
+### 4. Subscription Planner Upgrades & User Stories
+For subscription planner upgrade admin controls and the comprehensive menu user stories map, see:
+* [11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md](11G_SUBSCRIPTION_PLANNER_UPGRADES_DASHBOARD_README.md)
+* [MENU_SYSTEM_DASHBOARD_USER_STORIES.md](MENU_SYSTEM_DASHBOARD_USER_STORIES.md)
 
-This covers admin configuration for `premium_meal` and `premium_large_salad`.
+This covers admin configuration for `premium_meal`, `premium_large_salad`, and the full set of Dashboard Menu System User Stories.
 
 ---
 
@@ -95,6 +97,7 @@ This covers admin configuration for `premium_meal` and `premium_large_salad`.
 | 11E | Menu Options | `/menu` (Options) | `GET /api/dashboard/menu/options`, `POST .../options` | `READY_WITH_LIMITATIONS` | Test #10 | |
 | 11F | Menu Preview/Release | `/menu` (Preview/Release) | `GET /api/dashboard/menu/preview`, `POST .../publish`, `POST .../rollback/:versionId`, `POST .../validate` | `READY_WITH_LIMITATIONS` | Test #10 | ⚠️ Mismatch: Frontend references `/validation` but backend has `/validate` |
 | 11G | Subscription Planner Upgrades | `/menu` (Upgrades) | `GET /api/subscriptions/meal-planner-menu` | `BACKEND_FOUNDATION_READY_FOR_DASHBOARD_UI` | Test #21 | Covers admin configuration for `premium_meal` and `premium_large_salad`. |
+| 11H | Menu System User Stories | `/menu` (User Stories) | N/A | `READY_FOR_DASHBOARD_HANDOFF` | N/A | Full Menu System user stories and source map for the Dashboard team. |
 | 12 | Delivery | `/delivery` | `GET /api/courier/deliveries/today` | `NEEDS_TESTS` | Test #11 (Smoke) | No E2E fulfillment flow tests |
 | 13 | Delivery Zones | `/zones` | `GET /api/dashboard/zones` | `READY_WITH_LIMITATIONS` | Test #12 | Smoke tests only |
 | 14 | App Users | `/users` | `GET /api/dashboard/users` | `READY_WITH_LIMITATIONS` | Test #13 | Smoke tests only |
