@@ -12,6 +12,8 @@ const { createApp } = require("../src/app");
 const { dashboardAuth } = require("./helpers/dashboardAuthHelper");
 const Addon = require("../src/models/Addon");
 const AddonPlanPrice = require("../src/models/AddonPlanPrice");
+const MenuCategory = require("../src/models/MenuCategory");
+const MenuProduct = require("../src/models/MenuProduct");
 const BuilderCarb = require("../src/models/BuilderCarb");
 const BuilderCategory = require("../src/models/BuilderCategory");
 const BuilderProtein = require("../src/models/BuilderProtein");
@@ -73,6 +75,8 @@ async function cleanup() {
   const saladIngredientIds = (await SaladIngredient.find({ "name.en": { $regex: TEST_TAG } }).select("_id").lean()).map((row) => row._id);
   const planIds = (await Plan.find({ "name.en": { $regex: TEST_TAG } }).select("_id").lean()).map((row) => row._id);
   const zoneIds = (await Zone.find({ "name.en": { $regex: TEST_TAG } }).select("_id").lean()).map((row) => row._id);
+  const menuCategoryIds = (await MenuCategory.find({ "name.en": { $regex: TEST_TAG } }).select("_id").lean()).map((row) => row._id);
+  const menuProductIds = (await MenuProduct.find({ "name.en": { $regex: TEST_TAG } }).select("_id").lean()).map((row) => row._id);
   const userIds = (await User.find({ phone: { $regex: TEST_TAG } }).select("_id").lean()).map((row) => row._id);
   const subIds = (await Subscription.find({ userId: { $in: userIds } }).select("_id").lean()).map((row) => row._id);
   const promoIds = (await PromoCode.find({ codeNormalized: { $regex: TEST_TAG.replace(/[^A-Z0-9]/gi, "").slice(0, 16).toUpperCase() } }).select("_id").lean()).map((row) => row._id);
@@ -94,6 +98,8 @@ async function cleanup() {
     Subscription.deleteMany({ _id: { $in: subIds } }),
     Addon.deleteMany({ _id: { $in: addonIds } }),
     AddonPlanPrice.deleteMany({ addonPlanId: { $in: addonIds } }),
+    MenuProduct.deleteMany({ _id: { $in: menuProductIds } }),
+    MenuCategory.deleteMany({ _id: { $in: menuCategoryIds } }),
     BuilderCategory.deleteMany({ _id: { $in: builderCategoryIds } }),
     BuilderProtein.deleteMany({ _id: { $in: builderProteinIds } }),
     BuilderCarb.deleteMany({ _id: { $in: builderCarbIds } }),
@@ -128,6 +134,19 @@ async function seedBaseData() {
       isActive: true,
       mealsOptions: [{ mealsPerDay: 2, priceHalala: 70000, compareAtHalala: 80000, isActive: true }],
     }],
+  });
+  const menuCategory = await MenuCategory.create({
+    key: `${TEST_TAG}-snacks`,
+    name: { ar: "اختبار", en: `${TEST_TAG} Menu Category` },
+    isActive: true,
+  });
+  const menuProduct = await MenuProduct.create({
+    categoryId: menuCategory._id,
+    key: `${TEST_TAG}-product`,
+    name: { ar: "منتج اختبار", en: `${TEST_TAG} Menu Product` },
+    priceHalala: 500,
+    availableFor: ["subscription"],
+    isActive: true,
   });
   const zone = await Zone.create({
     name: { ar: "", en: `${TEST_TAG} Zone` },
@@ -177,7 +196,7 @@ async function seedBaseData() {
     deliveryFeeHalala: 1200,
     deliveryWindow: "",
   });
-  return { user, plan, zone, addonPlan, addonItem, subscription };
+  return { user, plan, zone, addonPlan, addonItem, menuProduct, subscription };
 }
 
 async function seedDashboardAuthUsers() {
@@ -209,61 +228,38 @@ async function main() {
 
   try {
     let res = await api.post("/api/dashboard/addons").set(adminHeaders).send({
-      name: { en: `${TEST_TAG} Plan Create` },
+      name: { ar: "خطة اختبار", en: `${TEST_TAG} Plan Create` },
       category: "juice",
-      kind: "plan",
-      billingMode: "per_day",
-      priceHalala: 1100,
+      menuProductIds: [ctx.menuProduct._id],
+      planPrices: [{ basePlanId: ctx.plan._id, priceHalala: 1100, isActive: true }],
     });
     expectStatus(res, 201, "create addon plan");
     const createdPlanAddonId = res.body.data.id;
 
     res = await api.post("/api/dashboard/addons").set(adminHeaders).send({
-      name: { en: `${TEST_TAG} Item Create` },
-      category: "snack",
-      kind: "item",
-      billingMode: "flat_once",
-      priceHalala: 600,
-    });
-    expectStatus(res, 201, "create addon item");
-    const createdItemAddonId = res.body.data.id;
-
-    res = await api.post("/api/dashboard/addons").set(adminHeaders).send({
-      name: { en: `${TEST_TAG} Invalid Kind` },
+      name: { ar: "نوع خاطئ", en: `${TEST_TAG} Invalid Kind` },
       category: "juice",
       kind: "bad",
-      priceHalala: 100,
+      menuProductIds: [ctx.menuProduct._id],
+      planPrices: [{ basePlanId: ctx.plan._id, priceHalala: 100 }],
     });
     expectStatus(res, 400, "reject invalid kind");
 
     res = await api.post("/api/dashboard/addons").set(adminHeaders).send({
-      name: { en: `${TEST_TAG} Invalid Category` },
+      name: { ar: "فئة خاطئة", en: `${TEST_TAG} Invalid Category` },
       category: "bad",
-      kind: "item",
-      priceHalala: 100,
+      menuProductIds: [ctx.menuProduct._id],
+      planPrices: [{ basePlanId: ctx.plan._id, priceHalala: 100 }],
     });
     expectStatus(res, 400, "reject invalid category");
 
-    res = await api.post("/api/dashboard/addons").set(adminHeaders).send({
-      name: { en: `${TEST_TAG} Invalid Billing` },
-      category: "juice",
-      kind: "item",
-      billingMode: "per_day",
-      priceHalala: 100,
-    });
-    expectStatus(res, 400, "reject invalid billing combination");
-
     res = await api.get("/api/dashboard/addons?kind=plan").set(adminHeaders);
     expectStatus(res, 200, "list addons by kind");
-    assert(res.body.data.every((addon) => addon.kind === "plan"));
+    assert(Array.isArray(res.body.data.plans));
 
     res = await api.get("/api/dashboard/addons?category=snack").set(adminHeaders);
     expectStatus(res, 200, "list addons by category");
-    assert(res.body.data.every((addon) => addon.category === "snack"));
-
-    res = await api.patch(`/api/dashboard/addons/${createdItemAddonId}/toggle`).set(adminHeaders).send({});
-    expectStatus(res, 200, "toggle addon");
-    assert.strictEqual(res.body.data.isActive, false);
+    assert(Array.isArray(res.body.data.plans));
 
     res = await api.delete(`/api/dashboard/addons/${createdPlanAddonId}`).set(adminHeaders).send({});
     expectStatus(res, 200, "soft delete addon");

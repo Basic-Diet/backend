@@ -1,76 +1,27 @@
-# Dashboard Add-on Plans Linking & Pricing Contract
+# Dashboard Add-on Subscription Plans CRUD, Linking & Pricing Contract
 
-This document is a Dashboard Frontend handoff describing the Add-ons Dashboard screen.
-The Add-ons dashboard is only responsible for:
-1. Viewing add-on subscription plans.
-2. Linking existing menu products to an add-on subscription plan.
-3. Updating the add-on plan prices by base subscription plan.
-4. Toggling the add-on subscription plan active/inactive.
-5. Editing basic add-on plan metadata such as name, category, and maxPerDay.
+The Add-ons page manages dashboard-visible add-on subscription plans. Existing seeded plans include Juice, Snack, and Small Salad, and new plans may be created through `POST /api/dashboard/addons`.
 
-> **Note:** The Dashboard Add-ons page must NOT create menu products. Menu products are managed only from the Menu/Catalog dashboard. The dashboard simply links existing products. Do not document or expose "Create Add-on Item" as part of this dashboard screen.
+The page links existing Menu/Catalog products; it never creates, edits, or deletes menu products. A product must be created in Menu/Catalog first, and the frontend submits only its ID in `menuProductIds`. Subscription pricing is stored in `planPrices` as `priceHalala` per base plan. No separate `/api/dashboard/addon-prices` screen or endpoint is needed for this workflow.
 
-## Dashboard Scope
+## Endpoint list
 
-The screen manages only these add-on subscription plans:
-* Juice Subscription
-* Snack Subscription
-* Small Salad Subscription
+1. `GET /api/dashboard/addons`
+2. `POST /api/dashboard/addons`
+3. `PUT /api/dashboard/addons/:id`
+4. `DELETE /api/dashboard/addons/:id`
+5. `PATCH /api/dashboard/addons/:id/toggle`
+6. `GET /api/dashboard/menu/products`
+7. `GET /api/dashboard/plans`
 
-> **Note:** "Healthy Dessert", "Snack Box", "Protein Snack", or any other menu product / one-time item must NEVER appear as a subscription plan. The backend filters out these decoy records automatically.
+The existing picker forms remain supported where available:
 
-The screen does not create these plan categories dynamically.
-The dashboard edits existing add-on subscription plans.
-
-The dashboard can:
-* edit name
-* edit category from fixed select
-* edit maxPerDay
-* link/unlink existing menu products
-* edit matrix prices
-* toggle active/inactive
-
-The dashboard cannot:
-* create menu products
-* edit menu product details
-* delete menu products
-* create one-time add-on items
-* manage mobile/customer daily selection
-* calculate customer quote totals
-* call `/api/dashboard/addon-prices` to render the main screen
-
-## Recommended Endpoint Scope
-
-Required endpoints for this screen:
-
-1. **GET** `/api/dashboard/addons`
-   Main screen read model.
-
-2. **PUT** `/api/dashboard/addons/:id`
-   Save one add-on subscription plan, including linked menu products and plan prices.
-
-3. **PATCH** `/api/dashboard/addons/:id/toggle`
-   Toggle active/inactive.
-
-4. **GET menu products picker endpoint**
-   `GET /api/dashboard/menu/products`
-
-5. **GET base plans picker endpoint**
-   `GET /api/dashboard/plans`
+- `GET /api/dashboard/menu/products?view=picker`
+- `GET /api/dashboard/plans?view=picker`
 
 ## GET /api/dashboard/addons
 
-This is the main read endpoint.
-The dashboard uses it to load:
-* existing add-on subscription plans
-* currently linked menu products for each plan
-* pricing matrix for each plan
-* category select options
-* summary counts
-
-> **Note:** `data.items` is NOT returned in the default Dashboard response. The dashboard only receives and renders the configured add-on subscription plans.
-
-### Response Shape
+Returns every active, dashboard-visible subscription add-on plan with a real plan discriminator and pricing matrix. Menu products, one-time items, inactive/archived plans, and item-shaped decoys are excluded. The selection is not based on display names and is not limited to three seeded plans.
 
 ```json
 {
@@ -79,26 +30,17 @@ The dashboard uses it to load:
     "plans": [
       {
         "id": "addon_plan_id",
-        "name": {
-          "ar": "اشتراك العصير",
-          "en": "Juice Subscription"
-        },
-        "category": "juice",
+        "name": { "ar": "اشتراك الزبادي", "en": "Yogurt Subscription" },
+        "category": "snack",
         "maxPerDay": 1,
         "isActive": true,
-        "menuProductIds": [
-          "menu_product_id_1",
-          "menu_product_id_2"
-        ],
+        "menuProductIds": ["menu_product_id_1"],
         "menuProducts": [
           {
             "id": "menu_product_id_1",
-            "key": "orange_juice",
-            "name": {
-              "ar": "عصير برتقال",
-              "en": "Orange Juice"
-            },
-            "category": "drinks",
+            "key": "yogurt_cup",
+            "name": { "ar": "كوب زبادي", "en": "Yogurt Cup" },
+            "category": "snacks",
             "image": "",
             "isActive": true
           }
@@ -106,15 +48,12 @@ The dashboard uses it to load:
         "planPrices": [
           {
             "basePlanId": "base_plan_id_1",
-            "basePlanName": {
-              "ar": "اشتراك 7 أيام",
-              "en": "7-Day Meal Subscription"
-            },
+            "basePlanName": { "ar": "خطة 7 أيام", "en": "7 Day Plan" },
             "daysCount": 7,
             "mealsCount": 14,
-            "priceHalala": 10000,
-            "priceSar": 100,
-            "priceLabel": "100 SAR",
+            "priceHalala": 7000,
+            "priceSar": 70,
+            "priceLabel": "70 SAR",
             "isActive": true
           }
         ]
@@ -122,260 +61,68 @@ The dashboard uses it to load:
     ],
     "meta": {
       "addonPlanCategories": [
-        {
-          "key": "juice",
-          "label": {
-            "ar": "اشتراك العصير",
-            "en": "Juice Subscription"
-          }
-        },
-        {
-          "key": "small_salad",
-          "label": {
-            "ar": "اشتراك السلطة الصغيرة",
-            "en": "Small Salad Subscription"
-          }
-        },
-        {
-          "key": "snack",
-          "label": {
-            "ar": "اشتراك السناك",
-            "en": "Snack Subscription"
-          }
-        }
+        { "key": "juice", "label": { "ar": "اشتراك العصير", "en": "Juice Subscription" } },
+        { "key": "small_salad", "label": { "ar": "اشتراك السلطة الصغيرة", "en": "Small Salad Subscription" } },
+        { "key": "snack", "label": { "ar": "اشتراك السناك", "en": "Snack Subscription" } }
       ]
     },
-    "summary": {
-      "plansCount": 3,
-      "matrixRowsCount": 9,
-      "currency": "SAR"
-    }
+    "summary": { "plansCount": 1, "matrixRowsCount": 1, "currency": "SAR" }
   }
 }
 ```
 
-## Editable Fields
+There is no `data.items`. Plan, product, and price objects use only the fields shown above; internal discriminators, timestamps, `_id`, `__v`, compatibility data, and price-row `addonPlanId` are not returned.
 
-The frontend can edit only these fields:
+## POST /api/dashboard/addons
 
-For add-on plan:
-* `name.ar`
-* `name.en`
-* `category`
-* `maxPerDay`
-* `isActive`
-* `menuProductIds`
-* `planPrices[].basePlanId`
-* `planPrices[].priceHalala`
-* `planPrices[].isActive`
+Creates one subscription add-on plan and links existing menu products. It does not create menu products.
 
-Read-only fields:
-* `id`
-* `_id`
-* `kind`
-* `type`
-* `pricingMode`
-* `menuProducts`
-* `menuProductsCount`
-* `planPricesCount`
-* `basePlanName`
-* `daysCount`
-* `mealsCount`
-* `priceSar`
-* `priceLabel`
-* `currency`
+```json
+{
+  "name": { "ar": "اشتراك الزبادي", "en": "Yogurt Subscription" },
+  "category": "snack",
+  "maxPerDay": 1,
+  "isActive": true,
+  "menuProductIds": ["menu_product_id_1", "menu_product_id_2"],
+  "planPrices": [
+    { "basePlanId": "base_plan_id_1", "priceHalala": 7000, "isActive": true },
+    { "basePlanId": "base_plan_id_2", "priceHalala": 14000, "isActive": true }
+  ]
+}
+```
 
-Do not ask the dashboard frontend to send read-only fields.
+Validation:
+
+- `name.ar` and `name.en` are required non-empty strings.
+- `category` is required and must be `juice`, `snack`, or `small_salad`.
+- `maxPerDay`, when supplied, must be a number greater than or equal to zero.
+- `isActive`, when supplied, must be boolean.
+- `menuProductIds` is required, must contain at least one existing menu product ID, and contains links only.
+- `planPrices` is required and must contain at least one row.
+- Every row requires an existing `basePlanId` and numeric `priceHalala >= 0`; optional `isActive` must be boolean.
+- Duplicate product IDs and duplicate base-plan rows are rejected.
+
+Success is `201` and returns the same lean populated plan DTO used inside GET.
 
 ## PUT /api/dashboard/addons/:id
 
-This is the main save endpoint for the add-on subscription plan.
+Updates plan metadata, linked `menuProductIds`, and the `planPrices` matrix. `kind` is not required. Sending `planPrices` replaces/upserts the plan's matrix by `basePlanId`. The response is the same lean populated plan DTO.
 
-### Payload
+## DELETE /api/dashboard/addons/:id
 
-```json
-{
-  "name": {
-    "ar": "اشتراك العصير",
-    "en": "Juice Subscription"
-  },
-  "category": "juice",
-  "maxPerDay": 1,
-  "isActive": true,
-  "menuProductIds": [
-    "menu_product_id_1",
-    "menu_product_id_2",
-    "menu_product_id_3"
-  ],
-  "planPrices": [
-    {
-      "basePlanId": "base_plan_id_1",
-      "priceHalala": 10000,
-      "isActive": true
-    },
-    {
-      "basePlanId": "base_plan_id_2",
-      "priceHalala": 18000,
-      "isActive": true
-    },
-    {
-      "basePlanId": "base_plan_id_3",
-      "priceHalala": 30000,
-      "isActive": true
-    }
-  ]
-}
-```
+Safely archives the subscription plan by setting `isActive=false`. The plan and its matrix remain stored for historical subscriptions, orders, payments, invoices, and audit records. Default GET no longer returns it.
 
-> **Note:** The backend implicitly infers `kind: "plan"`. Do not send `kind` in the payload.
-
-Save behavior:
-* Replaces/updates plan metadata.
-* Replaces/updates linked menu products.
-* Upserts pricing matrix rows by `basePlanId`.
-* Returns the updated full plan with nested `menuProducts` and `planPrices`.
-
-## Menu Product Linking
-
-Rules:
-* Add-ons dashboard does not create products.
-* Products must exist in Menu/Catalog first.
-* The dashboard fetches existing products from the menu products picker endpoint.
-* The dashboard submits selected product IDs as `menuProductIds`.
-* `menuProducts[]` in the read response is display-only.
-* To add a new product to Juice Subscription, create the product in Menu first, then link it here.
-
-### Menu Products Picker Endpoint
-
-`GET /api/dashboard/menu/products`
-
-Minimal response:
 ```json
 {
   "status": true,
-  "data": [
-    {
-      "id": "menu_product_id",
-      "key": "watermelon_juice",
-      "name": {
-        "ar": "عصير بطيخ",
-        "en": "Watermelon Juice"
-      },
-      "category": "drinks",
-      "image": "",
-      "isActive": true
-    }
-  ]
+  "data": { "id": "addon_plan_id", "archived": true, "isActive": false }
 }
 ```
 
-Frontend:
-* show searchable multi-select
-* select by `id`
-* submit selected IDs as `menuProductIds`
+## PATCH /api/dashboard/addons/:id/toggle
 
-## Base Plan Pricing Matrix
+Toggles the plan's active state. Inactive plans are omitted from default GET.
 
-Rules:
-* Add-on plan price is a flat package price for each base subscription plan.
-* Frontend must not multiply by days.
-* Frontend must not multiply by meals.
-* Frontend edits only `priceHalala` and `isActive` per base plan.
-* Display `priceLabel` from backend after saving/loading.
+## Picker ownership
 
-### Base Plans Picker Endpoint
-
-`GET /api/dashboard/plans`
-
-Minimal response:
-```json
-{
-  "status": true,
-  "data": [
-    {
-      "id": "base_plan_id",
-      "name": {
-        "ar": "اشتراك 7 أيام",
-        "en": "7-Day Meal Subscription"
-      },
-      "daysCount": 7,
-      "mealsCount": 14,
-      "isActive": true
-    }
-  ]
-}
-```
-
-Frontend:
-* render one matrix row per sellable base plan
-* submit each row as:
-  ```json
-  {
-    "basePlanId": "...",
-    "priceHalala": 10000,
-    "isActive": true
-  }
-  ```
-
-## Category Select
-
-Allowed values:
-* `juice`
-* `small_salad`
-* `snack`
-
-Source: `data.meta.addonPlanCategories`
-
-Frontend:
-* render select options from `label.ar` / `label.en`
-* submit only `key`
-
-Do not hardcode labels if meta is available.
-
-## Toggle
-
-`PATCH /api/dashboard/addons/:id/toggle`
-
-No payload is required.
-
-## Validation
-
-The frontend must block submit if:
-* name.ar is empty
-* name.en is empty
-* category is not selected
-* category is not one of `juice`, `small_salad`, `snack`
-* menuProductIds is empty
-* planPrices is empty
-* any planPrices[].basePlanId is missing
-* any planPrices[].priceHalala is missing, not a number, or negative
-
-Backend errors are generic:
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "INVALID",
-    "message": "..."
-  }
-}
-```
-
-## Frontend Do / Don't
-
-**Do:**
-* Use `GET /api/dashboard/addons` to load the screen.
-* Edit only `data.plans`.
-* Link existing menu products only.
-* Use `PUT /api/dashboard/addons/:id` to save a plan.
-* Use `menuProductIds` for selected linked products.
-* Use `planPrices[].priceHalala` for prices.
-
-**Don't:**
-* Do not create products from Add-ons page.
-* Do not send `menuProducts`.
-* Do not send read-only fields.
-* Do not use `/api/dashboard/addon-prices` for the main screen.
-* Do not multiply add-on price by days or meals.
-* Do not flatten `menuProducts` as top-level add-on plans.
-* Do not manage one-time items from this screen.
+Use `GET /api/dashboard/menu/products` to select existing products and submit their IDs in `menuProductIds`. Use `GET /api/dashboard/plans` to select base plans and submit each ID with its `priceHalala` in `planPrices`. The Add-ons page does not manage customer daily selection or calculate customer quote totals.

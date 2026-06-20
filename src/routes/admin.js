@@ -223,15 +223,11 @@ router.patch(
   asyncHandler(controller.updateMealsSortOrder)
 );
 
-router.get("/addons", asyncHandler(addonController.listAddonsAdmin));
-router.post("/addons", adminImageUploadMiddleware, asyncHandler(addonController.createAddon));
-router.patch("/addons/:id/toggle", asyncHandler(addonController.toggleAddonActive));
-router.patch("/addons/:id/sort", asyncHandler(addonController.updateAddonSortOrder));
-router.post("/addons/:id/clone", asyncHandler(addonController.cloneAddon));
-router.get("/addons/:id", asyncHandler(addonController.getAddonAdmin));
-router.put("/addons/:id", adminImageUploadMiddleware, asyncHandler(addonController.updateAddon));
-router.patch("/addons/:id", asyncHandler(addonController.patchAddon));
-router.delete("/addons/:id", asyncHandler(addonController.deleteAddon));
+router.get("/addons", asyncHandler(addonController.listDashboardAddonPlans));
+router.post("/addons", asyncHandler(addonController.createDashboardAddonPlan));
+router.patch("/addons/:id/toggle", asyncHandler(addonController.toggleAddonPlanActive));
+router.put("/addons/:id", adminImageUploadMiddleware, asyncHandler(addonController.updateAddonPlan));
+router.delete("/addons/:id", asyncHandler(addonController.deleteDashboardAddonPlan));
 
 router.get("/addon-plans", asyncHandler(addonController.listAddonPlansAdmin));
 router.post("/addon-plans", adminImageUploadMiddleware, asyncHandler(addonController.createAddonPlan));

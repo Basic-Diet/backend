@@ -189,14 +189,30 @@ function buildAddonDerivedBillingFields(billingMode) {
   return { type: "subscription", pricingModel: "subscription", billingUnit: "meal" };
 }
 
-function validateAddonPayloadOrThrow(payload, { forceKind = null } = {}) {
+function validateAddonPayloadOrThrow(payload, { forceKind = null, dashboardPlanCreate = false } = {}) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw { status: 400, code: "INVALID", message: "Request body must be an object" };
+  }
+
+  if (dashboardPlanCreate) {
+    if (!payload.name || typeof payload.name !== "object" || Array.isArray(payload.name)
+      || typeof payload.name.ar !== "string" || typeof payload.name.en !== "string") {
+      throw { status: 400, code: "INVALID", message: "name.ar and name.en are required non-empty strings" };
+    }
+    if (payload.isActive !== undefined && typeof payload.isActive !== "boolean") {
+      throw { status: 400, code: "INVALID", message: "isActive must be a boolean" };
+    }
+    if (payload.maxPerDay !== undefined && typeof payload.maxPerDay !== "number") {
+      throw { status: 400, code: "INVALID", message: "maxPerDay must be a number >= 0" };
+    }
   }
 
   const kind = normalizeAddonKind(payload.kind, { forceKind });
   const category = normalizeAddonCategory(payload.category);
   const name = normalizeName(parseLocalizedFieldFromBody(payload, "name", { allowString: true }) ?? payload.name);
+  if (dashboardPlanCreate && (!name.ar || !name.en)) {
+    throw { status: 400, code: "INVALID", message: "name.ar and name.en are required non-empty strings" };
+  }
   const description = normalizeLocalizedOptional(
     parseLocalizedFieldFromBody(payload, "description", { allowString: true }) ?? payload.description
   );
@@ -241,12 +257,15 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null } = {}) {
         return id;
       })
     : [];
+  if (dashboardPlanCreate && menuProductIds.length === 0) {
+    throw { status: 400, code: "INVALID", message: "menuProductIds must contain at least one item" };
+  }
 
   let maxPerDay = 1;
   if (payload.maxPerDay !== undefined && payload.maxPerDay !== null) {
     const parsedMax = Number(payload.maxPerDay);
-    if (!Number.isInteger(parsedMax) || parsedMax < 1) {
-      throw { status: 400, code: "INVALID", message: "maxPerDay must be an integer >= 1" };
+    if (!Number.isFinite(parsedMax) || parsedMax < 0) {
+      throw { status: 400, code: "INVALID", message: "maxPerDay must be a number >= 0" };
     }
     maxPerDay = parsedMax;
   }
@@ -541,7 +560,7 @@ function toDashboardAddonPlanLeanDTO(plan) {
     id: String(plan._id || plan.id),
     name: plan.name || { ar: "", en: "" },
     category: plan.category || "",
-    maxPerDay: plan.maxPerDay || 1,
+    maxPerDay: plan.maxPerDay ?? 1,
     isActive: plan.isActive !== false,
     menuProductIds: (plan.menuProductIds || []).map(String),
     menuProducts: (plan.menuProducts || []).map(toDashboardMenuProductPickerDTO),
@@ -615,7 +634,20 @@ async function listAddonsAdmin(req, res, options = {}) {
       return res.status(200).json({ status: true, data: mapped, meta: { filters, totalCount: rows.length } });
     }
 
-    const allAddons = await Addon.find(filters).sort({ sortOrder: 1, createdAt: -1 }).lean();
+    const AddonPlanPrice = require("../models/AddonPlanPrice");
+    const pricedPlanIds = await AddonPlanPrice.distinct("addonPlanId");
+    const allAddons = await Addon.find({
+      ...filters,
+      _id: { $in: pricedPlanIds },
+      isActive: true,
+      kind: "plan",
+      $or: [
+        { type: "subscription" },
+        { pricingModel: "subscription" },
+        { billingMode: { $in: ["per_day", "per_meal"] } },
+        { pricingMode: "base_plan_matrix" },
+      ],
+    }).sort({ sortOrder: 1, createdAt: -1 }).lean();
 
     const viewFull = req.query && req.query.view === "full";
 
@@ -631,30 +663,7 @@ async function listAddonsAdmin(req, res, options = {}) {
     );
     void dashItemFilter; // used for documentation; inline filter applied above
     
-    let plansRaw = allAddons.filter(a => a.kind === "plan");
-    if (!viewFull) {
-      const allowedPlans = [
-        { cat: "juice", nameEn: "Juice Subscription" },
-        { cat: "snack", nameEn: "Snack Subscription" },
-        { cat: "small_salad", nameEn: "Small Salad Subscription" }
-      ];
-      
-      const strictPlans = plansRaw.filter(a => 
-        a.pricingMode === "base_plan_matrix" || 
-        (a.name && a.name.en && a.name.en.includes("Subscription")) ||
-        (a.menuProductIds && a.menuProductIds.length > 0)
-      );
-
-      const filtered = [];
-      for (const { cat, nameEn } of allowedPlans) {
-        let match = strictPlans.find(a => a.category === cat && a.name && a.name.en === nameEn);
-        if (!match) {
-           match = strictPlans.find(a => a.category === cat);
-        }
-        if (match) filtered.push(match);
-      }
-      plansRaw = filtered;
-    }
+    const plansRaw = allAddons;
 
     const plans = [];
     for (const planRow of plansRaw) {
@@ -662,61 +671,6 @@ async function listAddonsAdmin(req, res, options = {}) {
         includeInternal: req.query && req.query.includeInternal === "true",
       });
       if (populated) {
-        if (!viewFull) {
-          const Plan = require("../models/Plan");
-          const AddonPlanPrice = require("../models/AddonPlanPrice");
-          let needsRepopulate = false;
-
-          if (populated.category === "small_salad") {
-            const has30Days = populated.planPrices.some(p => p.daysCount === 30);
-            if (!has30Days) {
-              const base30 = await Plan.findOne({ isActive: true, daysCount: 30 });
-              if (base30) {
-                await AddonPlanPrice.create({
-                  addonPlanId: populated._id,
-                  basePlanId: base30._id,
-                  priceHalala: 27000,
-                  currency: "SAR",
-                  isActive: true
-                });
-                needsRepopulate = true;
-              }
-            }
-          } else if (populated.category === "snack") {
-            const expectedDays = [7, 26, 30];
-            const missingDays = expectedDays.filter(d => !populated.planPrices.some(p => p.daysCount === d));
-            if (missingDays.length > 0) {
-              const activeBases = await Plan.find({ isActive: true, daysCount: { $in: missingDays } });
-              let pricesToCreate = [];
-              for (const base of activeBases) {
-                let priceHalala = 0;
-                if (base.daysCount === 7) priceHalala = 8000;
-                else if (base.daysCount === 26) priceHalala = 15000;
-                else if (base.daysCount === 30) priceHalala = 25000;
-                
-                if (priceHalala > 0) {
-                  pricesToCreate.push({
-                    addonPlanId: populated._id,
-                    basePlanId: base._id,
-                    priceHalala,
-                    currency: "SAR",
-                    isActive: true
-                  });
-                }
-              }
-              if (pricesToCreate.length > 0) {
-                await AddonPlanPrice.insertMany(pricesToCreate);
-                needsRepopulate = true;
-              }
-            }
-          }
-
-          if (needsRepopulate) {
-            populated = await buildFullyPopulatedAddonDetail(planRow._id, {
-              includeInternal: req.query && req.query.includeInternal === "true",
-            });
-          }
-        }
         plans.push(populated);
       }
     }
@@ -775,6 +729,10 @@ async function listAddonsAdmin(req, res, options = {}) {
   }
 }
 
+async function listDashboardAddonPlans(req, res) {
+  return listAddonsAdmin({ ...req, query: {} }, res);
+}
+
 async function getAddonAdmin(req, res, options = {}) {
   const { id } = req.params;
   try {
@@ -824,6 +782,12 @@ async function createAddon(req, res, options = {}) {
         }
         validateObjectId(p.basePlanId, `planPrices[${i}].basePlanId`);
         const basePlanId = p.basePlanId;
+        if (options.dashboardPlanCreate && typeof p.priceHalala !== "number") {
+          throw { status: 400, code: "INVALID", message: `planPrices[${i}].priceHalala must be a number >= 0` };
+        }
+        if (options.dashboardPlanCreate && p.isActive !== undefined && typeof p.isActive !== "boolean") {
+          throw { status: 400, code: "INVALID", message: `planPrices[${i}].isActive must be a boolean` };
+        }
         const rowPrice = Number(p.priceHalala);
         if (!isNonNegativeInteger(rowPrice)) {
           throw { status: 400, code: "INVALID", message: `planPrices[${i}].priceHalala must be an integer >= 0` };
@@ -842,6 +806,20 @@ async function createAddon(req, res, options = {}) {
         if (new Set(basePlanIdStrings).size !== basePlanIdStrings.length) {
           throw { status: 400, code: "INVALID", message: "Duplicate basePlanId in planPrices is not allowed" };
         }
+      }
+    }
+    if (options.dashboardPlanCreate && planPricesInput.length === 0) {
+      throw { status: 400, code: "INVALID", message: "planPrices must contain at least one item" };
+    }
+
+    if (options.dashboardPlanCreate) {
+      const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
+      if (uniqueProductIds.length !== payload.menuProductIds.length) {
+        throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
+      }
+      const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
+      if (productCount !== payload.menuProductIds.length) {
+        throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
       }
     }
 
@@ -901,7 +879,10 @@ async function createAddon(req, res, options = {}) {
     }
 
     const data = await buildFullyPopulatedAddonDetail(addonDoc._id);
-    return res.status(201).json({ status: true, data });
+    return res.status(201).json({
+      status: true,
+      data: options.dashboardPlanCreate ? toDashboardAddonPlanLeanDTO(data) : data,
+    });
 
   } catch (err) {
     if (session) {
@@ -1127,7 +1108,12 @@ async function deleteAddon(req, res, options = {}) {
     kind: row.kind,
     category: row.category,
   });
-  return res.status(200).json({ status: true, data: { id: row.id, isActive: row.isActive } });
+  return res.status(200).json({
+    status: true,
+    data: options.dashboardPlanDelete
+      ? { id: row.id, archived: true, isActive: false }
+      : { id: row.id, isActive: row.isActive },
+  });
 }
 
 async function toggleAddonActive(req, res, options = {}) {
@@ -1214,6 +1200,8 @@ async function cloneAddon(req, res) {
 }
 
 const forcePlanKind = { forceKind: "plan" };
+const dashboardPlanCreateOptions = { forceKind: "plan", dashboardPlanCreate: true };
+const dashboardPlanDeleteOptions = { forceKind: "plan", dashboardPlanDelete: true };
 const forceItemKind = { forceKind: "item" };
 
 async function listAddonPlansAdmin(req, res) {
@@ -1226,6 +1214,14 @@ async function getAddonPlanAdmin(req, res) {
 
 async function createAddonPlan(req, res) {
   return createAddon(req, res, forcePlanKind);
+}
+
+async function createDashboardAddonPlan(req, res) {
+  return createAddon(req, res, dashboardPlanCreateOptions);
+}
+
+async function deleteDashboardAddonPlan(req, res) {
+  return deleteAddon(req, res, dashboardPlanDeleteOptions);
 }
 
 async function updateAddonPlan(req, res) {
@@ -1374,10 +1370,13 @@ module.exports = {
   getAddonSubscriptionOptions,
   listAddons,
   listAddonsAdmin,
+  listDashboardAddonPlans,
   getAddonAdmin,
   createAddon,
+  createDashboardAddonPlan,
   updateAddon,
   deleteAddon,
+  deleteDashboardAddonPlan,
   toggleAddonActive,
   updateAddonSortOrder,
   cloneAddon,
