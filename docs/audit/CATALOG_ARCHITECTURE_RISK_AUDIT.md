@@ -1,154 +1,324 @@
-A. SYSTEM INTENT (INFERRED)
-PremiumUpgradeConfig becomes authoritative for subscription premium availability and pricing once any config exists; legacy fallback is allowed only while the collection is empty.
-Premium upgrades modify existing subscription meal slots and never add meals or act as add-ons.
-premiumKey is the canonical premium identity across quote, checkout, planner, balances, and clients.
-Premium configuration must not alter one-time order pricing.
-The dashboard Premium Upgrades page must manage only existing PremiumUpgradeConfig links through /api/dashboard/premium-upgrades.
-Candidate eligibility must be resolved by the backend; clients must only render returned candidates.
-Subscription-day, delivery, pickup-request, and order transitions should each have authoritative state rules.
-Backend DTOs should own allowed actions, prices, balances, and payment requirements.
-Dashboard and Flutter should render backend decisions rather than reproduce them.
-Canonical planner records use selectionType, premiumKey, menu products/options, and snapshots; legacy builder fields exist only for compatibility.
-B. ACTUAL SYSTEM BEHAVIOR
-PremiumUpgradeConfig CRUD, candidate discovery, revision control, visibility, enabled state, readiness, and archiving exist.
-An empty config collection activates legacy allow-all premium behavior.
-Config-first pricing coexists with hardcoded prices, menu relation prices, menu option prices, menu product prices, Meal Builder rules, and BuilderProtein prices.
-Different premium consumers apply different config predicates.
-Premium identity can be resolved from premiumKey, builder IDs, menu IDs, aliases, or localized-name inference.
-Candidate discovery is centralized in loadEligiblePremiumCandidates().
-Candidate creation reuses the same resolver.
-includeLinked defaults to false and structurally filters linked candidates correctly.
-Candidate discovery contains explicit hardcoded product scope for premium_large_salad.
-The dashboard /premium-meals page embeds MealBuilderPage and has no PremiumUpgradeConfig management client.
-Dashboard subscription creation uses /api/admin/builder-premium-meals and submits legacy premiumMealId.
-Flutter quote and checkout requests use canonical premiumKey.
-Flutter independently computes premium credit coverage, pending premium counts, and pending premium amounts.
-Subscription days, deliveries, pickup requests, and orders persist separate statuses.
-A purported subscription-day transition service exists but has no non-test call sites.
-Active operations use a different transition table in utils/state.js and direct status mutations.
-Delivery cancellation reason codes differ between documentation, dashboard, and backend validation.
-Legacy builder premium routes, legacy planner lookups, ID-based premium payloads, and name inference remain active.
-C. DEVIATION TABLE
-System Area	Intended	Actual	Type	Severity	Root Cause File
-Premium pricing	Config is authoritative once any config exists	Planner/catalog consumers can still fall back to menu, builder, rule, or hardcoded prices	DUPLICATED_AUTHORITY	BLOCKER	[CatalogService.js (line 195)](/home/hema/Projects/basicdiet145/src/services/catalog/CatalogService.js:195)
-Premium pricing	One shared config-state policy	mealSlotPlannerService requires active/enabled but ignores isVisible	LOGIC_CONFLICT	HIGH	[mealSlotPlannerService.js (line 898)](/home/hema/Projects/basicdiet145/src/services/subscription/mealSlotPlannerService.js:898)
-Premium pricing	Hidden config is unavailable to customer planner	premiumIdentity also ignores isVisible when applying config price	LOGIC_CONFLICT	HIGH	[premiumIdentity.js (line 220)](/home/hema/Projects/basicdiet145/src/utils/subscription/premiumIdentity.js:220)
-Premium pricing	Premium protein delta comes from authoritative config	Catalog contains hardcoded 2000-halalah values	DUPLICATED_AUTHORITY	HIGH	[CatalogService.js (line 59)](/home/hema/Projects/basicdiet145/src/services/catalog/CatalogService.js:59)
-Premium salad pricing	Config controls configured premium salad delta	Menu product, basic_salad, and fixed 2900-halalah fallback remain pricing authorities	DUPLICATED_AUTHORITY	HIGH	[premiumLargeSaladPricingService.js (line 35)](/home/hema/Projects/basicdiet145/src/services/catalog/premiumLargeSaladPricingService.js:35)
-Meal Builder pricing	Published planner reflects authoritative premium config	Builder rules and virtual defaults can supply 2000/2900 values	DUPLICATED_AUTHORITY	HIGH	[mealBuilderConfigService.js (line 1934)](/home/hema/Projects/basicdiet145/src/services/subscription/mealBuilderConfigService.js:1934)
-Premium identity	premiumKey is canonical identity	Identity can be inferred from localized names and legacy IDs	LEGACY_LEAK_ACTIVE	HIGH	[premiumIdentity.js (line 77)](/home/hema/Projects/basicdiet145/src/utils/subscription/premiumIdentity.js:77)
-Premium quote	Canonical payload is {premiumKey, qty}	Quote accepts premiumMealId and proteinId compatibility payloads	LEGACY_LEAK_ACTIVE	MEDIUM	[subscriptionQuoteService.js (line 208)](/home/hema/Projects/basicdiet145/src/services/subscription/subscriptionQuoteService.js:208)
-Config DTO	sourceStatus and validation represent source eligibility	published is hardcoded true and relationValid equals source existence	DTO_MISMATCH	HIGH	[premiumUpgradeConfigService.js (line 73)](/home/hema/Projects/basicdiet145/src/services/subscription/premiumUpgradeConfigService.js:73)
-Candidate ownership	One backend resolver owns premium-config eligibility	One canonical resolver is used by both list and create	—	—	[premiumUpgradeConfigService.js (line 238)](/home/hema/Projects/basicdiet145/src/services/subscription/premiumUpgradeConfigService.js:238)
-Candidate filtering	Backend filters eligibility and linked state	includeLinked, search, source, product, and selection filters are centralized and structurally consistent	—	—	[premiumUpgradeConfigService.js (line 399)](/home/hema/Projects/basicdiet145/src/services/subscription/premiumUpgradeConfigService.js:399)
-Candidate scope	Eligible menu sources are backend-resolved	Product-backed candidates are hardcoded to premium_large_salad; add-on detection also depends on itemType/UI card variant	CONTRACT_LEAKAGE	MEDIUM	[premiumUpgradeConfigService.js (line 199)](/home/hema/Projects/basicdiet145/src/services/subscription/premiumUpgradeConfigService.js:199)
-Candidate DTO	Documented response includes status: true	Service/controller returns only {data, meta}	DTO_MISMATCH	MEDIUM	[premiumUpgradeController.js (line 30)](/home/hema/Projects/basicdiet145/src/controllers/dashboard/premiumUpgradeController.js:30)
-Premium dashboard	Screen manages PremiumUpgradeConfig only	/premium-meals embeds MealBuilderPage	MISSING_IMPLEMENTATION	BLOCKER	[premium-meals/index.tsx (line 3)](/home/hema/Projects/full app/client_dashbourd/src/routes/_protected/premium-meals/index.tsx:3)
-Premium dashboard	Use /api/dashboard/premium-upgrades endpoints	No dashboard client, types, hooks, or components reference those endpoints	MISSING_IMPLEMENTATION	BLOCKER	[premium-meals/index.tsx (line 35)](/home/hema/Projects/full app/client_dashbourd/src/routes/_protected/premium-meals/index.tsx:35)
-Subscription creation	Premium selections use premiumKey	Dashboard fetches legacy builder premiums and submits premiumMealId	LEGACY_LEAK_ACTIVE	HIGH	[PremiumMealsSection.tsx (line 40)](/home/hema/Projects/full app/client_dashbourd/src/components/pages/subscriptions/create/PremiumMealsSection.tsx:40)
-Premium semantics	Upgrade consumes an existing slot	Dashboard labels the operation “Add meal” and “meal price”	CONTRACT_LEAKAGE	MEDIUM	[PremiumMealsSection.tsx (line 84)](/home/hema/Projects/full app/client_dashbourd/src/components/pages/subscriptions/create/PremiumMealsSection.tsx:84)
-Subscription-day lifecycle	One transition authority	subscriptionDayTransitionService is unreferenced; active operations use utils/state.js	DUPLICATED_AUTHORITY	HIGH	[subscriptionDayTransitionService.js (line 11)](/home/hema/Projects/basicdiet145/src/services/subscription/subscriptionDayTransitionService.js:11)
-Subscription-day lifecycle	Transition rules are consistent	utils/state.js and subscriptionDayTransitionService define different delivery transitions	LOGIC_CONFLICT	HIGH	[state.js (line 1)](/home/hema/Projects/basicdiet145/src/utils/state.js:1)
-Delivery lifecycle	Day and delivery states remain synchronized by one service	Courier cancellation directly mutates both persisted records	STATE_DESYNC	HIGH	[courierController.js (line 381)](/home/hema/Projects/basicdiet145/src/controllers/courierController.js:381)
-Delivery lifecycle	Ready → dispatched → fulfilled	Active transition table permits ready_for_delivery → fulfilled	LOGIC_CONFLICT	HIGH	[state.js (line 6)](/home/hema/Projects/basicdiet145/src/utils/state.js:6)
-Arriving-soon transition	Only out_for_delivery accepts arriving-soon	Backend helper accepts both scheduled and out_for_delivery	LOGIC_CONFLICT	HIGH	[deliveryWorkflowService.js (line 26)](/home/hema/Projects/basicdiet145/src/services/deliveryWorkflowService.js:26)
-Delivery cancellation	Documented/dashboard reason codes are accepted	Backend accepts a different reason-code set	DTO_MISMATCH	BLOCKER	[deliveryWorkflowService.js (line 31)](/home/hema/Projects/basicdiet145/src/services/deliveryWorkflowService.js:31)
-Courier DTO	Mutation endpoints return one unified delivery DTO	Deduplicated arriving-soon path returns {deliveryId,status,reminderSentAt}	DTO_MISMATCH	MEDIUM	[courierController.js (line 120)](/home/hema/Projects/basicdiet145/src/controllers/courierController.js:120)
-Pickup lifecycle	Pickup request state has one authority	Pickup-request transition rules are defined inside operations service while model and settlement services also mutate state	DUPLICATED_AUTHORITY	HIGH	[opsTransitionService.js (line 791)](/home/hema/Projects/basicdiet145/src/services/dashboard/opsTransitionService.js:791)
-Pickup duplication	Duplicate requests are prevented structurally	Uniqueness depends on caller-provided idempotencyKey; no independent selection/date uniqueness exists	FRONTEND_ASSUMPTION	MEDIUM	[SubscriptionPickupRequest.js (line 105)](/home/hema/Projects/basicdiet145/src/models/SubscriptionPickupRequest.js:105)
-Dashboard order actions	Backend DTO owns allowed actions	Dashboard synthesizes pickup actions when backend actions are absent	CONTRACT_LEAKAGE	HIGH	[oneTimeOrderActions.ts (line 10)](/home/hema/Projects/full app/client_dashbourd/src/lib/oneTimeOrderActions.ts:10)
-Dashboard courier cancellation	Client sends backend-defined reason	Client defaults to customer_unreachable, rejected by the backend enum	FRONTEND_ASSUMPTION	BLOCKER	[fetchCourierDeliveries.ts (line 181)](/home/hema/Projects/full app/client_dashbourd/src/utils/fetchCourierDeliveries.ts:181)
-Dashboard operations DTO	One backend DTO is consumed directly	Adapter resolves multiple aliases for source, entity, delivery mode, address, IDs, and status	FRONTEND_ASSUMPTION	MEDIUM	[operationsBoard.ts (line 372)](/home/hema/Projects/full app/client_dashbourd/src/lib/operationsBoard.ts:372)
-Flutter premium accounting	Backend owns balances and pending payment totals	Flutter recomputes credit coverage and pending amount from catalog fees	CONTRACT_LEAKAGE	HIGH	[meal_planner_state.dart (line 705)](/home/hema/Projects/full app/mobile_app/lib/presentation/plans/timeline/meal_planner/bloc/meal_planner_state.dart:705)
-Flutter premium identity	Backend-provided premiumKey is authoritative	Flutter falls back through premium key, legacy ID, and normalized name	LEGACY_LEAK_ACTIVE	HIGH	[meal_planner_state.dart (line 780)](/home/hema/Projects/full app/mobile_app/lib/presentation/plans/timeline/meal_planner/bloc/meal_planner_state.dart:780)
-Flutter planner DTO	Client renders canonical planner fields	Mapper supplies default premium keys/types and derives salad fee from product price	FRONTEND_ASSUMPTION	MEDIUM	[meal_planner_menu_mapper.dart (line 756)](/home/hema/Projects/full app/mobile_app/lib/data/mappers/meal_planner_menu_mapper.dart:756)
-Legacy service	Unused compatibility code should not define authority	premiumProteinService has no non-test source call site	LEGACY_LEAK_ACTIVE	LOW	[premiumProteinService.js (line 1)](/home/hema/Projects/basicdiet145/src/services/premiumProteinService.js:1)
+## 1. CRITICAL FIX LIST (P0)
 
-D. CRITICAL ARCHITECTURE BREAKS
-BLOCKER — Premium pricing has no single source of truth.
-Competing config, builder, menu relation, menu product, rule, and hardcoded prices remain reachable.
+### P0-1 — Premium pricing authority
 
-BLOCKER — The documented Premium Upgrade dashboard is missing.
-The route invokes Meal Builder instead of the PremiumUpgradeConfig API.
+- Issue: Subscription premium price can resolve from config, catalog fields, builder fields, rules, or constants.
+- Root file:
+  - [premiumUpgradeConfigService.js](/home/hema/Projects/basicdiet145/src/services/subscription/premiumUpgradeConfigService.js:41)
+  - [CatalogService.js](/home/hema/Projects/basicdiet145/src/services/catalog/CatalogService.js:59)
+  - [premiumLargeSaladPricingService.js](/home/hema/Projects/basicdiet145/src/services/catalog/premiumLargeSaladPricingService.js:63)
+  - [mealBuilderConfigService.js](/home/hema/Projects/basicdiet145/src/services/subscription/mealBuilderConfigService.js:1934)
+- Fix type: **ENFORCE SINGLE SOURCE**
+- Exact fix instruction:
+  - Add one exported `resolvePremiumUpgrade(premiumKey, {session})` function to `premiumUpgradeConfigService.js`.
+  - Return canonical `premiumKey`, `selectionType`, `upgradeDeltaHalala`, currency, source IDs, and availability.
+  - Make active + enabled + visible mandatory.
+  - Migrate catalog, quote, planner, Meal Builder, and identity consumers to this resolver.
+  - Remove the 2000 and 2900 constants after all four canonical keys have config rows.
+  - Stop using menu, relation, product, and builder prices for subscription premium charges.
+  - Preserve those fields only as candidate defaults and one-time-order pricing.
+- Risk if not fixed: Different subscription paths can assign different prices or expose hidden upgrades.
 
-BLOCKER — Delivery cancellation contract is internally incompatible.
-Documentation/dashboard send customer_unreachable; backend validation does not accept it.
+### P0-2 — Missing Premium Upgrade dashboard implementation
 
-HIGH — Config visibility is not consistently enforced.
-A hidden config can still be resolved by services that query only active/enabled state.
+- Issue: The documented management screen invokes Meal Builder instead of the premium-config API.
+- Root file: [premium-meals/index.tsx](/home/hema/Projects/full%20app/client_dashbourd/src/routes/_protected/premium-meals/index.tsx:3)
+- Fix type: **MIGRATE**
+- Exact fix instruction:
+  - Remove `MealBuilderPage` from this route.
+  - Implement the existing list, candidates, create, update, state, archive, and readiness contracts.
+  - Use `/api/dashboard/premium-upgrades` exclusively.
+  - Do not mutate menu products, options, groups, or Meal Builder drafts from this screen.
+- Risk if not fixed: Operators cannot administer the backend authority described by the contract.
 
-HIGH — Premium identity remains multi-authority.
-Canonical keys coexist with database IDs, aliases, and localized-name inference.
+### P0-3 — Delivery cancellation contract
 
-HIGH — Subscription-day transitions have conflicting authorities.
-The named transition service is unused, while the active table permits different transitions.
+- Issue: Dashboard/documented reason values are rejected by backend validation.
+- Root file:
+  - [deliveryWorkflowService.js](/home/hema/Projects/basicdiet145/src/services/deliveryWorkflowService.js:31)
+  - [fetchCourierDeliveries.ts](/home/hema/Projects/full%20app/client_dashbourd/src/utils/fetchCourierDeliveries.ts:181)
+  - [12_DELIVERY.md](/home/hema/Projects/basicdiet145/docs/dashboard-contracts/12_DELIVERY.md:384)
+- Fix type: **ALIGN CONTRACT**
+- Exact fix instruction:
+  - Keep `CANCELLATION_REASONS` as the backend authority.
+  - Replace documented/dashboard reason values with its exact keys.
+  - Remove the dashboard’s `customer_unreachable` fallback.
+  - Require the action payload to carry an accepted reason selected from the aligned contract.
+- Risk if not fixed: Courier cancellation requests are structurally invalid.
 
-HIGH — Delivery and subscription-day statuses require manual synchronization.
-Multiple controllers and operations handlers mutate the two documents.
+---
 
-HIGH — Frontends reproduce premium accounting and action eligibility.
-Backend results are not the exclusive authority for pending amounts, credit usage, or allowed actions.
+## 2. ARCHITECTURE FIX PLAN (P1/P2)
 
-E. DUPLICATED AUTHORITIES MAP
-Subscription premium price
-PremiumUpgradeConfig.upgradeDeltaHalala
-MenuOption.extraFeeHalala
-MenuOption.extraPriceHalala
-ProductGroupOption.extraPriceHalala
-BuilderProtein.extraFeeHalala
-Meal Builder rule extraFeeHalala
-Hardcoded premium protein 2000
-MenuProduct.priceHalala
-basic_salad product fallback
-Fixed premium salad 2900
-Flutter catalog fee used for pending totals
+### Premium
 
-Premium identity
-premiumKey
-BuilderProtein._id
-MenuOption._id
-premiumMealId
-proteinId
-custom_premium_salad alias
-Localized-name inference
+**What to consolidate**
 
-Subscription-day transitions
-utils/state.js
-subscriptionDayTransitionService.js
-opsTransitionService.js
-Courier direct mutations
-Fulfillment service mutations
+- P1: Route all subscription premium pricing through `resolvePremiumUpgrade()`.
+- P1: Retain `resolveCanonicalPremiumIdentity()` only as canonical-key validation and config resolution.
+- P1: Apply one predicate everywhere: `status=active`, `isEnabled=true`, `isVisible=true`.
+- P2: Move supported candidate source mappings into [mealPlannerContract.js](/home/hema/Projects/basicdiet145/src/config/mealPlannerContract.js:1).
 
-Delivery state
-SubscriptionDay.status
-Delivery.status
-Derived DTO state from arrivingSoonReminderSentAt
+**What to delete**
 
-Pickup state
-SubscriptionDay.status and pickup timestamp fields
-SubscriptionPickupRequest.status
-Pickup credit reservation/consumption timestamps
-Operations-local pickup transition table
-Settlement service direct updates
+- P1: `PREMIUM_MEAL_EXTRA_FEE_HALALA_BY_KEY`.
+- P1: Subscription use of `PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA`.
+- P1: Meal Builder literal 2000/2900 defaults.
+- P1: Subscription pricing from `BuilderProtein.extraFeeHalala`.
+- P1: Name-based premium identity inference after data migration.
+- P2: `basic_salad` as a premium pricing fallback.
 
-Allowed UI actions
-Backend allowedActions
-Dashboard one-time order fallback table
-Dashboard courier flags converted to actions
-Operations adapter normalization
+**What to enforce**
 
-F. CONTRACT LEAKS (FRONTEND)
-Dashboard premium route controls Meal Builder instead of rendering PremiumUpgradeConfig.
-Dashboard premium subscription form uses legacy builder IDs.
-Dashboard derives SAR display values from raw halala.
-Dashboard assigns semantic labels describing upgrades as additional meals.
-Dashboard synthesizes one-time order actions from status.
-Dashboard defaults cancellation reason codes independently of the backend enum.
-Dashboard normalizes multiple backend shapes and field aliases.
-Flutter computes premium credit consumption.
-Flutter computes pending premium payment amounts.
-Flutter matches premium entitlement using key, ID, and normalized name.
-Flutter derives premium salad identity and fee from product fields when canonical fields are absent.
-Flutter normalizes legacy standard_combo into standard_meal.
-G. FINAL ARCHITECTURE STATE
-BROKEN
+- P1: `premiumKey` required at quote, checkout, activation, planner, balance, and payment boundaries.
+- P1: Config absence for a requested premium key must produce a controlled unavailable/configuration result once migration is complete.
+- P2: `mapConfigToDTO()` must calculate publication and relation validity using the candidate eligibility resolver, not placeholders.
+
+### Subscription
+
+**What to consolidate**
+
+- P1: Quote, activation, renewal, planner, and timeline reads must use canonical `premiumKey`.
+- P1: Backend DTOs must expose premium coverage, pending count, and pending amount already calculated.
+
+**What to delete**
+
+- P1: Name matching and localized-name inference from activation and read paths.
+- P2: `premiumMealId` and `proteinId` acceptance from new quote requests.
+- P2: Legacy ID matching after stored contracts and balances are migrated.
+
+**What to enforce**
+
+- P1: All newly persisted premium balance and entitlement rows require `premiumKey`.
+- P1: Premium pricing snapshots must contain the resolved config revision/source.
+- P2: Legacy records remain read-only compatibility inputs; they cannot define new prices or identities.
+
+### Delivery
+
+**What to consolidate**
+
+- P1: Make [opsTransitionService.js](/home/hema/Projects/basicdiet145/src/services/dashboard/opsTransitionService.js:33) the only delivery/subscription-day mutation entry point.
+- P1: Move the final transition table into that service and make courier controllers delegate to it.
+- P1: Synchronize `SubscriptionDay.status` and `Delivery.status` inside the same transaction.
+
+**What to delete**
+
+- P1: Unused [subscriptionDayTransitionService.js](/home/hema/Projects/basicdiet145/src/services/subscription/subscriptionDayTransitionService.js:1).
+- P1: Competing transition definitions in [state.js](/home/hema/Projects/basicdiet145/src/utils/state.js:1) after their rules are absorbed.
+- P1: Direct status assignment in courier controllers.
+- P2: `ready_for_delivery → fulfilled`; require dispatch first.
+- P2: `scheduled` eligibility for arriving-soon.
+
+**What to enforce**
+
+- P1: Delivery sequence: `in_preparation → ready_for_delivery → out_for_delivery → fulfilled`.
+- P1: Cancellation and fulfillment must update both persisted state documents atomically.
+- P2: All courier mutation responses must use `deliveryMapper`.
+
+### Pickup
+
+**What to consolidate**
+
+- P1: Move pickup-request transition rules out of the local function in `opsTransitionService` into the same canonical transition policy.
+- P1: Keep reservation, consumption, and release in `subscriptionPickupRequestBalanceService`; invoke them only from canonical transitions.
+- P1: Route no-show settlement through the canonical pickup transition.
+
+**What to delete**
+
+- P1: Direct pickup status mutation in settlement and operations handlers after canonical transition methods exist.
+- P2: Caller-dependent duplicate protection as the only guard.
+
+**What to enforce**
+
+- P1: A transition and its credit side effect occur within one transaction.
+- P2: Canonical request identity must be derived from subscription, date, and normalized selection; `idempotencyKey` remains request replay protection.
+
+### Dashboard
+
+**What to consolidate**
+
+- P1: Consume backend `allowedActions`, premium totals, balances, and payment requirements directly.
+- P2: Use one canonical operations DTO shape.
+
+**What to delete**
+
+- P1: `FALLBACK_PICKUP_ACTIONS_BY_STATUS` in [oneTimeOrderActions.ts](/home/hema/Projects/full%20app/client_dashbourd/src/lib/oneTimeOrderActions.ts:10).
+- P1: Legacy `/api/admin/builder-premium-meals` usage from subscription creation.
+- P1: `premiumMealId` form fields.
+- P2: Multi-alias business fallbacks in `operationsBoard.ts` after DTO migration.
+- P2: UI wording that describes upgrades as additional meals.
+
+**What to enforce**
+
+- P1: Subscription creation submits `{premiumKey, qty}`.
+- P1: Dashboard renders backend premium coverage and payment data.
+- P2: SAR conversion remains display formatting only; submitted values use the documented halala field.
+
+### Flutter
+
+**What to consolidate**
+
+- P1: Consume backend-provided premium coverage and pending-payment DTO fields.
+- P1: Build quote, checkout, and planner writes using `premiumKey`.
+
+**What to delete**
+
+- P1: `evaluatePremiumUsage()` and generic-credit premium calculations as commercial authorities.
+- P1: Premium matching by ID or normalized name.
+- P2: Premium salad identity/price derivation from product fields.
+- P2: Legacy selection-type normalization after backend read DTO migration.
+
+**What to enforce**
+
+- P1: Flutter may display backend calculations but must not decide premium coverage or charge amount.
+
+---
+
+## 3. SINGLE SOURCE OF TRUTH ENFORCEMENT MAP
+
+### Pricing
+
+**Only authority**
+
+- [premiumUpgradeConfigService.js](/home/hema/Projects/basicdiet145/src/services/subscription/premiumUpgradeConfigService.js:41)
+- Canonical API: `resolvePremiumUpgrade(premiumKey, {session})`
+
+**MUST KEEP**
+
+- `PremiumUpgradeConfig.upgradeDeltaHalala`
+- Candidate-derived price only as an initial admin form value.
+- One-time order pricing isolated in order pricing services.
+
+**MUST REMOVE**
+
+- `CatalogService.PREMIUM_MEAL_EXTRA_FEE_HALALA_BY_KEY`
+- Subscription use of `PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA`
+- Meal Builder 2000/2900 literals
+- Subscription price fallback to option/relation/product/builder fields
+- Flutter premium charge calculations
+
+**MUST MIGRATE**
+
+- CatalogService
+- canonicalMealSlotPlannerService
+- mealSlotPlannerService
+- mealBuilderConfigService
+- subscriptionQuoteService
+- premiumIdentity
+- subscription activation/payment services
+
+### Identity
+
+**Only authority**
+
+- `premiumKey`, validated by a reduced `resolveCanonicalPremiumIdentity({premiumKey})` in [premiumIdentity.js](/home/hema/Projects/basicdiet145/src/utils/subscription/premiumIdentity.js:117).
+
+**MUST KEEP**
+
+- Canonical key normalization.
+- Explicit alias conversion only during stored-data migration.
+
+**MUST REMOVE**
+
+- Localized-name inference.
+- `premiumMealId`/`proteinId` identity fallback.
+- Flutter name and legacy-ID matching.
+- New `legacy_<id>` identities.
+
+**MUST MIGRATE**
+
+- Existing premium balances.
+- Contract snapshots.
+- Checkout drafts.
+- Subscription-day premium selections.
+- Timeline/read DTOs.
+
+### State
+
+**Only authority**
+
+- [opsTransitionService.js](/home/hema/Projects/basicdiet145/src/services/dashboard/opsTransitionService.js:33)
+
+**MUST KEEP**
+
+- Transactional state changes.
+- Delivery synchronization.
+- Pickup balance service for credit mutation.
+- Fulfillment service as a transition side-effect dependency.
+
+**MUST REMOVE**
+
+- `subscriptionDayTransitionService.js`
+- `utils/state.js` after consolidation
+- Local pickup transition tables
+- Direct controller status writes
+- Direct settlement status writes
+
+**MUST MIGRATE**
+
+- Courier collect, deliver, cancel, and arriving-soon handlers.
+- Order courier mutations.
+- Pickup preparation, fulfillment, cancellation, and no-show settlement.
+
+---
+
+## 4. DEPRECATION PLAN
+
+### Disable after consumer migration
+
+- `/api/admin/builder-premium-meals` as a subscription premium source.
+- Public legacy builder premium catalog route.
+- Legacy premium ID acceptance in quote/checkout.
+- `legacy_meal_count` for new pickup requests.
+
+### Remove
+
+- [premiumProteinService.js](/home/hema/Projects/basicdiet145/src/services/premiumProteinService.js:1).
+- [subscriptionDayTransitionService.js](/home/hema/Projects/basicdiet145/src/services/subscription/subscriptionDayTransitionService.js:1).
+- Hardcoded premium protein/salad prices.
+- `basic_salad` premium-price fallback.
+- Premium name inference after stored data has canonical keys.
+- Dashboard status-derived action tables.
+- Flutter premium accounting and identity fallbacks.
+
+### Keep temporarily as read-only compatibility
+
+- Legacy `BuilderProtein` and builder IDs on historical records.
+- Legacy selection-type readers.
+- Grandfathered subscription contract reads.
+- Historical `premiumMealId` and `proteinId` fields.
+- Legacy pickup request records without canonical item selection.
+
+These compatibility paths must not price, identify, or authorize new writes.
+
+---
+
+## 5. SAFE EXECUTION ORDER
+
+1. Add the canonical premium pricing resolver to `premiumUpgradeConfigService.js` while retaining internal compatibility fallback.
+
+2. Populate complete `PremiumUpgradeConfig` rows for every canonical `premiumKey` and migrate stored premium identities to `premiumKey`.
+
+3. Migrate quote, activation, catalog, planner, Meal Builder, and payment consumers to the resolver.
+
+4. Change dashboard subscription creation to submit `{premiumKey, qty}`.
+
+5. Change Flutter to consume backend premium coverage and pending-payment values.
+
+6. Remove name/ID identity inference from new write paths.
+
+7. Remove hardcoded 2000/2900 values and catalog/builder pricing fallbacks.
+
+8. Implement the dashboard Premium Upgrade Config screen and disable Meal Builder usage on that route.
+
+9. Consolidate transition rules into `opsTransitionService.js`.
+
+10. Migrate courier, order, delivery, pickup, fulfillment, and settlement mutations to the canonical transition service.
+
+11. Remove competing state tables and direct status writes.
+
+12. Align delivery cancellation reason codes and unified courier mutation DTOs.
+
+13. Remove frontend action synthesis and multi-shape business fallbacks.
+
+14. Disable legacy builder-premium subscription routes and remove statically unused legacy services.

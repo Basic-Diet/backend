@@ -35,9 +35,9 @@ Status values are read directly from the current contract files.
 
 | Status | Count | Files |
 |--------|-------|-------|
-| `READY` | 15 | `01_DASHBOARD_HOME`, `02_PAYMENTS`, `03_ACCOUNTING`, `04_PROMO_CODES`, `05_ADDONS`, `06_PACKAGES`, `07_SUBSCRIPTIONS`, `09_OPERATIONS`, `10_MANUAL_DEDUCTION`, `11_MENU_CATALOG`, `13_DELIVERY_ZONES`, `15_DASHBOARD_USERS`, `16_SETTINGS`, `17_RESTAURANT_HOURS`, `18_PICKUP_BRANCHES` |
+| `READY` | 16 | `01_DASHBOARD_HOME`, `02_PAYMENTS`, `03_ACCOUNTING`, `04_PROMO_CODES`, `05_ADDONS`, `06_PACKAGES`, `07_SUBSCRIPTIONS`, `09_OPERATIONS`, `10_MANUAL_DEDUCTION`, `11_MENU_CATALOG`, `12_DELIVERY`, `13_DELIVERY_ZONES`, `15_DASHBOARD_USERS`, `16_SETTINGS`, `17_RESTAURANT_HOURS`, `18_PICKUP_BRANCHES` |
 | `READY_WITH_LIMITATIONS` | 8 | `08_ONE_TIME_ORDERS`, `14_APP_USERS`, `11A_MENU_CATEGORIES`, `11B_MENU_PRODUCTS`, `11C_MENU_PRODUCT_CUSTOMIZATION`, `11D_MENU_OPTION_GROUPS`, `11E_MENU_OPTIONS`, `11F_MENU_PREVIEW_RELEASE` |
-| `NEEDS_TESTS` | 3 | `12_DELIVERY`, `19_NOTIFICATIONS`, `20_PROFILE` |
+| `NEEDS_TESTS` | 2 | `19_NOTIFICATIONS`, `20_PROFILE` |
 | `NEEDS_BACKEND_FIX` | 0 | — |
 | `LEGACY_OR_UNCLEAR` | 0 | — |
 | `OUT_OF_SCOPE` | 0 | — |
@@ -78,7 +78,7 @@ New dashboard screen handoffs added:
 
 | Area | Limitation |
 |------|-----------|
-| **Delivery** (`12_DELIVERY`) | Status: `NEEDS_TESTS`. Courier queue list is smoke-tested (HTTP 200), but no end-to-end fulfillment flow is verified. Route prefix is `/api/courier/deliveries/today`, not `/api/dashboard/courier/`. |
+| **Delivery** (`12_DELIVERY`) | Status: `READY`. Courier queue is natively unified, mapping both SubscriptionDays and Orders. Endpoint is `/api/courier/deliveries/today`. |
 | **One-Time Orders** (`08_ONE_TIME_ORDERS`) | Status: `READY_WITH_LIMITATIONS`. Covered by `oneTimeOrders.test.js` integration suite, but has no dedicated detail field assertions inside `dashboardContracts.test.js`. |
 | **App Users** (`14_APP_USERS`) | Status: `READY_WITH_LIMITATIONS`. List and detail are smoke-tested only. Create-subscription subflows and field-level assertions are not covered. |
 | **Notifications** (`19_NOTIFICATIONS`) | Status: `NEEDS_TESTS`. Both `/notifications/summary` and `/notification-logs` endpoints exist in the backend and were verified in source code, but no automated contract tests exist yet. |

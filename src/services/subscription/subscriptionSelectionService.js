@@ -751,8 +751,9 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
           const mapKey = `${sel.baseSlotKey}_${sel.premiumKey}`;
           const existingClaim = existingBalanceMap.get(mapKey);
 
+          const upgrade = await resolvePremiumUpgrade(sel.premiumKey, { session });
           if (existingClaim) {
-             processedPremiumSelections.push({ ...sel, premiumSource: "balance", unitExtraFeeHalala: existingClaim.unitExtraFeeHalala || 3000 });
+             processedPremiumSelections.push({ ...sel, premiumSource: "balance", unitExtraFeeHalala: upgrade.priceHalala });
              existingBalanceMap.delete(mapKey);
              continue;
           }
@@ -763,7 +764,7 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
             date,
             premiumKey: sel.premiumKey || null,
             proteinId: sel.proteinId,
-            unitExtraFeeHalala: sel.unitExtraFeeHalala || 3000,
+            unitExtraFeeHalala: upgrade.priceHalala,
             session,
           });
           if (balanceResult.consumed && Array.isArray(subInSession.premiumBalance)) {
@@ -777,7 +778,7 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
           processedPremiumSelections.push({
             ...sel,
             premiumSource: balanceResult.consumed ? "balance" : "pending_payment",
-            unitExtraFeeHalala: balanceResult.consumed ? 0 : (balanceResult.premiumExtraFeeHalala || 3000)
+            unitExtraFeeHalala: balanceResult.consumed ? 0 : upgrade.priceHalala
           });
         } else {
           processedPremiumSelections.push(sel);

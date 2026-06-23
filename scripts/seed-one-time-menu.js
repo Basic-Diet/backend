@@ -247,6 +247,7 @@ const productRows = [
   ].map(([productKey, ar, en, priceHalala]) => ({ key: productKey, category: "ice_cream", name: name(ar, en), pricingModel: "fixed", priceHalala })),
   {
     key: "premium_large_salad", 
+    itemType: "premium_large_salad",
     category: "custom_order", 
     name: name("سلطة كبيرة مميزة", "Premium Large Salad"), 
     pricingModel: "per_100g", 
@@ -489,6 +490,27 @@ async function seedOneTimeMenu({ actor = { role: "script" }, notes = "Seed one-t
   }
 
   await deactivateLegacyCategories();
+
+  const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
+  const plsProduct = await MenuProduct.findOne({ key: "premium_large_salad" });
+  if (plsProduct) {
+    await PremiumUpgradeConfig.updateOne(
+      { premiumKey: "premium_large_salad" },
+      {
+        $set: {
+          sourceType: "menu_product",
+          sourceId: plsProduct._id,
+          selectionType: "premium_large_salad",
+          upgradeDeltaHalala: 2900,
+          currency: "SAR",
+          status: "active",
+          isEnabled: true,
+          isVisible: true,
+        }
+      },
+      { upsert: true }
+    );
+  }
 
   await publishMenu({ actor, notes });
   return { products: productRows.length, categories: categoryRows.length, skipped: false, mode: seedMode };

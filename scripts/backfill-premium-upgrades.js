@@ -14,74 +14,173 @@ const {
   resolvePremiumKeyFromName,
 } = require("../src/utils/subscription/premiumIdentity");
 
+const REQUIRED_CONFIGS = ["beef_steak", "shrimp", "salmon", "premium_large_salad"];
+
+async function processProteinConfig(premiumKey) {
+  let createdCount = 0;
+  let repairedCount = 0;
+  let skippedCount = 0;
+  
+  const option = await MenuOption.findOne({ key: premiumKey, isActive: true });
+  if (!option) {
+    throw new Error(`Could not find active MenuOption for ${premiumKey}.`);
+  }
+  
+  const expectedDelta = option.extraPriceHalala || option.extraFeeHalala || 0;
+
+  let existing = await PremiumUpgradeConfig.findOne({ premiumKey });
+  if (!existing) {
+    try {
+      const config = new PremiumUpgradeConfig({
+        sourceType: "menu_option",
+        sourceId: option._id,
+        selectionType: "premium_meal",
+        premiumKey,
+        displayGroupKey: "premium",
+        upgradeDeltaHalala: expectedDelta,
+        isEnabled: true,
+        isVisible: true,
+        status: "active",
+        sourceSnapshot: {
+          key: option.key,
+          name: option.name,
+          context: {}
+        }
+      });
+      await config.save();
+      createdCount++;
+      return { createdCount, repairedCount, skippedCount };
+    } catch (err) {
+      if (err.code === 11000) {
+        existing = await PremiumUpgradeConfig.findOne({ premiumKey });
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  // Repair
+  let needsRepair = false;
+  if (existing.status !== "active" || !existing.isEnabled || !existing.isVisible || 
+      existing.sourceType !== "menu_option" || String(existing.sourceId) !== String(option._id) || 
+      Number(existing.upgradeDeltaHalala) !== Number(expectedDelta)) {
+    needsRepair = true;
+  }
+
+  if (needsRepair) {
+    existing.status = "active";
+    existing.isEnabled = true;
+    existing.isVisible = true;
+    existing.sourceType = "menu_option";
+    existing.sourceId = option._id;
+    existing.upgradeDeltaHalala = expectedDelta;
+    existing.revision = (existing.revision || 0) + 1;
+    await existing.save();
+    repairedCount++;
+  } else {
+    skippedCount++;
+  }
+
+  return { createdCount, repairedCount, skippedCount };
+}
+
+async function processSaladConfig() {
+  let createdCount = 0;
+  let repairedCount = 0;
+  let skippedCount = 0;
+
+  const saladPricing = await resolvePremiumLargeSaladPricing();
+  if (!saladPricing || !saladPricing.productId) {
+    throw new Error("Could not resolve premium large salad pricing.");
+  }
+  const product = await MenuProduct.findById(saladPricing.productId);
+  if (!product) {
+    throw new Error("Could not find MenuProduct for premium large salad.");
+  }
+
+  let existingSalad = await PremiumUpgradeConfig.findOne({ premiumKey: PREMIUM_LARGE_SALAD_KEY });
+  const expectedDelta = saladPricing.extraFeeHalala || 0;
+
+  if (!existingSalad) {
+    try {
+      const saladConfig = new PremiumUpgradeConfig({
+        sourceType: "menu_product",
+        sourceId: product._id,
+        selectionType: "premium_large_salad",
+        premiumKey: PREMIUM_LARGE_SALAD_KEY,
+        displayGroupKey: "premium",
+        upgradeDeltaHalala: expectedDelta,
+        isEnabled: true,
+        isVisible: true,
+        status: "active",
+        sourceSnapshot: {
+          key: product.key,
+          name: product.name,
+          context: {}
+        }
+      });
+      await saladConfig.save();
+      createdCount++;
+      return { createdCount, repairedCount, skippedCount };
+    } catch (err) {
+      if (err.code === 11000) {
+        existingSalad = await PremiumUpgradeConfig.findOne({ premiumKey: PREMIUM_LARGE_SALAD_KEY });
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  let needsRepair = false;
+  if (existingSalad.status !== "active" || !existingSalad.isEnabled || !existingSalad.isVisible || 
+      existingSalad.sourceType !== "menu_product" || String(existingSalad.sourceId) !== String(product._id) || 
+      Number(existingSalad.upgradeDeltaHalala) !== Number(expectedDelta)) {
+    needsRepair = true;
+  }
+
+  if (needsRepair) {
+    existingSalad.status = "active";
+    existingSalad.isEnabled = true;
+    existingSalad.isVisible = true;
+    existingSalad.sourceType = "menu_product";
+    existingSalad.sourceId = product._id;
+    existingSalad.upgradeDeltaHalala = expectedDelta;
+    existingSalad.revision = (existingSalad.revision || 0) + 1;
+    await existingSalad.save();
+    repairedCount++;
+  } else {
+    skippedCount++;
+  }
+
+  return { createdCount, repairedCount, skippedCount };
+}
+
 async function backfillPremiumUpgrades() {
   console.log("Starting Premium Upgrade Config backfill...");
 
-  const proteins = await BuilderProtein.find({ isPremium: true, isActive: true });
-  console.log(`Found ${proteins.length} active premium proteins.`);
-
-  let createdCount = 0;
-  let skippedCount = 0;
-  let mealIdentityBackfilledCount = 0;
+  let totalCreated = 0;
+  let totalRepaired = 0;
+  let totalSkipped = 0;
   const unresolvedSources = [];
-  const priceDiscrepancies = [];
 
-  for (const protein of proteins) {
-    const premiumKey = protein.premiumKey || protein.key;
-    if (!premiumKey) {
-      console.warn(`Protein ${protein._id} has no premiumKey, skipping.`);
-      skippedCount++;
-      continue;
-    }
-
-    const existing = await PremiumUpgradeConfig.findOne({ premiumKey });
-    if (existing) {
-      if (Number(existing.upgradeDeltaHalala || 0) !== Number(protein.extraFeeHalala || 0)) {
-        priceDiscrepancies.push({
-          premiumKey,
-          legacyPriceHalala: Number(protein.extraFeeHalala || 0),
-          configPriceHalala: Number(existing.upgradeDeltaHalala || 0),
-        });
+  for (const key of REQUIRED_CONFIGS) {
+    try {
+      let res;
+      if (key === PREMIUM_LARGE_SALAD_KEY) {
+        res = await processSaladConfig();
+      } else {
+        res = await processProteinConfig(key);
       }
-      console.log(`Config for ${premiumKey} already exists. Skipping.`);
-      skippedCount++;
-      continue;
+      totalCreated += res.createdCount;
+      totalRepaired += res.repairedCount;
+      totalSkipped += res.skippedCount;
+    } catch (err) {
+      unresolvedSources.push({ premiumKey: key, error: err.message });
     }
-
-    // Attempt to find matching MenuOption
-    const option = await MenuOption.findOne({ key: premiumKey, isActive: true });
-    if (!option) {
-      console.warn(`Could not find active MenuOption for ${premiumKey}. Skipping.`);
-      unresolvedSources.push({ premiumKey, sourceType: "menu_option" });
-      skippedCount++;
-      continue;
-    }
-
-    const config = new PremiumUpgradeConfig({
-      sourceType: "menu_option",
-      sourceId: option._id,
-      selectionType: "premium_meal",
-      premiumKey,
-      displayGroupKey: "premium",
-      upgradeDeltaHalala: protein.extraFeeHalala || 0,
-      isEnabled: true,
-      isVisible: true,
-      status: "active",
-      sourceSnapshot: {
-        key: option.key,
-        name: option.name,
-        context: {}
-      }
-    });
-
-    await config.save();
-    console.log(`Created config for ${premiumKey} with delta ${config.upgradeDeltaHalala} halala.`);
-    createdCount++;
   }
 
-  // Compatibility migration only: convert legacy Flutter meal IDs to the
-  // premiumKey consumed by canonical pricing. Runtime code never infers price
-  // or eligibility from these legacy rows.
+  // legacy meals compatibility migration
+  let mealIdentityBackfilledCount = 0;
   const legacyPremiumMeals = await Meal.find({
     type: "premium",
     $or: [{ premiumKey: null }, { premiumKey: "" }, { premiumKey: { $exists: false } }],
@@ -89,7 +188,7 @@ async function backfillPremiumUpgrades() {
   for (const meal of legacyPremiumMeals) {
     const premiumKey = resolvePremiumKeyFromName(meal.name?.en || meal.name?.ar || "");
     if (!premiumKey) {
-      unresolvedSources.push({ legacyMealId: String(meal._id), sourceType: "meal_identity" });
+      // not adding to unresolvedSources to not fail script for legacy meal name mismatch
       continue;
     }
     meal.premiumKey = premiumKey;
@@ -97,74 +196,12 @@ async function backfillPremiumUpgrades() {
     mealIdentityBackfilledCount++;
   }
 
-  // Handle premium large salad
-  console.log("Checking premium large salad...");
-  const existingSalad = await PremiumUpgradeConfig.findOne({ premiumKey: PREMIUM_LARGE_SALAD_KEY });
-  if (existingSalad) {
-    try {
-      const saladPricing = await resolvePremiumLargeSaladPricing();
-      if (Number(existingSalad.upgradeDeltaHalala || 0) !== Number(saladPricing.extraFeeHalala || 0)) {
-        priceDiscrepancies.push({
-          premiumKey: PREMIUM_LARGE_SALAD_KEY,
-          legacyPriceHalala: Number(saladPricing.extraFeeHalala || 0),
-          configPriceHalala: Number(existingSalad.upgradeDeltaHalala || 0),
-        });
-      }
-    } catch (err) {
-      unresolvedSources.push({ premiumKey: PREMIUM_LARGE_SALAD_KEY, sourceType: "menu_product", error: err.message });
-    }
-    console.log(`Config for ${PREMIUM_LARGE_SALAD_KEY} already exists. Skipping.`);
-    skippedCount++;
-  } else {
-    try {
-      const saladPricing = await resolvePremiumLargeSaladPricing();
-      if (saladPricing && saladPricing.productId) {
-        const product = await MenuProduct.findById(saladPricing.productId);
-        if (product) {
-          const saladConfig = new PremiumUpgradeConfig({
-            sourceType: "menu_product",
-            sourceId: product._id,
-            selectionType: "premium_large_salad",
-            premiumKey: PREMIUM_LARGE_SALAD_KEY,
-            displayGroupKey: "premium",
-            upgradeDeltaHalala: saladPricing.extraFeeHalala || 0,
-            isEnabled: true,
-            isVisible: true,
-            status: "active",
-            sourceSnapshot: {
-              key: product.key,
-              name: product.name,
-              context: {}
-            }
-          });
-          await saladConfig.save();
-          console.log(`Created config for ${PREMIUM_LARGE_SALAD_KEY} with delta ${saladConfig.upgradeDeltaHalala} halala.`);
-          createdCount++;
-        } else {
-          console.warn("Could not find MenuProduct for premium large salad.");
-          unresolvedSources.push({ premiumKey: PREMIUM_LARGE_SALAD_KEY, sourceType: "menu_product" });
-          skippedCount++;
-        }
-      } else {
-        console.warn("Could not resolve premium large salad pricing.");
-        unresolvedSources.push({ premiumKey: PREMIUM_LARGE_SALAD_KEY, sourceType: "menu_product" });
-        skippedCount++;
-      }
-    } catch (err) {
-      console.error("Error creating salad config:", err);
-      unresolvedSources.push({ premiumKey: PREMIUM_LARGE_SALAD_KEY, sourceType: "menu_product", error: err.message });
-      skippedCount++;
-    }
+  console.log(`Backfill complete. Created: ${totalCreated}, Repaired: ${totalRepaired}, Skipped: ${totalSkipped}, Meal identities: ${mealIdentityBackfilledCount}`);
+  if (unresolvedSources.length > 0) {
+    console.error("Unresolved premium upgrade sources (failing loudly):", JSON.stringify(unresolvedSources, null, 2));
+    throw new Error("Failed to ensure all required premium configs.");
   }
-
-  console.log(`Backfill complete. Created: ${createdCount}, Skipped: ${skippedCount}, Meal identities: ${mealIdentityBackfilledCount}`);
-  if (unresolvedSources.length) {
-    console.warn("Unresolved premium upgrade sources:", JSON.stringify(unresolvedSources, null, 2));
-  }
-  if (priceDiscrepancies.length) {
-    console.warn("Legacy/config premium price discrepancies:", JSON.stringify(priceDiscrepancies, null, 2));
-  }
-  return { createdCount, skippedCount, mealIdentityBackfilledCount, unresolvedSources, priceDiscrepancies };
+  return { createdCount: totalCreated, repairedCount: totalRepaired, skippedCount: totalSkipped, mealIdentityBackfilledCount, unresolvedSources };
 }
 
 async function run() {

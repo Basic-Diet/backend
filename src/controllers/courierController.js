@@ -2,10 +2,11 @@ const mongoose = require("mongoose");
 const Delivery = require("../models/Delivery");
 const Subscription = require("../models/Subscription");
 const SubscriptionDay = require("../models/SubscriptionDay");
+const Order = require("../models/Order");
 const User = require("../models/User");
 const { getTodayKSADate } = require("../utils/date");
 const { writeLog } = require("../utils/log");
-const { mapSubscriptionDelivery } = require("../mappers/deliveryMapper");
+const { mapSubscriptionDelivery, mapOneTimeOrderDelivery } = require("../mappers/deliveryMapper");
 const { notifyUser } = require("../utils/notify");
 const { sendUserNotificationWithDedupe } = require("../services/notificationService");
 const { fulfillSubscriptionDay } = require("../services/fulfillmentService");
@@ -57,62 +58,97 @@ function appendDeliveryCancellationAudit(day, actorId) {
 async function listTodayDeliveries(req, res) {
   try {
     const today = getTodayKSADate();
-    const deliverySubs = await Subscription.find({ deliveryMode: "delivery" }).select("_id").lean();
-    const deliverySubIds = deliverySubs.map(s => s._id);
 
+    // 1. Get Delivery Subscriptions
+    const deliverySubs = await Subscription.find({ deliveryMode: "delivery" }).lean();
+    const deliverySubIds = deliverySubs.map(s => s._id);
+    const subMap = new Map(deliverySubs.map(s => [String(s._id), s]));
+
+    // 2. Get Subscription Days
     const dayDocs = await SubscriptionDay.find({
       date: today,
       subscriptionId: { $in: deliverySubIds }
-    }).select("_id").lean();
+    }).lean();
+    const dayIds = dayDocs.map(d => d._id);
 
-    const dayIds = dayDocs.map((d) => d._id);
-    const query = { dayId: { $in: dayIds } };
+    // 3. Get One-Time Orders
+    const orders = await Order.find({
+      $or: [{ fulfillmentDate: today }, { deliveryDate: today }],
+      $or: [{ fulfillmentMethod: "delivery" }, { deliveryMode: "delivery" }],
+      paymentStatus: "paid",
+      status: { $nin: ["pending_payment", "failed_payment", "expired", "refunded"] }
+    }).lean();
+    const orderIds = orders.map(o => o._id);
+
+    // 4. Gather Users
+    const subUserIds = deliverySubs.map(s => String(s.userId));
+    const orderUserIds = orders.map(o => String(o.userId));
+    const userIds = [...new Set([...subUserIds, ...orderUserIds].filter(Boolean))];
+    const users = userIds.length ? await User.find({ _id: { $in: userIds } }).select("name phone").lean() : [];
+    const userMap = new Map(users.map(u => [String(u._id), u]));
+
+    // 5. Get existing Delivery records
+    const deliveries = await Delivery.find({
+      $or: [
+        { dayId: { $in: dayIds } },
+        { orderId: { $in: orderIds } }
+      ]
+    }).lean();
+    const deliveryByDayId = new Map(deliveries.filter(d => d.dayId).map(d => [String(d.dayId), d]));
+    const deliveryByOrderId = new Map(deliveries.filter(d => d.orderId).map(d => [String(d.orderId), d]));
+
+    // 6. Map Subscription Days
+    const mappedDays = dayDocs.map(day => {
+      const sub = subMap.get(String(day.subscriptionId));
+      let deliveryRecord = deliveryByDayId.get(String(day._id));
+      if (!deliveryRecord) {
+        deliveryRecord = {
+          _id: day._id,
+          subscriptionId: sub._id,
+          dayId: day,
+          date: day.date,
+          address: (day.lockedSnapshot && day.lockedSnapshot.address) || day.deliveryAddressOverride || (sub && sub.deliveryAddress),
+          window: (day.lockedSnapshot && day.lockedSnapshot.deliveryWindow) || day.deliveryWindowOverride || (sub && sub.deliveryWindow),
+          zoneName: (day.lockedSnapshot && day.lockedSnapshot.zoneName) || null,
+          status: "preparing",
+          cancellationReason: day.cancellationReason,
+          cancellationNote: day.cancellationNote,
+          canceledAt: day.canceledAt,
+          deliveredAt: day.fulfilledAt
+        };
+      } else {
+        deliveryRecord.dayId = day;
+      }
+      const user = userMap.get(String(sub && sub.userId));
+      return mapSubscriptionDelivery(deliveryRecord, user);
+    });
+
+    // 7. Map Orders
+    const mappedOrders = orders.map(order => {
+      const user = userMap.get(String(order.userId));
+      const deliveryRecord = deliveryByOrderId.get(String(order._id));
+      return mapOneTimeOrderDelivery(order, user, deliveryRecord);
+    });
+
+    const allMapped = [...mappedDays, ...mappedOrders];
+    allMapped.sort((a, b) => {
+      const dateA = a.timestamps && a.timestamps.scheduledAt ? new Date(a.timestamps.scheduledAt).getTime() : 0;
+      const dateB = b.timestamps && b.timestamps.scheduledAt ? new Date(b.timestamps.scheduledAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
     const pagination = resolveOptionalPagination(req.query, 300, 50);
-
     if (!pagination) {
-      // No pagination requested - return all (current behavior)
-      const deliveries = await Delivery.find(query).populate("dayId").sort({ createdAt: -1 }).lean();
-
-      const subIds = [...new Set(deliveries.map((d) => String(d.subscriptionId)).filter(Boolean))];
-      const subs = subIds.length ? await Subscription.find({ _id: { $in: subIds } }).select("userId").lean() : [];
-      const userIds = [...new Set(subs.map((s) => String(s.userId)).filter(Boolean))];
-      const users = userIds.length ? await User.find({ _id: { $in: userIds } }).select("name phone").lean() : [];
-      
-      const userMap = new Map(users.map((u) => [String(u._id), u]));
-      const subUserMap = new Map(subs.map((s) => [String(s._id), String(s.userId)]));
-
-      const mapped = deliveries.map((d) => {
-        const userId = subUserMap.get(String(d.subscriptionId));
-        return mapSubscriptionDelivery(d, userMap.get(userId));
-      });
-
-      return res.status(200).json({ status: true, data: mapped });
+      return res.status(200).json({ status: true, data: allMapped });
     }
 
-    // Pagination requested - apply it
     const skip = (pagination.page - 1) * pagination.limit;
-    const [deliveries, total] = await Promise.all([
-      Delivery.find(query).populate("dayId").sort({ createdAt: -1 }).skip(skip).limit(pagination.limit).lean(),
-      Delivery.countDocuments(query),
-    ]);
-
-    const subIds = [...new Set(deliveries.map((d) => String(d.subscriptionId)).filter(Boolean))];
-    const subs = subIds.length ? await Subscription.find({ _id: { $in: subIds } }).select("userId").lean() : [];
-    const userIds = [...new Set(subs.map((s) => String(s.userId)).filter(Boolean))];
-    const users = userIds.length ? await User.find({ _id: { $in: userIds } }).select("name phone").lean() : [];
-    
-    const userMap = new Map(users.map((u) => [String(u._id), u]));
-    const subUserMap = new Map(subs.map((s) => [String(s._id), String(s.userId)]));
-
-    const mapped = deliveries.map((d) => {
-      const userId = subUserMap.get(String(d.subscriptionId));
-      return mapSubscriptionDelivery(d, userMap.get(userId));
-    });
+    const paginatedData = allMapped.slice(skip, skip + pagination.limit);
 
     return res.status(200).json({
       status: true,
-      data: mapped,
-      meta: buildPaginationMeta(pagination.page, pagination.limit, total),
+      data: paginatedData,
+      meta: buildPaginationMeta(pagination.page, pagination.limit, allMapped.length),
     });
   } catch (err) {
     // MEDIUM AUDIT FIX: Express 4 does not catch async errors automatically; return controlled 500.

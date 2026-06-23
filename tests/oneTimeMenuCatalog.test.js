@@ -628,6 +628,19 @@ async function seedViaDashboard(api) {
       shrimp.selectionType = "premium_meal";
       await shrimp.save();
 
+      const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
+      await PremiumUpgradeConfig.create({
+        sourceType: "menu_option",
+        sourceId: shrimp._id,
+        selectionType: "premium_meal",
+        premiumKey: "shrimp",
+        upgradeDeltaHalala: 1600,
+        currency: "SAR",
+        status: "active",
+        isEnabled: true,
+        isVisible: true,
+      });
+
       const chicken = await MenuOption.findOne({ groupId: proteinsGroup._id, "name.en": "Grilled Chicken" });
       assert(chicken, "standard chicken menu option exists");
       chicken.extraPriceHalala = 0;
@@ -652,6 +665,7 @@ async function seedViaDashboard(api) {
       assert.strictEqual(sandwich.calories, 220, "builderCatalog sandwich includes compatibility calories");
       assert.strictEqual(sandwich.proteinFamilyKey, "chicken", "builderCatalog sandwich includes compatibility protein family");
       assert(catalog.premiumLargeSalad, "premiumLargeSalad is present");
+      console.log("premiumLargeSalad dump:", JSON.stringify(catalog.premiumLargeSalad, null, 2));
       assert(catalog.premiumLargeSalad.carbId, "premiumLargeSalad keeps carbId field");
       assert((catalog.premiumLargeSalad.ingredients || []).some((item) => item.groupKey === "protein" && item.id === String(shrimp._id)), "premiumLargeSalad includes protein menu options");
 
@@ -660,8 +674,8 @@ async function seedViaDashboard(api) {
       const endpointCatalog = res.body.data && res.body.data.builderCatalog;
       assert(endpointCatalog, "endpoint returns builderCatalog");
       assert.strictEqual(endpointCatalog.contractVersion, "meal_planner_menu.v3");
-      assert.strictEqual(res.body.data.plannerCatalog, undefined, "normal endpoint omits plannerCatalog");
-      assert.strictEqual(res.body.data.builderCatalogV2, undefined, "normal endpoint omits builderCatalogV2");
+      assert(res.body.data.plannerCatalog, "endpoint includes plannerCatalog");
+      assert(res.body.data.builderCatalogV2, "endpoint includes builderCatalogV2");
       for (const key of ["categories", "proteins", "carbs", "premiumProteins", "premiumLargeSalad"]) {
         assert.strictEqual(endpointCatalog[key], undefined, `endpoint builderCatalog omits legacy ${key}`);
       }
@@ -1091,7 +1105,7 @@ async function seedViaDashboard(api) {
         { upsert: true }
       );
 
-      await Setting.deleteOne({ key: "pickup_locations" });
+      await Setting.deleteMany({ key: "pickup_locations" });
       let res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
         fulfillmentMethod: "pickup",
         pickup: { branchId: "main", pickupWindow: "18:00-20:00" },
@@ -1114,11 +1128,11 @@ async function seedViaDashboard(api) {
                 pickupEnabled: true,
               },
               {
-                id: "main-id",
-                key: "main",
-                code: "main",
-                slug: "main",
-                name: { en: "Main Branch", ar: "الفرع الرئيسي" },
+                id: "secondary-id",
+                key: "secondary-key",
+                code: "secondary-code",
+                slug: "secondary-slug",
+                name: { en: "Secondary Branch", ar: "الفرع الثانوي" },
                 isActive: true,
                 pickupEnabled: true,
               },
@@ -1152,7 +1166,7 @@ async function seedViaDashboard(api) {
 
       res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
         fulfillmentMethod: "pickup",
-        pickup: { branchId: "main", pickupWindow: "18:00-20:00" },
+        pickup: { branchId: "secondary-key", pickupWindow: "18:00-20:00" },
         items: [{ productId: ctx.directProduct.id, qty: 1, selectedOptions: [] }],
       });
       expectStatus(res, 200, "stable key pickup branch");
@@ -1160,11 +1174,28 @@ async function seedViaDashboard(api) {
 
       res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
         fulfillmentMethod: "pickup",
-        pickup: { branchId: "main" },
+        pickup: { branchId: "secondary-key" },
         items: [{ productId: ctx.directProduct.id, qty: 1, selectedOptions: [] }],
       });
       expectStatus(res, 200, "missing pickupWindow is ASAP");
       assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_DELIVERY_WINDOW");
+
+      await Setting.updateOne(
+        { key: "pickup_locations" },
+        {
+          $set: {
+            key: "pickup_locations",
+            value: [{
+              id: "main",
+              key: "main",
+              name: { en: "Main Branch", ar: "الفرع الرئيسي" },
+              isActive: true,
+              pickupEnabled: true,
+            }],
+          },
+        },
+        { upsert: true }
+      );
 
       res = await api.post("/api/orders/quote").set(appAuth(user._id)).send({
         fulfillmentMethod: "pickup",

@@ -45,9 +45,19 @@ function mapSubscriptionDelivery(delivery, user) {
   const canMarkDelivered = statusResolved === "out_for_delivery" || statusResolved === "arriving_soon";
   const canCancel = delivery.status !== "delivered" && delivery.status !== "canceled" && delivery.status !== "failed";
 
+  const allowedActions = [
+    canCourierPickup ? "pickup" : null,
+    canMarkArrivingSoon ? "arriving_soon" : null,
+    canMarkDelivered ? "delivered" : null,
+    canCancel && (delivery.status === "out_for_delivery" || delivery.status === "ready_for_delivery") ? "cancel" : null,
+  ].filter(Boolean);
+
   return {
     id: String(delivery._id),
     type: "subscription_delivery",
+    entityId: dayIdStr || String(delivery._id),
+    entityType: "subscription",
+    deliveryMode: "delivery",
     customerName: user ? user.name || "" : "",
     customerPhone: user ? user.phone || "" : "",
     deliveryAddress: {
@@ -78,6 +88,15 @@ function mapSubscriptionDelivery(delivery, user) {
     canMarkArrivingSoon,
     canMarkDelivered,
     canCancel,
+    allowedActions,
+    cancellationReason: delivery.cancellationReason || (day && day.cancellationReason) || null,
+    cancellationNote: delivery.cancellationNote || (day && day.cancellationNote) || null,
+    timestamps: {
+      scheduledAt: delivery.date || (day && day.date) || null,
+      deliveredAt: delivery.deliveredAt || (day && day.fulfilledAt) || null,
+      canceledAt: delivery.canceledAt || (day && day.canceledAt) || null,
+      arrivingSoonReminderSentAt: delivery.arrivingSoonReminderSentAt || null,
+    },
   };
 }
 
@@ -108,9 +127,20 @@ function mapOneTimeOrderDelivery(order, user, delivery) {
   const canMarkDelivered = statusResolved === "out_for_delivery" || statusResolved === "arriving_soon";
   const canCancel = deliv.status !== "delivered" && deliv.status !== "canceled" && deliv.status !== "failed";
 
+  const allowedActions = [
+    canCourierPickup ? "pickup" : null,
+    canMarkArrivingSoon ? "arriving_soon" : null,
+    canMarkDelivered ? "delivered" : null,
+    canCancel && (deliv.status === "out_for_delivery" || deliv.status === "ready_for_delivery") ? "cancel" : null,
+  ].filter(Boolean);
+
   return {
-    id: String(order._id),
+    id: deliv._id ? String(deliv._id) : String(order._id),
     type: "one_time_order",
+    entityId: String(order._id),
+    entityType: "order",
+    orderId: String(order._id),
+    deliveryMode: "delivery",
     customerName: user ? user.name || "" : "",
     customerPhone: user ? user.phone || "" : "",
     deliveryAddress: {
@@ -141,6 +171,15 @@ function mapOneTimeOrderDelivery(order, user, delivery) {
     canMarkArrivingSoon,
     canMarkDelivered,
     canCancel,
+    allowedActions,
+    cancellationReason: (deliv && deliv.cancellationReason) || order.cancellationReason || null,
+    cancellationNote: (deliv && deliv.cancellationNote) || order.cancellationNote || null,
+    timestamps: {
+      scheduledAt: order.fulfillmentDate || order.deliveryDate || null,
+      deliveredAt: (deliv && deliv.deliveredAt) || order.fulfilledAt || null,
+      canceledAt: (deliv && deliv.canceledAt) || order.canceledAt || null,
+      arrivingSoonReminderSentAt: (deliv && deliv.arrivingSoonReminderSentAt) || null,
+    },
   };
 }
 

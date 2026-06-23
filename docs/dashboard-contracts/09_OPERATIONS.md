@@ -170,6 +170,7 @@ No request body.
 * **Data Sources**: The response is a unified array from three database collections: `SubscriptionDay` (mapped as `entityType: "subscription_day"`), `Order` (mapped as `entityType: "order"`), and `SubscriptionPickupRequest` (mapped as `entityType: "subscription_pickup_request"`).
 * **Read-only Fields**: All fields in the response are read-only for display. Action states must be triggered by sending requests to endpoints listed in `allowedActions`.
 * **Editable Fields**: None. Action buttons should make requests directly to the endpoints specified in the `allowedActions` array.
+* **Courier Schedule Visibility**: Kitchen/Operations owns preparation and transition actions. Operations/Kitchen transitions still control when an item becomes `ready_for_delivery`. However, the courier schedule can now display items before they are ready (in `preparing` state). Courier pickup/delivery actions are only allowed when backend action policy allows them (items in preparation will not have terminal delivery actions available).
 
 ### Validation
 * `date` must be a valid string matching `/^\d{4}-\d{2}-\d{2}$/`.

@@ -43,6 +43,19 @@ const CANCELLATION_REASONS = {
   order_operational_issue: "delivery_issue",
 };
 
+const LEGACY_CANCELLATION_MAPPING = {
+  customer_requested: "customer_requested_cancellation",
+  admin_cancelled: "internal_delivery_problem",
+  restaurant_cancelled: "order_operational_issue",
+  restaurant_rejected: "order_operational_issue",
+  stock_out: "order_operational_issue",
+  customer_unreachable: "customer_not_answering",
+  wrong_address: "invalid_customer_address",
+  client_refused: "customer_refused_delivery",
+  delivery_accident: "courier_issue",
+  other: "internal_delivery_problem",
+};
+
 function parseDeliveryCancellationInput(payload = {}) {
   const reasonInput =
     typeof payload.reason === "string"
@@ -53,12 +66,16 @@ function parseDeliveryCancellationInput(payload = {}) {
       ? payload.note
       : payload.cancellationNote;
 
-  const reason = reasonInput.trim();
+  let reason = reasonInput.trim();
   const noteRaw = noteInput === undefined || noteInput === null ? "" : String(noteInput).trim();
   const note = noteRaw || null;
 
   if (!reason) {
     throw createDeliveryWorkflowError(400, "CANCELLATION_REASON_REQUIRED", "Cancellation reason is required");
+  }
+
+  if (LEGACY_CANCELLATION_MAPPING[reason]) {
+    reason = LEGACY_CANCELLATION_MAPPING[reason];
   }
 
   const category = CANCELLATION_REASONS[reason];

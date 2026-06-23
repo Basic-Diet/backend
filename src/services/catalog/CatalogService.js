@@ -186,7 +186,7 @@ function isPremiumMealProtein(option) {
 }
 
 function resolvePremiumMealExtraFeeHalala(option, premiumConfigState = null) {
-  const key = String(option?.key || option?.premiumKey || "").trim().toLowerCase();
+  const key = String(option?.premiumKey || option?.key || "").trim().toLowerCase();
   const config = premiumConfigState && typeof premiumConfigState.getActiveConfig === "function"
     ? premiumConfigState.getActiveConfig(key)
     : null;

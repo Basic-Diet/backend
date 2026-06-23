@@ -20,7 +20,9 @@ Provides delivery drivers (couriers) and operations managers with views of deliv
 ## GET /api/courier/deliveries/today
 
 ### Purpose
-Lists subscription delivery days scheduled for today (filtered to `deliveryMode === "delivery"` only).
+Lists all delivery items scheduled for today. This is a unified endpoint that returns both subscription delivery days and one-time delivery orders from the start of the day.
+
+**Architecture Note**: This endpoint does NOT rely on the `Delivery` collection as its root source. It natively queries `SubscriptionDay` and `Order` collections for today where `deliveryMode = "delivery"`, and only looks up `Delivery` records to enrich timestamps, ETA, and courier metadata. This ensures items are visible even when the kitchen is still preparing them.
 
 ### Used By
 Courier's daily subscription delivery queue screen.
@@ -46,6 +48,10 @@ No request body.
     {
       "id": "665f1b2e7b9a4d0012c10001",
       "type": "subscription_delivery",
+      "entityId": "665f1b2e7b9a4d0012a10001",
+      "entityType": "subscription",
+      "orderId": null,
+      "deliveryMode": "delivery",
       "customerName": "Client One",
       "customerPhone": "+966500000001",
       "deliveryAddress": {
@@ -63,10 +69,9 @@ No request body.
       },
       "deliveryZone": "Al Yasmin Zone",
       "deliveryWindow": "08:00-11:00",
+      "scheduledDate": "2026-06-20",
       "status": "ready_for_delivery",
       "preparationStatus": "ready_for_delivery",
-      "scheduledDate": "2026-06-20",
-      "orderNumber": null,
       "subscriptionId": "665f1b2e7b9a4d0012a10000",
       "subscriptionDayId": "665f1b2e7b9a4d0012a10001",
       "mealCount": 2,
@@ -75,7 +80,19 @@ No request body.
       "canCourierPickup": true,
       "canMarkArrivingSoon": false,
       "canMarkDelivered": false,
-      "canCancel": true
+      "canCancel": true,
+      "allowedActions": [
+        "pickup",
+        "cancel"
+      ],
+      "cancellationReason": null,
+      "cancellationNote": null,
+      "timestamps": {
+        "scheduledAt": "2026-06-20",
+        "deliveredAt": null,
+        "canceledAt": null,
+        "arrivingSoonReminderSentAt": null
+      }
     }
   ]
 }
@@ -91,8 +108,15 @@ No request body.
 ```
 
 ### Frontend Notes
-* **Filtering**: The backend automatically filters out branch pickup day subscriptions (`deliveryMode === "pickup"`).
-* **Fulfillment State**: Driver should check status flags like `canCourierPickup` before attempting collection.
+* **Filtering**: The backend automatically filters out branch pickup and customer pickup orders. It includes both subscription deliveries and one-time orders.
+* **Fulfillment State**: Driver should check status flags like `canCourierPickup` and the `allowedActions` array before attempting actions.
+* **UI Interpretation**:
+  * `preparing` / `in_preparation` = Kitchen is preparing
+  * `ready_for_delivery` = Ready for courier pickup
+  * `out_for_delivery` = Out for delivery
+  * `delivered` / `fulfilled` = Delivered
+  * `canceled` / `failed` = Cancelled or failed delivery
+* **Allowed Actions Policy**: Actions are backend-owned. Use `allowedActions` array. Preparing items do not allow pickup/delivered actions. Ready-for-delivery items allow pickup. Out-for-delivery items allow arriving soon, delivered, and cancel. Delivered/cancelled items allow no terminal mutation actions.
 
 ### Read-only and Editable Fields
 * All fields in the response are read-only.
@@ -438,7 +462,21 @@ Required:
 ```
 
 ### Frontend Notes
-* Supported reasons: `customer_unreachable`, `wrong_address`, `client_refused`, `delivery_accident`, `other`.
+* Supported reasons:
+  * **Legacy Keys:** `customer_requested`, `admin_cancelled`, `restaurant_cancelled`, `restaurant_rejected`, `stock_out`, `customer_unreachable`, `wrong_address`, `client_refused`, `delivery_accident`, `other`.
+  * **Canonical Keys:** `customer_not_available`, `customer_not_answering`, `customer_refused_delivery`, `invalid_customer_address`, `customer_requested_cancellation`, `courier_issue`, `operational_delay`, `internal_delivery_problem`, `order_operational_issue`.
+* Legacy-to-Canonical Mapping (handled automatically by backend):
+  * `customer_requested` → `customer_requested_cancellation`
+  * `admin_cancelled` → `internal_delivery_problem`
+  * `restaurant_cancelled` → `order_operational_issue`
+  * `restaurant_rejected` → `order_operational_issue`
+  * `stock_out` → `order_operational_issue`
+  * `customer_unreachable` → `customer_not_answering`
+  * `wrong_address` → `invalid_customer_address`
+  * `client_refused` → `customer_refused_delivery`
+  * `delivery_accident` → `courier_issue`
+  * `other` → `internal_delivery_problem`
+* Unknown reasons will return `INVALID_CANCELLATION_REASON`.
 
 ### Postman
 ```http
@@ -563,12 +601,8 @@ Required:
 * `reason` (string): Predefined cancellation reason code.
 * `note` (string, optional): Extra courier description.
 
-```json
-{
-  "reason": "customer_unreachable",
-  "note": "Called twice, phone off."
-}
-```
+### Frontend Notes
+* Supported reasons and mappings are identical to the subscription delivery endpoint documented above.
 
 ### Success Response
 ```json

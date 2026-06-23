@@ -395,13 +395,9 @@ async function validateCanonicalMealSlots({
   const premiumConfigState = await loadClientPremiumUpgradeConfigState({ session });
   let premiumLargeSaladPricing = { extraFeeHalala: 0, priceHalala: 0 };
   if (slots.some((slot) => slot?.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD)) {
-    try {
-      premiumLargeSaladPricing = premiumUpgradePricing(
-        await resolvePremiumUpgrade(PREMIUM_LARGE_SALAD_PREMIUM_KEY, { session })
-      );
-    } catch (_err) {
-      premiumLargeSaladPricing = null;
-    }
+    premiumLargeSaladPricing = premiumUpgradePricing(
+      await resolvePremiumUpgrade(PREMIUM_LARGE_SALAD_PREMIUM_KEY, { session })
+    );
   }
   let builderMembership;
   try {
@@ -854,20 +850,8 @@ async function validateCanonicalMealSlots({
     if (selectionType === MEAL_SELECTION_TYPES.PREMIUM_MEAL && proteinSelection) {
       isPremium = true;
       premiumKey = proteinSelection.option.premiumKey || proteinSelection.option.key || null;
-      try {
-        const upgrade = await resolvePremiumUpgrade(premiumKey, { session });
-        premiumExtraFeeHalala = upgrade.priceHalala;
-      } catch (_err) {
-        slotErrors.push(buildSlotError({
-          slotIndex,
-          field: `mealSlots[${slotArrayIndex}].selectedOptions`,
-          code: "PREMIUM_UPGRADE_CONFIG_UNAVAILABLE",
-          message: "Premium upgrade is not available",
-          productId,
-          optionId: proteinSelection.selected.optionId,
-          stale: true,
-        }));
-      }
+      const upgrade = await resolvePremiumUpgrade(premiumKey, { session });
+      premiumExtraFeeHalala = upgrade.priceHalala;
     } else if (selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD) {
       isPremium = true;
       premiumKey = PREMIUM_LARGE_SALAD_PREMIUM_KEY;

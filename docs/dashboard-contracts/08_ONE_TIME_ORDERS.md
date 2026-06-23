@@ -58,8 +58,16 @@ Provides monitoring, lifecycle state changes, timeline history, and actions for 
 * List endpoint returns valid array of orders.
 * Reject invalid transitions on test orders.
 
-## 12. Known Risks
+## 12. Courier Visibility
+* **Unified Schedule**: Paid one-time delivery orders (`fulfillmentMethod === "delivery"`) scheduled for today are automatically routed to the unified Courier Today Delivery Schedule (`GET /api/courier/deliveries/today`).
+* **Preparing Visibility**: They are visible to the courier even while they are still in the `preparing` state, but courier action buttons will remain disabled until the kitchen marks them as `ready_for_delivery`.
+* **Exclusions**: Any one-time order with `fulfillmentMethod === "pickup"` is strictly excluded from the courier queue.
+
+## 13. Architecture & Pricing Isolation
+* **Independent Pricing**: One-time order pricing logic, including any premium catalog selections, remains strictly isolated from the subscription `PremiumUpgradeConfig`. The two systems do not share pricing tiers or state machines, preventing crossover bugs.
+
+## 14. Known Risks
 * Customer might request cancellation after preparation has started. The backend logs the operator who approved the cancellation.
 
-## 13. Status
+## 15. Status
 `READY_WITH_LIMITATIONS` (Verified via the `oneTimeOrders.test.js` integration suite, but lacks dedicated detailed validations inside `dashboardContracts.test.js`).

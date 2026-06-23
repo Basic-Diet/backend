@@ -822,22 +822,12 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
     ...premiumMealProteinKeys,
     ...(shouldLoadPremiumLargeSaladPricing ? [PREMIUM_LARGE_SALAD_PREMIUM_KEY] : []),
   ])];
-  const [menuProteinGroupId, menuCarbGroupId, menuSaladExtraProteinGroupId, resolvedUpgrades] = await Promise.all([
+  const [menuProteinGroupId, menuCarbGroupId, menuSaladExtraProteinGroupId] = await Promise.all([
     getMenuGroupId(MENU_PROTEIN_GROUP_KEY, session),
     getMenuGroupId(MENU_CARB_GROUP_KEY, session),
     getMenuGroupId(MENU_SALAD_EXTRA_PROTEIN_GROUP_KEY, session),
-    Promise.all(upgradeKeys.map(async (premiumKey) => {
-      try {
-        return await resolvePremiumUpgrade(premiumKey, { session });
-      } catch (_err) {
-        return null;
-      }
-    })),
   ]);
-  const upgradeDeltaHalalaByKey = new Map((resolvedUpgrades || []).filter(Boolean).map((upgrade) => [upgrade.premiumKey, upgrade.priceHalala]));
-  const premiumLargeSaladPricing = {
-    extraFeeHalala: upgradeDeltaHalalaByKey.get(PREMIUM_LARGE_SALAD_PREMIUM_KEY) || 0,
-  };
+
 
   const [menuProteinRows, menuCarbRows, menuSaladOptionRows, legacyProteins, legacyCarbs, sandwichCategory, saladIngredients, catalogSandwiches] = await Promise.all([
     menuProteinGroupId
@@ -920,18 +910,57 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
     }).session(session).lean();
   }
 
-  const proteinMap = new Map(
-    legacyProteins
-      .map((p) => [String(p._id), mapMenuProteinOption(p, upgradeDeltaHalalaByKey)])
-      .concat(menuProteins.map((p) => [String(p._id), mapMenuProteinOption(p, upgradeDeltaHalalaByKey)]))
-  );
+  const proteinMap = new Map();
   const proteinIdentityMap = new Map();
+  const allPremiumKeys = new Set(upgradeKeys);
+  
   for (const protein of legacyProteins) {
-    addProteinIdentity(proteinIdentityMap, protein);
+    if (protein.isPremium && protein.premiumKey) {
+      allPremiumKeys.add(protein.premiumKey);
+    }
   }
-  for (const protein of menuProteins.map((p) => mapMenuProteinOption(p, upgradeDeltaHalalaByKey))) {
-    addProteinIdentity(proteinIdentityMap, protein);
+  for (const p of menuProteins) {
+    const isPremium = p.displayCategoryKey === "premium" || (Array.isArray(p.ruleTags) && p.ruleTags.includes("premium"));
+    const premiumKey = isPremium ? p.premiumKey || p.key : null;
+    if (isPremium && premiumKey) {
+      allPremiumKeys.add(premiumKey);
+    }
   }
+
+  const resolvedUpgrades = await Promise.all([...allPremiumKeys].map(async (premiumKey) => {
+    try {
+      const upgrade = await resolvePremiumUpgrade(premiumKey, { session });
+      return { premiumKey, upgrade };
+    } catch (err) {
+      return { premiumKey, error: err };
+    }
+  }));
+
+  const upgradeDeltaHalalaByKey = new Map();
+  const upgradeErrorsByKey = new Map();
+  for (const result of resolvedUpgrades || []) {
+    if (result.error) {
+      upgradeErrorsByKey.set(result.premiumKey, result.error);
+    } else if (result.upgrade) {
+      upgradeDeltaHalalaByKey.set(result.premiumKey, result.upgrade.priceHalala);
+    }
+  }
+
+  const premiumLargeSaladPricing = {
+    extraFeeHalala: upgradeDeltaHalalaByKey.get(PREMIUM_LARGE_SALAD_PREMIUM_KEY) || 0,
+  };
+
+  for (const protein of legacyProteins) {
+    const mapped = mapMenuProteinOption(protein, upgradeDeltaHalalaByKey);
+    proteinMap.set(String(protein._id), mapped);
+    addProteinIdentity(proteinIdentityMap, mapped);
+  }
+  for (const p of menuProteins) {
+    const mapped = mapMenuProteinOption(p, upgradeDeltaHalalaByKey);
+    proteinMap.set(String(p._id), mapped);
+    addProteinIdentity(proteinIdentityMap, mapped);
+  }
+
   const carbMap = new Map(
     legacyCarbs
       .map((c) => [String(c._id), c])
@@ -1052,6 +1081,19 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
     const isPremiumSalad = processedSlot.selectionType === NEW_TYPES.PREMIUM_LARGE_SALAD;
     if (processedSlot.isPremium || isPremiumSalad) {
       const key = isPremiumSalad ? CANONICAL_PREMIUM_SALAD_KEY : processedSlot.premiumKey;
+      
+      if (upgradeErrorsByKey.has(key) || !upgradeDeltaHalalaByKey.has(key)) {
+        normalizedSlotErrors.push({
+          slotIndex: processedSlot.slotIndex,
+          code: "PREMIUM_UPGRADE_CONFIG_UNAVAILABLE",
+          message: upgradeErrorsByKey.get(key)?.message || "Premium upgrade is not configured or available",
+        });
+        processedSlot.status = "partial";
+        plannerMeta.partialSlotCount += 1;
+        plannerMeta.completeSlotCount -= 1;
+        continue;
+      }
+
       const avail = key ? (tempBalances.get(key) || 0) : 0;
       const persistedPremiumSource = String(slot.premiumSource || "").trim();
       
@@ -1062,7 +1104,7 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
         processedSlot.premiumSource = persistedPremiumSource === "paid" ? "paid" : "paid_extra";
         const fee = isPremiumSalad
           ? premiumLargeSaladPricing.extraFeeHalala
-          : (proteinMap.get(String(processedSlot.proteinId))?.extraFeeHalala || 0);
+          : (upgradeDeltaHalalaByKey.get(processedSlot.premiumKey) || 0);
         processedSlot.premiumExtraFeeHalala = Number(processedSlot.premiumExtraFeeHalala || fee || 0);
         plannerMeta.premiumPaidExtraCount += 1;
       } else if (avail > 0) {
@@ -1073,7 +1115,7 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
         processedSlot.premiumSource = "pending_payment";
         const fee = isPremiumSalad
           ? premiumLargeSaladPricing.extraFeeHalala
-          : (proteinMap.get(String(processedSlot.proteinId))?.extraFeeHalala || 0);
+          : (upgradeDeltaHalalaByKey.get(processedSlot.premiumKey) || 0);
         processedSlot.premiumExtraFeeHalala = Number(fee);
         plannerMeta.premiumPendingPaymentCount += 1;
         plannerMeta.premiumTotalHalala += processedSlot.premiumExtraFeeHalala;
