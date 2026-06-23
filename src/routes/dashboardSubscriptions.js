@@ -12,7 +12,7 @@ const router = Router();
 router.get(
   "/search",
   dashboardAuthMiddleware,
-  dashboardRoleMiddleware(["admin"]),
+  dashboardRoleMiddleware(["admin", "cashier"]),
   asyncHandler(controller.searchByPhone)
 );
 
@@ -47,14 +47,14 @@ router.get(
 router.post(
   "/:subscriptionId/manual-deduction",
   dashboardAuthMiddleware,
-  dashboardRoleMiddleware(["admin"]),
+  dashboardRoleMiddleware(["admin", "cashier"]),
   asyncHandler(controller.manualDeduction)
 );
 
 router.get(
   "/:subscriptionId/manual-deductions",
   dashboardAuthMiddleware,
-  dashboardRoleMiddleware(["admin"]),
+  dashboardRoleMiddleware(["admin", "cashier"]),
   asyncHandler(controller.listManualDeductions)
 );
 

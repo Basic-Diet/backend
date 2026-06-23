@@ -1,0 +1,291 @@
+process.env.DASHBOARD_JWT_SECRET = process.env.DASHBOARD_JWT_SECRET || "dashboardsecret";
+process.env.NODE_ENV = process.env.NODE_ENV || "test";
+
+require("dotenv").config();
+
+const assert = require("assert");
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+const request = require("supertest");
+
+const { createApp } = require("../src/app");
+const ActivityLog = require("../src/models/ActivityLog");
+const DashboardUser = require("../src/models/DashboardUser");
+const Plan = require("../src/models/Plan");
+const Subscription = require("../src/models/Subscription");
+const User = require("../src/models/User");
+const Addon = require("../src/models/Addon");
+
+const DASHBOARD_JWT_SECRET = process.env.DASHBOARD_JWT_SECRET;
+const TEST_PREFIX = "manual-deduction-addons";
+
+let app;
+let adminUser;
+let cashierUser;
+let kitchenUser;
+let adminToken;
+let cashierToken;
+let kitchenToken;
+let plan;
+let customer;
+let addon;
+let testSubscription;
+
+function issueDashboardToken(userId, role = "admin") {
+  return jwt.sign(
+    { userId: String(userId), role, tokenType: "dashboard_access" },
+    DASHBOARD_JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+function auth(req, token) {
+  return req.set("Authorization", `Bearer ${token}`).set("Accept-Language", "en");
+}
+
+async function connect() {
+  const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI || "mongodb://localhost:27017/basicdiet_test";
+  if (mongoose.connection.readyState === 0) {
+    await mongoose.connect(mongoUri);
+  } else if (mongoose.connection.readyState === 2) {
+    await mongoose.connection.asPromise();
+  }
+}
+
+async function cleanup() {
+  const users = await User.find({ phone: "+966511119999" }).select("_id").lean();
+  const userIds = users.map((user) => user._id);
+  await ActivityLog.deleteMany({
+    $or: [
+      { entityId: testSubscription ? testSubscription._id : null },
+      { "meta.customerId": { $in: userIds.map(String) } },
+    ],
+  });
+  await Subscription.deleteMany({ userId: { $in: userIds } });
+  await User.deleteMany({ phone: "+966511119999" });
+  await Plan.deleteMany({ "name.en": TEST_PREFIX });
+  await Addon.deleteMany({ "name.en": `${TEST_PREFIX}-addon` });
+  await DashboardUser.deleteMany({ email: { $regex: TEST_PREFIX } });
+}
+
+async function setup() {
+  await connect();
+  await cleanup();
+  app = createApp();
+
+  await ActivityLog.init();
+
+  adminUser = await DashboardUser.create({
+    email: `${TEST_PREFIX}-admin@example.com`,
+    passwordHash: "test",
+    role: "admin",
+    isActive: true,
+  });
+  cashierUser = await DashboardUser.create({
+    email: `${TEST_PREFIX}-cashier@example.com`,
+    passwordHash: "test",
+    role: "cashier",
+    isActive: true,
+  });
+  kitchenUser = await DashboardUser.create({
+    email: `${TEST_PREFIX}-kitchen@example.com`,
+    passwordHash: "test",
+    role: "kitchen",
+    isActive: true,
+  });
+
+  adminToken = issueDashboardToken(adminUser._id, "admin");
+  cashierToken = issueDashboardToken(cashierUser._id, "cashier");
+  kitchenToken = issueDashboardToken(kitchenUser._id, "kitchen");
+
+  plan = await Plan.create({
+    name: { ar: TEST_PREFIX, en: TEST_PREFIX },
+    daysCount: 28,
+    currency: "SAR",
+    isActive: true,
+    gramsOptions: [{
+      grams: 300,
+      isActive: true,
+      mealsOptions: [{ mealsPerDay: 2, priceHalala: 50000, compareAtHalala: 50000, isActive: true }],
+    }],
+  });
+
+  addon = await Addon.create({
+    name: { ar: "Test Addon", en: `${TEST_PREFIX}-addon` },
+    category: "snack",
+    currency: "SAR",
+    priceHalala: 1000,
+    isActive: true,
+  });
+
+  customer = await User.create({
+    phone: "+966511119999",
+    name: "Manual Deduction Addon Customer",
+    role: "client",
+    isActive: true,
+  });
+
+  testSubscription = await Subscription.create({
+    userId: customer._id,
+    planId: plan._id,
+    status: "active",
+    startDate: new Date(),
+    endDate: new Date(Date.now() + 30 * 86400000),
+    validityEndDate: new Date(Date.now() + 30 * 86400000),
+    totalMeals: 10,
+    remainingMeals: 7,
+    selectedMealsPerDay: 2,
+    deliveryMode: "pickup",
+    premiumBalance: [{
+      premiumKey: "premium_1",
+      purchasedQty: 2,
+      remainingQty: 2,
+    }],
+    addonSubscriptions: [{
+      addonId: addon._id,
+      name: "Test Addon",
+      category: "Snack",
+      maxPerDay: 1,
+    }],
+    addonBalance: [{
+      addonId: addon._id,
+      purchasedQty: 5,
+      remainingQty: 5,
+    }],
+  });
+}
+
+async function testRoles() {
+  // Admin allowed
+  let res = await auth(request(app).get(`/api/dashboard/subscriptions/search?phone=${encodeURIComponent(customer.phone)}`), adminToken);
+  assert.strictEqual(res.status, 200, "admin can search");
+
+  // Cashier allowed
+  res = await auth(request(app).get(`/api/dashboard/subscriptions/search?phone=${encodeURIComponent(customer.phone)}`), cashierToken);
+  assert.strictEqual(res.status, 200, "cashier can search");
+
+  // Kitchen denied
+  res = await auth(request(app).get(`/api/dashboard/subscriptions/search?phone=${encodeURIComponent(customer.phone)}`), kitchenToken);
+  assert.strictEqual(res.status, 403, "kitchen denied");
+}
+
+async function testSearchResponse() {
+  const res = await auth(request(app).get(`/api/dashboard/subscriptions/search?phone=${encodeURIComponent(customer.phone)}`), cashierToken);
+  assert.strictEqual(res.status, 200);
+  const sub = res.body.data.subscription;
+  assert.strictEqual(sub.remainingRegularMeals, 5);
+  assert.strictEqual(sub.remainingPremiumMeals, 2);
+  assert.strictEqual(sub.remainingMeals, 7);
+  assert(Array.isArray(sub.addonBalances), "addonBalances is an array");
+  assert.strictEqual(sub.addonBalances.length, 1);
+  assert.strictEqual(sub.addonBalances[0].addonId, String(addon._id));
+  assert.strictEqual(sub.addonBalances[0].name, "Test Addon");
+  assert.strictEqual(sub.addonBalances[0].remainingQty, 5);
+  assert.strictEqual(sub.addonBalances[0].totalQty, 5);
+  assert.strictEqual(sub.addonBalances[0].consumedQty, 0);
+}
+
+async function testOldPayloadStillWorks() {
+  const payload = {
+    regularMeals: 1,
+    premiumMeals: 0,
+    reason: "test_regular",
+    notes: "notes"
+  };
+  const res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send(payload), cashierToken);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.data.deducted.regularMeals, 1);
+  assert.strictEqual(res.body.data.remaining.regularMeals, 4); // 5 - 1
+  assert.strictEqual(res.body.data.remaining.totalMeals, 6); // 7 - 1
+}
+
+async function testAddonDeduction() {
+  const payload = {
+    regularMeals: 0,
+    premiumMeals: 0,
+    addons: [{ addonId: String(addon._id), qty: 2 }],
+    reason: "test_addon"
+  };
+  const res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send(payload), adminToken);
+  assert.strictEqual(res.status, 200, res.text);
+  assert.strictEqual(res.body.data.deducted.addons[0].qty, 2);
+  assert.strictEqual(res.body.data.remaining.addons[0].remainingQty, 3); // 5 - 2
+  
+  // Verify regular meals unaffected
+  assert.strictEqual(res.body.data.remaining.regularMeals, 4);
+  assert.strictEqual(res.body.data.remaining.totalMeals, 6);
+  assert.strictEqual(res.body.data.remaining.premiumMeals, 2);
+}
+
+async function testCombinedDeduction() {
+  const payload = {
+    regularMeals: 1,
+    premiumMeals: 1,
+    addons: [{ addonId: String(addon._id), qty: 1 }],
+    reason: "test_combined"
+  };
+  const res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send(payload), cashierToken);
+  assert.strictEqual(res.status, 200, res.text);
+  assert.strictEqual(res.body.data.remaining.regularMeals, 3); // 4 - 1
+  assert.strictEqual(res.body.data.remaining.premiumMeals, 1); // 2 - 1
+  assert.strictEqual(res.body.data.remaining.totalMeals, 4); // 6 - 2
+  assert.strictEqual(res.body.data.remaining.addons[0].remainingQty, 2); // 3 - 1
+}
+
+async function testErrors() {
+  // All zero
+  let res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send({ regularMeals: 0, premiumMeals: 0, addons: [], reason: "fail" }), cashierToken);
+  assert.strictEqual(res.status, 400);
+
+  // Negative qty
+  res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send({ regularMeals: 0, premiumMeals: 0, addons: [{ addonId: String(addon._id), qty: -1 }], reason: "fail" }), cashierToken);
+  assert.strictEqual(res.status, 400);
+
+  // Unknown addon
+  res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send({ regularMeals: 0, premiumMeals: 0, addons: [{ addonId: String(new mongoose.Types.ObjectId()), qty: 1 }], reason: "fail" }), cashierToken);
+  assert.strictEqual(res.status, 404, "unknown addon rejected");
+
+  // Exceed balance
+  res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send({ regularMeals: 0, premiumMeals: 0, addons: [{ addonId: String(addon._id), qty: 10 }], reason: "fail" }), cashierToken);
+  assert.strictEqual(res.status, 409, "exceed addon balance rejected");
+}
+
+async function testActivityLog() {
+  const res = await auth(request(app).get(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deductions`), cashierToken);
+  assert.strictEqual(res.status, 200);
+  const items = res.body.data.items;
+  assert.strictEqual(items.length, 3, "should have 3 logs");
+  
+  // The first log is the combined deduction (most recent)
+  const combinedLog = items[0];
+  assert.strictEqual(combinedLog.deducted.regularMeals, 1);
+  assert.strictEqual(combinedLog.deducted.premiumMeals, 1);
+  assert.strictEqual(combinedLog.deducted.total, 2);
+  assert.strictEqual(combinedLog.deducted.addons.length, 1);
+  assert.strictEqual(combinedLog.deducted.addons[0].qty, 1);
+}
+
+async function run() {
+  await setup();
+  try {
+    await testRoles();
+    await testSearchResponse();
+    await testOldPayloadStillWorks();
+    await testAddonDeduction();
+    await testCombinedDeduction();
+    await testErrors();
+    await testActivityLog();
+    console.log("dashboard manual deduction phase 2 addons tests passed");
+  } finally {
+    await cleanup();
+    await mongoose.disconnect();
+  }
+}
+
+run().catch(async (err) => {
+  console.error(`dashboard manual deduction addons tests failed: ${err.stack || err.message}`);
+  try {
+    await cleanup();
+  } catch (e) {}
+  process.exit(1);
+});
