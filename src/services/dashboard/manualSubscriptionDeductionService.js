@@ -5,7 +5,6 @@ const { runMongoTransactionWithRetry } = require("../mongoTransactionRetryServic
 const { MANUAL_DEDUCTION_ACTION } = require("./manualDeduction/constants");
 const { ManualDeductionError, assertCashierOrAdminRole } = require("./manualDeduction/ManualDeductionError");
 const {
-  chooseDefaultSubscription,
   resolveAddonBalances,
   resolveBalances,
   validateBalances,
@@ -15,58 +14,15 @@ const {
 const {
   buildDeductionLog,
   buildDeductionResponse,
-  serializeCustomer,
   serializeManualDeductionLog,
-  serializeSubscription,
 } = require("./manualDeduction/manualDeductionPresenter");
 const manualDeductionRepository = require("./manualDeduction/manualDeductionRepository");
+const { createManualDeductionSearchService } = require("./manualDeduction/manualDeductionSearchService");
 
-async function findLastManualDeduction(subscriptionId, businessDate = null, session = null) {
-  return manualDeductionRepository.findLastManualDeduction(subscriptionId, businessDate, session);
-}
-
-async function buildTodaySummary(subscription, businessDate) {
-  const lastToday = await findLastManualDeduction(subscription._id, businessDate);
-  const lastAny = lastToday || await findLastManualDeduction(subscription._id);
-  return {
-    businessDate,
-    hasDeliveryDeductionToday: subscription.deliveryMode === "delivery" && Boolean(lastToday),
-    lastDeductionAt: lastAny ? lastAny.createdAt || null : null,
-  };
-}
-
-async function searchByPhone({ phone, role, lang = "en" }) {
-  assertCashierOrAdminRole(role);
-  const normalizedPhone = String(phone || "").trim();
-  if (!normalizedPhone) {
-    throw new ManualDeductionError("CUSTOMER_NOT_FOUND", "Customer not found", 404);
-  }
-
-  const user = await manualDeductionRepository.findUserByPhone(normalizedPhone);
-  if (!user) {
-    throw new ManualDeductionError("CUSTOMER_NOT_FOUND", "Customer not found", 404);
-  }
-
-  const activeSubscriptions = await manualDeductionRepository.findActiveSubscriptionsByUserId(user._id);
-
-  if (!activeSubscriptions.length) {
-    throw new ManualDeductionError("SUBSCRIPTION_NOT_FOUND", "Active subscription not found", 404);
-  }
-
-  const businessDate = await getRestaurantBusinessDate();
-  const defaultSubscription = chooseDefaultSubscription(activeSubscriptions, businessDate);
-  const planIds = [...new Set(activeSubscriptions.map((sub) => String(sub.planId)).filter(Boolean))];
-  const plans = await manualDeductionRepository.findPlansByIds(planIds);
-  const planMap = new Map(plans.map((plan) => [String(plan._id), plan]));
-  const today = await buildTodaySummary(defaultSubscription, businessDate);
-
-  return {
-    customer: serializeCustomer(user),
-    subscription: serializeSubscription(defaultSubscription, planMap.get(String(defaultSubscription.planId)), lang),
-    subscriptions: activeSubscriptions.map((sub) => serializeSubscription(sub, planMap.get(String(sub.planId)), lang)),
-    today,
-  };
-}
+const { searchByPhone } = createManualDeductionSearchService({
+  repository: manualDeductionRepository,
+  getBusinessDate: getRestaurantBusinessDate,
+});
 
 async function validateSubscriptionCustomerExists(subscription, session) {
   const customer = await manualDeductionRepository.customerExists(subscription.userId, session);
@@ -81,7 +37,7 @@ async function deductAtomically({ subscription, counts, session }) {
 
 async function ensureNoDeliveryDeductionToday(subscription, businessDate, session) {
   if (subscription.deliveryMode !== "delivery") return;
-  const existing = await findLastManualDeduction(subscription._id, businessDate, session);
+  const existing = await manualDeductionRepository.findLastManualDeduction(subscription._id, businessDate, session);
   if (existing) {
     throw new ManualDeductionError("DELIVERY_ALREADY_DEDUCTED_TODAY", "Delivery subscription already deducted today", 409);
   }
