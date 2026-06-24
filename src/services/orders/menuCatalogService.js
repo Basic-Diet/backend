@@ -442,137 +442,36 @@ function listOptions(options) {
   return menuCatalogAdminService.listOptions(options);
 }
 
-async function getModel(Model, id, extraQuery = {}) {
-  assertObjectId(id);
-  const row = await Model.findOne({ _id: id, ...extraQuery }).lean();
-  if (!row) throw new MenuNotFoundError();
-  return serializeDoc(row);
+function getModel(Model, id, extraQuery) {
+  return menuCatalogAdminService.getModel(Model, id, extraQuery);
 }
 
 function serializeAdminProductSummary(product) {
-  const payload = serializeDoc(product);
-  payload.isCustomizable = inferProductCustomizable(product);
-  return payload;
+  return menuCatalogAdminService.serializeAdminProductSummary(product);
 }
 
 function serializeCategoryDetailV3(category, products) {
-  const categoryPayload = serializeDoc(category);
-  const categoryProducts = (products || []).filter((product) => (
-    String(product.categoryId) === String(category._id)
-  ));
-  return {
-    contractVersion: "dashboard_category_detail.v3",
-    category: categoryPayload,
-    products: categoryProducts.map(serializeAdminProductSummary),
-    assignment: {
-      relationOwner: "product.categoryId",
-      bulkAssignmentEndpoint: `/api/dashboard/menu/categories/${categoryPayload.id}/products`,
-    },
-    actions: {
-      canBulkAssignProducts: true,
-      canReorderProducts: true,
-    },
-  };
+  return menuCatalogAdminService.serializeCategoryDetailV3(category, products);
 }
 
-function assertDashboardContractVersion(options = {}) {
-  const requested = String(options.contractVersion || "").trim().toLowerCase();
-  if (!requested || requested === "v3" || requested === "v4") return;
-  throw new MenuValidationError(
-    "Dashboard menu contract versions v1 and v2 are no longer supported. Use dashboard v3 or v4.",
-    "DASHBOARD_CONTRACT_VERSION_UNSUPPORTED",
-    410,
-    { supportedContractVersions: ["v3", "v4"] }
-  );
+function assertDashboardContractVersion(options) {
+  return menuCatalogAdminService.assertDashboardContractVersion(options);
 }
 
-async function getCategoryDetail(id, options = {}) {
-  assertDashboardContractVersion(options);
-  assertObjectId(id);
-  const category = await MenuCategory.findById(id).lean();
-  if (!category) throw new MenuNotFoundError();
-
-  const productQuery = {
-    categoryId: id,
-    ...buildListQuery(options),
-  };
-  const products = await MenuProduct.find(productQuery)
-    .sort({ sortOrder: 1, createdAt: -1 })
-    .lean();
-
-  return serializeCategoryDetailV3(category, products);
+function getCategoryDetail(id, options) {
+  return menuCatalogAdminService.getCategoryDetail(id, options);
 }
 
-async function getProductDetail(id) {
-  assertObjectId(id);
-  const product = await MenuProduct.findById(id).lean();
-  if (!product) throw new MenuNotFoundError("Product not found");
-
-  const [category, activeGroupCount] = await Promise.all([
-    product.categoryId ? MenuCategory.findById(product.categoryId).lean() : null,
-    ProductOptionGroup.countDocuments({ productId: id, isActive: true }),
-  ]);
-
-  const payload = serializeDoc(product);
-  payload.isCustomizable = inferProductCustomizable(product, activeGroupCount > 0 ? [{}] : []);
-
-  return {
-    contractVersion: "dashboard_product_detail.v3",
-    product: payload,
-    category: category ? serializeDoc(category) : null,
-    groupSummary: {
-      linkedGroupCount: activeGroupCount,
-      composerEndpoint: `/api/dashboard/menu/products/${id}/composer`,
-      linkEndpoint: `/api/dashboard/menu/products/${id}/option-groups`,
-    },
-  };
+function getProductDetail(id) {
+  return menuCatalogAdminService.getProductDetail(id);
 }
 
-async function getOptionGroupDetail(id, options = {}) {
-  assertDashboardContractVersion(options);
-  assertObjectId(id);
-  const group = await MenuOptionGroup.findById(id).lean();
-  if (!group) throw new MenuNotFoundError();
-  const [optionsRows, linkedProductIds] = await Promise.all([
-    MenuOption.find({
-      groupId: id,
-      ...buildListQuery(options),
-    }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
-    ProductOptionGroup.distinct("productId", { groupId: id, isActive: true }),
-  ]);
-
-  return {
-    contractVersion: "dashboard_option_group_detail.v3",
-    optionGroup: serializeDoc(group),
-    options: optionsRows.map(serializeDashboardOption),
-    usage: {
-      linkedProductsCount: linkedProductIds.length,
-    },
-    actions: {
-      canAddOptions: true,
-      canReorderOptions: true,
-    },
-  };
+function getOptionGroupDetail(id, options) {
+  return menuCatalogAdminService.getOptionGroupDetail(id, options);
 }
 
-async function getOptionDetail(id, options = {}) {
-  assertDashboardContractVersion(options);
-  assertObjectId(id);
-  const option = await MenuOption.findById(id).lean();
-  if (!option) throw new MenuNotFoundError();
-  const [group, linkedProductIds] = await Promise.all([
-    option.groupId ? MenuOptionGroup.findById(option.groupId).lean() : null,
-    ProductGroupOption.distinct("productId", { optionId: id, isActive: true }),
-  ]);
-
-  return {
-    contractVersion: "dashboard_option_detail.v3",
-    option: serializeDashboardOption(option),
-    optionGroup: group ? serializeDoc(group) : null,
-    usage: {
-      linkedProductsCount: linkedProductIds.length,
-    },
-  };
+function getOptionDetail(id, options) {
+  return menuCatalogAdminService.getOptionDetail(id, options);
 }
 
 function normalizeCategoryPayload(body = {}, existing = null) {
