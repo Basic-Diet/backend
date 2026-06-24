@@ -1624,6 +1624,74 @@ function createMenuCatalogAdminService(deps) {
     });
   }
 
+  function serializeLibraryGroup(group = {}) {
+    return {
+      id: String(group._id),
+      key: group.key || "",
+      name: group.name || { ar: "", en: "" },
+      description: group.description || { ar: "", en: "" },
+      displayStyle: normalizeGroupUiMetadata(group.ui).displayStyle,
+      enabled: truthyByDefault(group.isActive) && truthyByDefault(group.isVisible) && truthyByDefault(group.isAvailable),
+      sortOrder: Number(group.sortOrder || 0),
+    };
+  }
+
+  function serializeLibraryOption(option = {}, group = null) {
+    return {
+      id: String(option._id),
+      key: option.key || "",
+      name: option.name || { ar: "", en: "" },
+      description: option.description || { ar: "", en: "" },
+      imageUrl: option.imageUrl || "",
+      suggestedGroupId: option.groupId ? String(option.groupId) : null,
+      suggestedGroupKey: group ? group.key : null,
+      defaultPricing: serializeDefaultPricing(option),
+      nutrition: option.nutrition || {},
+      enabled: truthyByDefault(option.isActive) && truthyByDefault(option.isVisible) && truthyByDefault(option.isAvailable),
+      sortOrder: Number(option.sortOrder || 0),
+    };
+  }
+
+  async function getCustomizationLibrary(options = {}) {
+    const [groups, optionRows] = await Promise.all([
+      MenuOptionGroup.find({ ...buildListQuery({ ...options, includeInactive: true }) }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+      MenuOption.find({ ...buildListQuery({ ...options, includeInactive: true }) }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    ]);
+    const groupsById = new Map(groups.map((group) => [String(group._id), group]));
+    return {
+      contractVersion: "dashboard_customization_library.v1",
+      groups: groups.map(serializeLibraryGroup),
+      options: optionRows.map((option) => serializeLibraryOption(option, groupsById.get(String(option.groupId)) || null)),
+    };
+  }
+
+  async function updateProductCustomization(productId, body = {}, actor = {}) {
+    assertObjectId(productId, "productId");
+    if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
+    const product = await MenuProduct.findById(productId);
+    if (!product) throw new MenuNotFoundError("Product not found");
+    const before = product.toObject();
+    const isCustomizable = normalizeBoolean(body.isCustomizable, "isCustomizable", product.isCustomizable);
+    product.isCustomizable = isCustomizable;
+    await product.save();
+    if (!isCustomizable && normalizeBoolean(body.clearRelations, "clearRelations", false)) {
+      await Promise.all([
+        ProductOptionGroup.deleteMany({ productId }),
+        ProductGroupOption.deleteMany({ productId }),
+      ]);
+    }
+    await writeMenuAudit({
+      entityType: "menu_product",
+      entityId: product._id,
+      action: isCustomizable ? "product_customization_enabled" : "product_customization_disabled",
+      before,
+      after: product.toObject(),
+      actor,
+      meta: { productId, clearRelations: Boolean(body.clearRelations) },
+    });
+    return getProductComposer(productId, { contractVersion: "v4" });
+  }
+
   return {
     serializeDashboardOption,
     getDashboardMenuPreview,
@@ -1700,6 +1768,10 @@ function createMenuCatalogAdminService(deps) {
     serializeProductComposerLinkedGroupV4,
     serializeProductComposerV4,
     getProductComposer,
+    serializeLibraryGroup,
+    serializeLibraryOption,
+    getCustomizationLibrary,
+    updateProductCustomization,
   };
 }
 
