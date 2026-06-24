@@ -1,62 +1,99 @@
 # Screen Contract: 16_SETTINGS
 
 ## 1. Screen Purpose
-Provides administration for global system configurations, including VAT percentage, skip allowances, premium pricing, and custom salad/meal base prices.
+
+The Settings screen is a lightweight Arabic-only ownership and navigation screen for general settings. It must not become a duplicate editor for pricing, menu configuration, delivery zones, premium upgrades, or restaurant operations.
+
+No truly general editable setting is currently proven to be both effective and correctly owned by this screen. Until such a setting is introduced with a tested backend contract, the screen displays Arabic guidance rather than editable inputs.
 
 ## 2. Dashboard Route
+
 `/settings`
 
 ## 3. Visible UI Requirements
-* Form displaying current settings values.
-* Inputs: VAT percentage, Skip allowance (days), Premium upgrade extra price (SAR), Subscription delivery fee (SAR), Custom salad base price (SAR), Custom meal base price (SAR).
-* "Save Settings" button.
 
-## 4. Backend Endpoints
-* `GET /api/dashboard/settings` (lists all settings keys and values)
-* `PATCH /api/dashboard/settings` (bulk updates settings parameters)
-* `PUT /api/dashboard/settings/vat-percentage` (updates VAT percentage key)
-* `PUT /api/dashboard/settings/skip-allowance` (updates client skip allowance)
-* `PUT /api/dashboard/settings/premium-price` (updates premium meal upgrade price)
-* `PUT /api/dashboard/settings/subscription-delivery-fee` (updates delivery fee key)
-* `PUT /api/dashboard/settings/custom-salad-base-price` (updates base custom salad price)
-* `PUT /api/dashboard/settings/custom-meal-base-price` (updates base custom meal price)
+* All visible interface text is Arabic.
+* Explain that no general settings are currently editable from this screen.
+* Link only to verified owner routes:
+  * Delivery fees: `/zones`
+  * Custom meal and salad configuration: `/menu`
+  * Premium upgrade pricing: `/premium-meals`
+  * Restaurant hours, delivery windows, and cutoff: `/restaurant-hours`
+* Explain that VAT is controlled by backend financial configuration and is not editable from the Dashboard.
+* Do not render a settings form or save button when there are no owned editable settings.
 
-## 5. Request Parameters
-* Body (PATCH /settings):
-  * A JSON dictionary containing keys to update (e.g. `{ "vat_percentage": 16, "skip_allowance": 3 }`).
-* Body (PUT endpoints):
-  * Varies depending on key. For instance, `PUT /settings/vat-percentage` accepts `{ "percentage": 16 }` or `{ "vatPercentage": 16 }`.
+## 4. Endpoints Used by This Screen
 
-## 6. Response Fields Required
-* `status` (boolean): success status.
-* `data` (object): Key-value dictionary of all active system settings:
-  * `vat_percentage` (number)
-  * `skip_allowance` (number)
-  * `premium_price` (number)
-  * `subscription_delivery_fee_halala` (number)
-  * `custom_salad_base_price` (number)
-  * `custom_meal_base_price` (number)
+None.
 
-## 7. Field Dictionary
-* `vat_percentage`: Value representing system tax percentage. Enforced at 16% in compliance with global tax standards.
-* `skip_allowance`: The maximum number of subscription days a user is allowed to skip per billing period.
+The active Settings screen does not call `GET /api/dashboard/settings` or `PATCH /api/dashboard/settings` because it has no owned editable settings. This prevents foreign-owner or persisted-only keys from being presented as authoritative controls.
 
-## 8. Classification
-`FINANCIAL_CRITICAL`
+## 5. Backward-Compatible Backend Endpoints
+
+The backend continues to expose the following admin endpoints for compatibility and dedicated consumers:
+
+* `GET /api/dashboard/settings`
+* `PATCH /api/dashboard/settings`
+* `PUT /api/dashboard/settings/cutoff`
+* `PUT /api/dashboard/settings/delivery-windows`
+* `PUT /api/dashboard/settings/skip-allowance`
+* `PUT /api/dashboard/settings/premium-price`
+* `PUT /api/dashboard/settings/subscription-delivery-fee`
+* `PUT /api/dashboard/settings/vat-percentage`
+* `PUT /api/dashboard/settings/custom-salad-base-price`
+* `PUT /api/dashboard/settings/custom-meal-base-price`
+
+Their continued existence does not make every stored key an effective or Settings-owned Dashboard control.
+
+## 6. Ownership Rules
+
+| Setting / Area | Current Key or Source | Owner | Settings UI Rule |
+| --- | --- | --- | --- |
+| Zone delivery fee | `Zone.deliveryFeeHalala` | Delivery Zones | Hidden; manage in `/zones` |
+| Subscription delivery fallback | `subscription_delivery_fee_halala` | Backend delivery fallback | Hidden; not presented as the main delivery fee |
+| Custom meal price | `custom_meal_base_price` | Menu / Meal Builder | Hidden |
+| Custom salad price | `custom_salad_base_price` | Menu / Meal Builder | Hidden |
+| Premium upgrade price | `PremiumUpgradeConfig` | Premium Upgrades | Manage in `/premium-meals`; legacy `premium_price` is hidden |
+| Restaurant open/close | `restaurant_open_time`, `restaurant_close_time`, `restaurant_is_open` | Restaurant Hours | Hidden; manage in `/restaurant-hours` |
+| Delivery windows | `delivery_windows` | Restaurant Hours | Hidden; manage in `/restaurant-hours` |
+| Cutoff time | `cutoff_time` | Restaurant Hours | Hidden; manage in `/restaurant-hours` |
+| Subscription skip allowance | Plan `skipPolicy` | Packages / subscription plan policy | Legacy `skip_allowance` is hidden |
+| VAT | Backend `VAT_PERCENTAGE` configuration | Backend finance configuration | Read-only explanation; no editable input |
+
+## 7. Business Authority
+
+* Backend behavior remains the source of truth.
+* The Dashboard must not infer that a persisted key is operationally effective.
+* VAT remains controlled by `src/config/vat.js`; the `vat_percentage` database key is not an authoritative pricing control.
+* Premium upgrades remain controlled by `PremiumUpgradeConfig`; `premium_price` must not be reconnected as an active control.
+* Zone delivery fees remain controlled by Zone records and backend quote services.
+* Custom meal and salad pricing behavior is unchanged and remains with menu configuration.
+
+## 8. Roles
+
+The `/settings` Dashboard route is available to `admin` and `superadmin`. The compatibility backend settings endpoints are also restricted to those roles.
 
 ## 9. Frontend Restrictions
-* **No Local Fallbacks**: Settings values must be fetched from the API. Do not write local defaults for VAT percentages or delivery fees.
 
-## 10. Backend Acceptance Criteria
-* Validate settings keys against permitted schemas.
-* Persist history and write settings change event to log.
+* Do not call Settings mutation endpoints while the screen has no owned editable keys.
+* Do not submit hidden, legacy, fallback-only, or foreign-owner keys.
+* Do not add local financial defaults or calculations.
+* Do not add a navigation link unless its Dashboard route exists and is permitted for the same roles.
 
-## 11. Contract Tests Required
-* Get settings returns required keys.
-* Updates settings with valid parameters successfully.
+## 10. Contract Tests Required
 
-## 12. Known Risks
-* Changing the VAT percentage affects payment quotes immediately. Guarded by admin authorization.
+* The screen displays Arabic ownership guidance.
+* The screen renders no generic editable settings form.
+* Foreign-owner keys are absent from the screen and cannot be submitted.
+* Navigation targets are limited to `/zones`, `/menu`, `/premium-meals`, and `/restaurant-hours`.
+* Existing settings endpoint URL helpers remain backward compatible.
 
-## 13. Status
-`READY`
+## 11. Known Limitations
+
+* Legacy and fallback keys remain stored and writable through backward-compatible backend endpoints.
+* The backend response does not yet include ownership/effectiveness metadata.
+* No general business setting currently qualifies for editing on this screen.
+
+## 12. Status
+
+`READY_WITH_LIMITATIONS`

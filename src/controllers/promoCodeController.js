@@ -28,15 +28,60 @@ function buildPromoQuery(includeDeleted = false) {
   return includeDeleted ? {} : { deletedAt: null };
 }
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function readPositiveInteger(value, fallback, { max = Number.MAX_SAFE_INTEGER } = {}) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) return null;
+  return parsed;
+}
+
 async function listPromoCodesAdmin(req, res) {
   const includeDeleted = String(req.query.includeDeleted || "").trim().toLowerCase() === "true";
-  const promos = await PromoCode.find(buildPromoQuery(includeDeleted))
-    .sort({ createdAt: -1 })
-    .lean();
+  const paginationRequested = req.query.page !== undefined || req.query.limit !== undefined;
+  const page = readPositiveInteger(req.query.page, 1);
+  const limit = readPositiveInteger(req.query.limit, 20, { max: 100 });
+  if (page === null || limit === null) {
+    return errorResponse(res, 400, "INVALID", "page must be >= 1 and limit must be between 1 and 100");
+  }
+
+  const query = buildPromoQuery(includeDeleted);
+  const q = String(req.query.q || "").trim();
+  if (q) {
+    const pattern = new RegExp(escapeRegex(q), "i");
+    query.$or = [
+      { code: pattern },
+      { codeNormalized: pattern },
+      { title: pattern },
+      { description: pattern },
+      { "metadata.name.ar": pattern },
+      { "metadata.name.en": pattern },
+    ];
+  }
+
+  const total = await PromoCode.countDocuments(query);
+  let promoQuery = PromoCode.find(query).sort({ createdAt: -1 });
+  if (paginationRequested) {
+    promoQuery = promoQuery.skip((page - 1) * limit).limit(limit);
+  }
+  const promos = await promoQuery.lean();
+  const effectiveLimit = paginationRequested ? limit : Math.max(total, 1);
+  const totalPages = paginationRequested ? Math.max(1, Math.ceil(total / limit)) : 1;
 
   return res.status(200).json({
     status: true,
     data: promos.map((promo) => serializePromoCodeForAdmin(promo)),
+    meta: {
+      total,
+      page: paginationRequested ? page : 1,
+      currentPage: paginationRequested ? page : 1,
+      limit: effectiveLimit,
+      totalPages,
+      lastPage: totalPages,
+    },
   });
 }
 

@@ -522,6 +522,9 @@ function serializePromoCodeForAdmin(promo) {
   const now = new Date();
   const isExpired = Boolean(promo.expiresAt && new Date(promo.expiresAt) < now);
   const isStarted = !promo.startsAt || new Date(promo.startsAt) <= now;
+  const isUsageExhausted = promo.usageLimitTotal !== null
+    && promo.usageLimitTotal !== undefined
+    && Number(promo.currentUsageCount || 0) >= Number(promo.usageLimitTotal);
 
   return {
     id: String(promo._id),
@@ -580,7 +583,10 @@ function serializePromoCodeForAdmin(promo) {
       isExpired,
       isStarted,
       isDeleted: Boolean(promo.deletedAt),
-      isCurrentlyValid: Boolean(promo.isActive && !promo.deletedAt && isStarted && !isExpired),
+      isUsageExhausted,
+      isCurrentlyValid: Boolean(
+        promo.isActive && !promo.deletedAt && isStarted && !isExpired && !isUsageExhausted
+      ),
     },
   };
 }
