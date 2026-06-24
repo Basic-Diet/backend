@@ -3,6 +3,7 @@
 const { addDays } = require("date-fns");
 const { fromZonedTime } = require("date-fns-tz");
 const ActivityLog = require("../../models/ActivityLog");
+const Addon = require("../../models/Addon");
 const DashboardUser = require("../../models/DashboardUser");
 const Order = require("../../models/Order");
 const Payment = require("../../models/Payment");
@@ -42,8 +43,13 @@ function normalizeFulfillmentFilter(value) {
 }
 
 function parseIncludeDetails(value) {
+  // Preserve the legacy default. Dashboard callers can explicitly request the
+  // lightweight shape with includeDetails=false.
   if (value === undefined || value === null || value === "") return true;
-  return String(value).toLowerCase() === "true";
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  throw new AccountingReportError("INVALID_INCLUDE_DETAILS", "includeDetails must be true or false", 400);
 }
 
 function assertBusinessDate(date) {
@@ -95,17 +101,28 @@ function orderDisplayId(order) {
 
 function normalizeOrderPricing(order, fallbackVatPercentage = 0) {
   const pricing = order && order.pricing && typeof order.pricing === "object" ? order.pricing : {};
-  const totalOnlyValue = pricing.totalPrice !== undefined ? pricing.totalPrice : pricing.total;
+  const canonicalTotal = normalizeHalala(pricing.totalHalala);
+  const legacyTotal = normalizeHalala(pricing.totalPrice !== undefined ? pricing.totalPrice : pricing.total);
+  // Hydrating a legacy record may materialize the schema default
+  // totalHalala=0. Do not let that erase its stored legacy total.
+  const totalOnlyValue = canonicalTotal > 0 ? canonicalTotal : legacyTotal;
   const totalOnlyHalala = normalizeHalala(totalOnlyValue);
-  const hasMeaningfulStoredNet = normalizeHalala(pricing.basePrice) > 0 || normalizeHalala(pricing.subtotal) > 0;
-  const hasMeaningfulStoredVat = normalizeHalala(pricing.vatAmount) > 0;
+  const canonicalSubtotal = normalizeHalala(pricing.subtotalHalala);
+  const legacySubtotal = normalizeHalala(pricing.subtotal !== undefined ? pricing.subtotal : pricing.basePrice);
+  const storedSubtotal = canonicalSubtotal > 0 ? canonicalSubtotal : legacySubtotal;
+  const canonicalVat = normalizeHalala(pricing.vatHalala);
+  const legacyVat = normalizeHalala(pricing.vatAmount);
+  const storedVat = canonicalVat > 0 ? canonicalVat : legacyVat;
+  const hasMeaningfulStoredNet = storedSubtotal > 0;
+  const hasMeaningfulStoredVat = storedVat > 0;
   if (
     totalOnlyHalala > 0
     && !hasMeaningfulStoredNet
     && !hasMeaningfulStoredVat
   ) {
     const totalHalala = totalOnlyHalala;
-    const vatPercentage = Number(pricing.vatPercentage !== undefined ? pricing.vatPercentage : fallbackVatPercentage) || 0;
+    const storedVatPercentage = Number(pricing.vatPercentage);
+    const vatPercentage = storedVatPercentage > 0 ? storedVatPercentage : Number(fallbackVatPercentage) || 0;
     // Accounting fallback for legacy total-only records: One-Time Order totals are VAT-inclusive.
     const vatHalala = Math.round(totalHalala * (vatPercentage / 100) / (1 + (vatPercentage / 100)));
     return {
@@ -118,10 +135,11 @@ function normalizeOrderPricing(order, fallbackVatPercentage = 0) {
     };
   }
   const normalized = normalizeStoredVatBreakdown({
-    basePriceHalala: pricing.basePrice !== undefined ? pricing.basePrice : pricing.subtotal,
+    basePriceHalala: storedSubtotal,
+    subtotalHalala: storedSubtotal,
     vatPercentage: pricing.vatPercentage !== undefined ? pricing.vatPercentage : fallbackVatPercentage,
-    vatHalala: pricing.vatAmount,
-    totalPriceHalala: pricing.totalPrice !== undefined ? pricing.totalPrice : pricing.total,
+    vatHalala: storedVat,
+    totalPriceHalala: totalOnlyValue,
   });
   return {
     totalHalala: normalized.totalHalala,
@@ -158,16 +176,29 @@ function resolvePaymentMethod(order, payment) {
 
 function serializeOrderItem(order, user, payment, fallbackVatPercentage) {
   const pricing = normalizeOrderPricing(order, fallbackVatPercentage);
+  const storedPricing = order && order.pricing && typeof order.pricing === "object" ? order.pricing : {};
+  const subtotalHalala = normalizeHalala(
+    storedPricing.subtotalHalala !== undefined ? storedPricing.subtotalHalala : storedPricing.subtotal
+  );
+  const discountHalala = normalizeHalala(storedPricing.discountHalala);
+  const deliveryFeeHalala = normalizeHalala(
+    storedPricing.deliveryFeeHalala !== undefined ? storedPricing.deliveryFeeHalala : storedPricing.deliveryFee
+  );
   return {
+    id: String(order._id),
     orderId: String(order._id),
-    orderNumber: orderDisplayId(order),
+    orderNumber: order.orderNumber || orderDisplayId(order),
     createdAt: order.createdAt ? order.createdAt.toISOString() : null,
     updatedAt: order.updatedAt ? order.updatedAt.toISOString() : null,
     customerName: user ? user.name || "" : "",
     customerPhone: user ? user.phone || "" : "",
     status: order.status || "",
     paymentStatus: order.paymentStatus || "",
-    fulfillmentMethod: order.deliveryMode === "pickup" ? "pickup" : "delivery",
+    fulfillmentMethod: (order.fulfillmentMethod || order.deliveryMode) === "pickup" ? "pickup" : "delivery",
+    subtotalHalala,
+    discountHalala,
+    deliveryFeeHalala,
+    taxHalala: pricing.vatHalala,
     totalHalala: pricing.totalHalala,
     netHalala: pricing.netHalala,
     vatHalala: pricing.vatHalala,
@@ -176,11 +207,22 @@ function serializeOrderItem(order, user, payment, fallbackVatPercentage) {
   };
 }
 
-function serializeDeduction(log, user, actor) {
+function serializeDeduction(log, user, actor, addonMap = new Map()) {
   const meta = log.meta && typeof log.meta === "object" ? log.meta : {};
   const regularMeals = Number(meta.deductedRegularMeals || 0);
   const premiumMeals = Number(meta.deductedPremiumMeals || 0);
+  const addons = (Array.isArray(meta.deductedAddons) ? meta.deductedAddons : []).map((row) => {
+    const addon = addonMap.get(String(row && row.addonId || ""));
+    return {
+      addonId: String(row && row.addonId || ""),
+      name: addon && addon.name ? { ar: addon.name.ar || "", en: addon.name.en || "" } : { ar: "", en: "" },
+      qty: Number(row && row.qty || 0),
+      remainingBefore: Number(row && row.remainingBefore || 0),
+      remainingAfter: Number(row && row.remainingAfter || 0),
+    };
+  });
   return {
+    id: String(log._id),
     activityLogId: String(log._id),
     subscriptionId: String(meta.subscriptionId || log.entityId || ""),
     customerId: String(meta.customerId || ""),
@@ -190,6 +232,7 @@ function serializeDeduction(log, user, actor) {
     businessDate: String(meta.businessDate || ""),
     regularMeals,
     premiumMeals,
+    addons,
     totalMeals: Number(meta.deductedTotalMeals || regularMeals + premiumMeals),
     before: {
       remainingRegularMeals: Number(meta.before && meta.before.remainingRegularMeals || 0),
@@ -248,7 +291,10 @@ async function buildDailyReport({
     createdAt: { $gte: period.start, $lte: period.end },
   };
   if (selectedFulfillment !== "all") {
-    orderMatch.deliveryMode = selectedFulfillment;
+    orderMatch.$or = [
+      { fulfillmentMethod: selectedFulfillment },
+      { fulfillmentMethod: { $exists: false }, deliveryMode: selectedFulfillment },
+    ];
   }
 
   const deductionMatch = {
@@ -284,13 +330,18 @@ async function buildDailyReport({
     ...deductions.map((log) => String(log.meta && log.meta.customerId || "")).filter(Boolean),
   ]));
   const actorIds = Array.from(new Set(deductions.map((log) => String(log.byUserId || "")).filter(Boolean)));
-  const [users, actors, paymentMap] = await Promise.all([
+  const addonIds = Array.from(new Set(deductions.flatMap((log) => (
+    Array.isArray(log.meta && log.meta.deductedAddons) ? log.meta.deductedAddons : []
+  )).map((row) => String(row && row.addonId || "")).filter(Boolean)));
+  const [users, actors, addons, paymentMap] = await Promise.all([
     userIds.length ? User.find({ _id: { $in: userIds } }).select("_id name phone").lean() : [],
     actorIds.length ? DashboardUser.find({ _id: { $in: actorIds } }).select("_id email role").lean() : [],
+    addonIds.length ? Addon.find({ _id: { $in: addonIds } }).select("_id name").lean() : [],
     loadPaymentsByOrderId(orders),
   ]);
   const userMap = new Map(users.map((user) => [String(user._id), user]));
   const actorMap = new Map(actors.map((actor) => [String(actor._id), actor]));
+  const addonMap = new Map(addons.map((addon) => [String(addon._id), addon]));
 
   const byStatus = new Map();
   const byFulfillment = new Map();
@@ -314,6 +365,8 @@ async function buildDailyReport({
   let onlineExpectedHalala = 0;
   let unknownExpectedHalala = 0;
   let unknownPaymentMethodCount = 0;
+  let discountsHalala = 0;
+  let deliveryFeesHalala = 0;
   const warnings = [];
 
   const orderItems = orders.map((order) => {
@@ -341,6 +394,8 @@ async function buildDailyReport({
       grossSalesHalala += item.totalHalala;
       netSalesHalala += item.netHalala;
       vatHalala += item.vatHalala;
+      discountsHalala += item.discountHalala;
+      deliveryFeesHalala += item.deliveryFeeHalala;
       pushBucket(byPaymentMethod, item.paymentMethod, item.totalHalala);
       if (CASH_METHODS.has(item.paymentMethod)) cashExpectedHalala += item.totalHalala;
       else if (item.paymentMethod === "unknown") {
@@ -355,7 +410,8 @@ async function buildDailyReport({
   const manualDeductions = deductions.map((log) => serializeDeduction(
     log,
     userMap.get(String(log.meta && log.meta.customerId || "")),
-    actorMap.get(String(log.byUserId || ""))
+    actorMap.get(String(log.byUserId || "")),
+    addonMap
   ));
   const subscriptionSummary = manualDeductions.reduce((acc, row) => {
     acc.manualDeductionsCount += 1;
@@ -417,14 +473,46 @@ async function buildDailyReport({
 
   const vatRate = fallbackVatPercentage / 100;
   const resolvedNetSalesHalala = Math.max(0, grossSalesHalala - vatHalala);
+  const addonDeductionMap = new Map();
+  for (const row of manualDeductions) {
+    for (const addon of row.addons) {
+      const current = addonDeductionMap.get(addon.addonId) || { addonId: addon.addonId, name: addon.name, qty: 0 };
+      current.qty += addon.qty;
+      addonDeductionMap.set(addon.addonId, current);
+    }
+  }
+  const normalizedSummary = {
+    grossRevenueHalala: null,
+    netRevenueHalala: resolvedNetSalesHalala,
+    discountsHalala,
+    refundsHalala: null,
+    deliveryFeesHalala,
+    taxHalala: vatHalala,
+    totalCollectedHalala: grossSalesHalala,
+    ordersCount: orders.length,
+    subscriptionsCount: null,
+    refundsCount: null,
+    manualDeductionsCount: subscriptionSummary.manualDeductionsCount,
+  };
   return {
+    date: period.businessDate,
     businessDate: period.businessDate,
+    filters: {
+      date: period.businessDate,
+      fromDate: null,
+      toDate: null,
+      fulfillmentMethod: selectedFulfillment,
+      includeDetails: details,
+    },
+    currency: "SAR",
+    moneyUnit: "halala",
     timezone: period.timezone,
     period: {
       start: period.start.toISOString(),
       end: period.end.toISOString(),
     },
     summary: {
+      ...normalizedSummary,
       grossSalesHalala,
       netSalesHalala: resolvedNetSalesHalala,
       vatHalala,
@@ -473,6 +561,47 @@ async function buildDailyReport({
     subscriptions: {
       summary: subscriptionSummary,
       manualDeductions: details ? manualDeductions : [],
+    },
+    breakdown: {
+      oneTimeOrders: {
+        count: orders.length,
+        grossRevenueHalala: null,
+        netRevenueHalala: resolvedNetSalesHalala,
+        discountsHalala,
+        refundsHalala: null,
+      },
+      subscriptions: {
+        count: null,
+        grossRevenueHalala: null,
+        netRevenueHalala: null,
+        discountsHalala: null,
+        refundsHalala: null,
+      },
+      delivery: {
+        ordersCount: deliveryCount,
+        revenueHalala: null,
+        feesHalala: deliveryFeesHalala,
+      },
+      pickup: { ordersCount: pickupCount, revenueHalala: null, feesHalala: 0 },
+      manualDeductions: {
+        regularMeals: subscriptionSummary.regularMealsDeducted,
+        premiumMeals: subscriptionSummary.premiumMealsDeducted,
+        addons: Array.from(addonDeductionMap.values()),
+        totalActions: subscriptionSummary.manualDeductionsCount,
+      },
+    },
+    details: {
+      orders: details ? orderItems : [],
+      subscriptions: [],
+      refunds: [],
+      manualDeductions: details ? manualDeductions : [],
+    },
+    dataSources: {
+      oneTimeOrders: "Order",
+      payments: "Payment when linked; Order.paymentStatus remains the paid-status gate",
+      subscriptionRevenue: null,
+      refunds: null,
+      manualDeductions: "ActivityLog.manual_subscription_meal_deduction",
     },
     operations: {
       kitchen: {

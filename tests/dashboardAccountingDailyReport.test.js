@@ -32,8 +32,12 @@ const SETTING_KEYS = ["restaurant_open_time", "restaurant_close_time", "vat_perc
 let app;
 let adminUser;
 let kitchenUser;
+let cashierUser;
+let superadminUser;
 let adminToken;
 let kitchenToken;
+let cashierToken;
+let superadminToken;
 let plan;
 let customer;
 let settingsSnapshot = [];
@@ -95,7 +99,12 @@ async function cleanup() {
   await Subscription.deleteMany({ userId: { $in: userIds } });
   await User.deleteMany({ phone: { $in: TEST_PHONES } });
   await Plan.deleteMany({ "name.en": TEST_PREFIX });
-  await DashboardUser.deleteMany({ email: { $in: [`${TEST_PREFIX}@example.com`, `${TEST_PREFIX}-kitchen@example.com`] } });
+  await DashboardUser.deleteMany({ email: { $in: [
+    `${TEST_PREFIX}@example.com`,
+    `${TEST_PREFIX}-kitchen@example.com`,
+    `${TEST_PREFIX}-cashier@example.com`,
+    `${TEST_PREFIX}-superadmin@example.com`,
+  ] } });
 }
 
 async function upsertSetting(key, value) {
@@ -129,8 +138,16 @@ async function setup() {
     role: "kitchen",
     isActive: true,
   });
+  cashierUser = await DashboardUser.create({
+    email: `${TEST_PREFIX}-cashier@example.com`, passwordHash: "test", role: "cashier", isActive: true,
+  });
+  superadminUser = await DashboardUser.create({
+    email: `${TEST_PREFIX}-superadmin@example.com`, passwordHash: "test", role: "superadmin", isActive: true,
+  });
   adminToken = issueDashboardToken(adminUser._id, "admin");
   kitchenToken = issueDashboardToken(kitchenUser._id, "kitchen");
+  cashierToken = issueDashboardToken(cashierUser._id, "cashier");
+  superadminToken = issueDashboardToken(superadminUser._id, "superadmin");
 
   plan = await Plan.create({
     name: { ar: TEST_PREFIX, en: TEST_PREFIX },
@@ -210,7 +227,7 @@ async function createSubscription({ user = customer, deliveryMode = "pickup", re
   });
 }
 
-async function createManualDeductionLog({ subscription, regularMeals, premiumMeals, fulfillmentMethod, actor = adminUser, createdAt }) {
+async function createManualDeductionLog({ subscription, regularMeals, premiumMeals, addons = [], fulfillmentMethod, actor = adminUser, createdAt }) {
   return ActivityLog.create({
     entityType: "subscription",
     entityId: subscription._id,
@@ -223,6 +240,7 @@ async function createManualDeductionLog({ subscription, regularMeals, premiumMea
       deductedRegularMeals: regularMeals,
       deductedPremiumMeals: premiumMeals,
       deductedTotalMeals: regularMeals + premiumMeals,
+      deductedAddons: addons,
       before: { remainingRegularMeals: 5, remainingPremiumMeals: 2, remainingMeals: 7 },
       after: { remainingRegularMeals: 5 - regularMeals, remainingPremiumMeals: 2 - premiumMeals, remainingMeals: 7 - regularMeals - premiumMeals },
       fulfillmentMethod,
@@ -241,6 +259,27 @@ async function testUnauthorizedAndRoleChecks() {
 
   res = await auth(request(app).get(`/api/dashboard/accounting/daily-report?date=${TEST_DATE}`), kitchenToken);
   assert.strictEqual(res.status, 403, "kitchen role cannot access report");
+
+  res = await auth(request(app).get(`/api/dashboard/accounting/daily-report?date=${TEST_DATE}`), cashierToken);
+  assert.strictEqual(res.status, 403, "cashier role cannot access report");
+
+  res = await auth(request(app).get(`/api/dashboard/accounting/daily-report?date=${TEST_DATE}`), superadminToken);
+  assert.strictEqual(res.status, 200, "superadmin can access report");
+}
+
+async function testValidationContract() {
+  let res = await auth(request(app).get("/api/dashboard/accounting/daily-report?date=15-05-2026"));
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.status, false);
+  assert(res.body.messageAr, "date validation includes Arabic message");
+
+  res = await auth(request(app).get(`/api/dashboard/accounting/daily-report?date=${TEST_DATE}&fulfillmentMethod=branch`));
+  assert.strictEqual(res.status, 400);
+  assert(res.body.messageAr, "fulfillment validation includes Arabic message");
+
+  res = await auth(request(app).get(`/api/dashboard/accounting/daily-report?date=${TEST_DATE}&includeDetails=yes`));
+  assert.strictEqual(res.status, 400);
+  assert(res.body.messageAr, "boolean validation includes Arabic message");
 }
 
 async function testEmptyReportAndBusinessPeriod() {
@@ -251,6 +290,10 @@ async function testEmptyReportAndBusinessPeriod() {
   assert.strictEqual(res.body.data.period.start, "2026-05-14T21:00:00.000Z");
   assert.strictEqual(res.body.data.period.end, "2026-05-15T20:59:59.999Z");
   assert.strictEqual(res.body.data.summary.grossSalesHalala, 0);
+  assert.strictEqual(res.body.data.currency, "SAR");
+  assert.strictEqual(res.body.data.moneyUnit, "halala");
+  assert.strictEqual(res.body.data.filters.includeDetails, true, "legacy details default is preserved");
+  assert(Array.isArray(res.body.data.details.orders));
 }
 
 async function testOrdersMoneyVatAndWarnings() {
@@ -289,8 +332,10 @@ async function testOrdersMoneyVatAndWarnings() {
   assert.strictEqual(res.status, 200, "orders report status");
   assert.strictEqual(res.body.data.summary.paidOneTimeOrdersCount, 3);
   assert.strictEqual(res.body.data.summary.grossSalesHalala, 25300);
-  assert.strictEqual(res.body.data.summary.vatHalala, 3300);
-  assert.strictEqual(res.body.data.summary.netSalesHalala, 22000);
+  assert.strictEqual(res.body.data.summary.vatHalala, 3403);
+  assert.strictEqual(res.body.data.summary.netSalesHalala, 21897);
+  assert.strictEqual(res.body.data.summary.totalCollectedHalala, 25300);
+  assert.strictEqual(res.body.data.summary.taxHalala, 3403);
   assert.strictEqual(res.body.data.summary.cancelledOrdersCount, 1);
   assert.strictEqual(res.body.data.oneTimeOrders.summary.createdCount, 4);
   assert.strictEqual(res.body.data.oneTimeOrders.summary.fulfilledCount, 1);
@@ -304,6 +349,7 @@ async function testManualDeductionsAndDeliveryRestrictionUnchanged() {
     subscription: pickupSub,
     regularMeals: 1,
     premiumMeals: 2,
+    addons: [{ addonId: new mongoose.Types.ObjectId(), qty: 2, remainingBefore: 4, remainingAfter: 2 }],
     fulfillmentMethod: "pickup",
     createdAt: new Date("2026-05-15T08:00:00.000Z"),
   });
@@ -337,6 +383,22 @@ async function testManualDeductionsAndDeliveryRestrictionUnchanged() {
   assert.strictEqual(res.body.data.subscriptions.summary.regularMealsDeducted, 2);
   assert.strictEqual(res.body.data.subscriptions.summary.premiumMealsDeducted, 2);
   assert.strictEqual(res.body.data.subscriptions.summary.totalMealsDeducted, 4);
+  assert.strictEqual(res.body.data.breakdown.manualDeductions.addons.length, 1);
+  assert.strictEqual(res.body.data.breakdown.manualDeductions.addons[0].qty, 2);
+  assert.strictEqual(res.body.data.details.manualDeductions[0].addons[0].qty, 2);
+}
+
+async function testDetailsAndFulfillmentFilters() {
+  let res = await auth(request(app).get(`/api/dashboard/accounting/daily-report?date=${TEST_DATE}&includeDetails=false`));
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body.data.details.orders, []);
+  assert.deepStrictEqual(res.body.data.details.manualDeductions, []);
+  assert.deepStrictEqual(res.body.data.oneTimeOrders.items, []);
+
+  res = await auth(request(app).get(`/api/dashboard/accounting/daily-report?date=${TEST_DATE}&includeDetails=true&fulfillmentMethod=pickup`));
+  assert.strictEqual(res.status, 200);
+  assert(res.body.data.details.orders.every((row) => row.fulfillmentMethod === "pickup"));
+  assert(res.body.data.details.manualDeductions.every((row) => row.fulfillmentMethod === "pickup"));
 }
 
 async function testCsvExport() {
@@ -357,9 +419,11 @@ async function run() {
   await setup();
   try {
     await testUnauthorizedAndRoleChecks();
+    await testValidationContract();
     await testEmptyReportAndBusinessPeriod();
     await testOrdersMoneyVatAndWarnings();
     await testManualDeductionsAndDeliveryRestrictionUnchanged();
+    await testDetailsAndFulfillmentFilters();
     await testCsvExport();
     console.log("dashboard accounting daily report tests passed");
   } finally {

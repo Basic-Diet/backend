@@ -1,11 +1,23 @@
 "use strict";
 
 const accountingDailyReportService = require("../../services/dashboard/accountingDailyReportService");
-const errorResponse = require("../../utils/errorResponse");
 
 function handleAccountingError(res, err) {
   if (err instanceof accountingDailyReportService.AccountingReportError) {
-    return errorResponse(res, err.status, err.code, err.message);
+    const messageArByCode = {
+      INVALID_DATE: "صيغة التاريخ غير صحيحة. استخدم YYYY-MM-DD",
+      INVALID_FULFILLMENT_METHOD: "طريقة التنفيذ غير صحيحة. استخدم all أو pickup أو delivery",
+      INVALID_INCLUDE_DETAILS: "قيمة عرض التفاصيل غير صحيحة. استخدم true أو false",
+      UNSUPPORTED_EXPORT_FORMAT: "صيغة التصدير غير مدعومة. الصيغة المتاحة هي csv",
+    };
+    const messageAr = messageArByCode[err.code] || "تعذر إنشاء تقرير المحاسبة";
+    return res.status(err.status).json({
+      ok: false,
+      status: false,
+      message: err.message,
+      messageAr,
+      error: { code: err.code, message: err.message, messageAr },
+    });
   }
   throw err;
 }
@@ -29,7 +41,11 @@ async function exportDailyReport(req, res) {
   try {
     const format = String(req.query.format || "csv").trim().toLowerCase();
     if (format !== "csv") {
-      return errorResponse(res, 400, "UNSUPPORTED_EXPORT_FORMAT", "Only csv export is currently supported");
+      throw new accountingDailyReportService.AccountingReportError(
+        "UNSUPPORTED_EXPORT_FORMAT",
+        "Only csv export is currently supported",
+        400
+      );
     }
 
     const data = await accountingDailyReportService.buildDailyReport({
