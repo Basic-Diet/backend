@@ -1,5 +1,6 @@
 function createMenuCatalogAdminService(deps) {
   const {
+    mongoose,
     MenuCategory,
     MenuProduct,
     MenuOptionGroup,
@@ -223,9 +224,169 @@ function createMenuCatalogAdminService(deps) {
     };
   }
 
+  function buildListQuery({ includeInactive = false, isActive, isVisible, isAvailable, q, published } = {}) {
+    const query = {};
+    if (isActive !== undefined && isActive !== null && String(isActive).trim() !== "") {
+      query.isActive = normalizeBoolean(isActive, "isActive");
+    } else if (!includeInactive) {
+      query.isActive = true;
+    }
+    if (isVisible !== undefined && isVisible !== null && String(isVisible).trim() !== "") {
+      query.isVisible = normalizeBoolean(isVisible, "isVisible");
+    }
+    if (isAvailable !== undefined && isAvailable !== null && String(isAvailable).trim() !== "") {
+      query.isAvailable = normalizeBoolean(isAvailable, "isAvailable");
+    }
+    if (published !== undefined && published !== null && String(published).trim() !== "") {
+      const showPublished = normalizeBoolean(published, "published");
+      query.publishedAt = showPublished ? { $ne: null } : null;
+    }
+    if (q !== undefined && q !== null && String(q).trim()) {
+      const escaped = String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(escaped, "i");
+      query.$or = [{ key: regex }, { "name.ar": regex }, { "name.en": regex }];
+    }
+    return query;
+  }
+
+  function buildProductFilter(options = {}) {
+    const {
+      categoryId,
+      availableFor,
+      itemType,
+      search,
+    } = options;
+    const query = buildListQuery({
+      ...options,
+      q: options.q || search,
+    });
+
+    if (categoryId !== undefined && categoryId !== null && String(categoryId).trim() !== "") {
+      if (!mongoose.Types.ObjectId.isValid(String(categoryId))) {
+        throw new MenuValidationError("Invalid categoryId", "INVALID_CATEGORY_ID", 400);
+      }
+      query.categoryId = new mongoose.Types.ObjectId(String(categoryId));
+    }
+
+    if (availableFor !== undefined && availableFor !== null && String(availableFor).trim() !== "") {
+      const channel = String(availableFor).trim();
+      if (!["one_time", "subscription"].includes(channel)) {
+        throw new MenuValidationError("availableFor contains an unsupported channel");
+      }
+      query.availableFor = channel;
+    }
+
+    if (itemType !== undefined && itemType !== null && String(itemType).trim() !== "") {
+      query.itemType = String(itemType).trim();
+    }
+
+    return query;
+  }
+
+  async function listModel(Model, options = {}, extraQuery = {}, serializer = serializeDoc) {
+    const query = { ...buildListQuery(options), ...extraQuery };
+    const pagination = parsePaginationOptions(options);
+    const find = Model.find(query)
+      .sort({ sortOrder: 1, createdAt: -1 })
+      .lean();
+
+    if (!pagination) {
+      const rows = await find;
+      return rows.map(serializer);
+    }
+
+    const [rows, total] = await Promise.all([
+      find.skip(pagination.skip).limit(pagination.limit),
+      Model.countDocuments(query),
+    ]);
+
+    return {
+      items: rows.map(serializer),
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        pages: Math.ceil(total / pagination.limit),
+      },
+    };
+  }
+
+  function serializeDashboardPickerProduct(row) {
+    return {
+      id: String(row._id),
+      key: row.key,
+      name: row.name,
+      category: row.categoryId ? row.categoryId.key : (row.category || ""),
+      image: row.imageUrl || "",
+      isActive: row.isActive !== false,
+    };
+  }
+
+  async function listProducts(options = {}) {
+    const query = buildProductFilter(options);
+    if (options.view === "picker") {
+      query.isActive = true;
+    }
+    
+    const pagination = parsePaginationOptions(options);
+    let find = MenuProduct.find(query).sort({ sortOrder: 1, createdAt: -1 });
+    
+    if (options.view === "picker") {
+      find = find.populate("categoryId");
+    }
+    
+    find = find.lean();
+    const serializeFn = options.view === "picker" ? serializeDashboardPickerProduct : serializeDoc;
+
+    if (!pagination) {
+      const rows = await find;
+      return rows.map(serializeFn);
+    }
+
+    const [rows, total] = await Promise.all([
+      find.skip(pagination.skip).limit(pagination.limit),
+      MenuProduct.countDocuments(query),
+    ]);
+
+    return {
+      items: rows.map(serializeFn),
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        pages: Math.ceil(total / pagination.limit),
+      },
+    };
+  }
+
+  async function listOptions(options = {}) {
+    return listModel(
+      MenuOption,
+      options,
+      options && options.groupId ? { groupId: assertObjectId(options.groupId, "groupId") } : {},
+      serializeDashboardOption
+    );
+  }
+
+  async function listCategories(options = {}) {
+    return listModel(MenuCategory, options);
+  }
+
+  async function listOptionGroups(options = {}) {
+    return listModel(MenuOptionGroup, options);
+  }
+
   return {
     serializeDashboardOption,
     getDashboardMenuPreview,
+    buildListQuery,
+    buildProductFilter,
+    listModel,
+    serializeDashboardPickerProduct,
+    listProducts,
+    listOptions,
+    listCategories,
+    listOptionGroups,
   };
 }
 
