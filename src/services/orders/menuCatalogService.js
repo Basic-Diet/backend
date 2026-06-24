@@ -578,350 +578,48 @@ function updateProductCustomization(productId, body, actor) {
   return menuCatalogAdminService.updateProductCustomization(productId, body, actor);
 }
 
-async function createProductGroup(productId, body, actor = {}) {
-  assertObjectId(productId, "productId");
-  const payload = normalizeProductGroupRelationPayload({ ...body, productId });
-  const [product, group] = await Promise.all([
-    MenuProduct.findById(productId).lean(),
-    MenuOptionGroup.findById(payload.groupId).lean(),
-  ]);
-  if (!product) throw new MenuNotFoundError("Product not found");
-  if (!group) throw new MenuNotFoundError("Option group not found");
-
-  const existing = await ProductOptionGroup.findOne({ productId, groupId: payload.groupId }).lean();
-  const relation = existing
-    ? await updateEntity(ProductOptionGroup, existing._id, { ...payload, isActive: true }, {
-      entityType: "menu_product_group",
-      actor,
-      action: "product_group_attached",
-      meta: { productId, groupId: payload.groupId },
-    })
-    : await createEntity(ProductOptionGroup, payload, { entityType: "menu_product_group", actor });
-
-  await MenuProduct.updateOne({ _id: productId }, { $set: { isCustomizable: true } });
-
-  const initialOptionIds = Array.isArray(body.initialOptionIds)
-    ? [...new Set(body.initialOptionIds.map((item) => assertObjectId(item, "initialOptionIds[]")))]
-    : [];
-  const linkAllOptions = normalizeBoolean(body.linkAllOptions, "linkAllOptions", false);
-  const optionRows = linkAllOptions
-    ? await MenuOption.find({ groupId: payload.groupId, isActive: true }).lean()
-    : (initialOptionIds.length ? await MenuOption.find({ _id: { $in: initialOptionIds }, isActive: true }).lean() : []);
-  const catalogItemsById = optionRows.length ? await loadCatalogItemsByIdForDocs(optionRows) : new Map();
-  const options = filterGloballyAvailable(optionRows, catalogItemsById);
-  if (options.length > 0) {
-    const optionRelations = options.map((opt) => ({
-      productId,
-      groupId: payload.groupId,
-      optionId: opt._id,
-      isActive: true,
-      isVisible: true,
-      isAvailable: true,
-      sortOrder: opt.sortOrder || 0,
-    }));
-    for (const optionRelation of optionRelations) {
-      await ProductGroupOption.updateOne(
-        { productId, groupId: payload.groupId, optionId: optionRelation.optionId },
-        { $set: optionRelation },
-        { upsert: true }
-      );
-    }
-  }
-  await writeMenuAudit({
-    entityType: "menu_product_group",
-    entityId: productId,
-    action: "product_group_attached",
-    actor,
-    meta: { productId, groupId: payload.groupId, optionIds: options.map((item) => String(item._id)), linkAllOptions },
-  });
-
-  return relation;
+function createProductGroup(productId, body, actor) {
+  return menuCatalogAdminService.createProductGroup(productId, body, actor);
 }
 
-async function deleteProductGroup(productId, groupId, actor = {}) {
-  assertObjectId(productId);
-  assertObjectId(groupId);
-  const result = await ProductOptionGroup.deleteOne({ productId, groupId });
-  if (result.deletedCount > 0) {
-    await ProductGroupOption.deleteMany({ productId, groupId });
-    await writeMenuAudit({ entityType: "menu_product_group", entityId: productId, action: "product_group_detached", actor, meta: { productId, groupId } });
-  }
-  return { deleted: result.deletedCount };
+function deleteProductGroup(productId, groupId, actor) {
+  return menuCatalogAdminService.deleteProductGroup(productId, groupId, actor);
 }
 
-async function updateProductGroup(productId, groupId, body, actor = {}, action = null) {
-  assertObjectId(productId, "productId");
-  assertObjectId(groupId, "groupId");
-  const existing = await ProductOptionGroup.findOne({ productId, groupId }).lean();
-  if (!existing) throw new MenuNotFoundError("Product group relation not found");
-  const payload = normalizeProductGroupRelationPayload({ ...body, productId, groupId }, existing);
-  const updated = await updateEntity(ProductOptionGroup, existing._id, payload, {
-    entityType: "menu_product_group",
-    actor,
-    action: action || changeAction(payload, "product_group_rules_changed"),
-    meta: { productId, groupId },
-  });
-  return updated;
+function updateProductGroup(productId, groupId, body, actor, action) {
+  return menuCatalogAdminService.updateProductGroup(productId, groupId, body, actor, action);
 }
 
-async function updateProductGroupSelectionRules(productId, groupId, body, actor = {}) {
-  assertObjectId(productId, "productId");
-  assertObjectId(groupId, "groupId");
-  const existing = await ProductOptionGroup.findOne({ productId, groupId }).lean();
-  if (!existing) throw new MenuNotFoundError("Product group relation not found");
-  const payload = normalizeSelectionRulePayload(body, existing);
-  return updateEntity(ProductOptionGroup, existing._id, payload, {
-    entityType: "menu_product_group",
-    actor,
-    action: "product_group_rules_changed",
-    meta: { productId, groupId },
-  });
+function updateProductGroupSelectionRules(productId, groupId, body, actor) {
+  return menuCatalogAdminService.updateProductGroupSelectionRules(productId, groupId, body, actor);
 }
 
-async function listProductGroupOptions(productId, groupId, options = {}) {
-  assertObjectId(productId, "productId");
-  assertObjectId(groupId, "groupId");
-  const query = { productId, groupId, ...buildListQuery(options) };
-  const pagination = parsePaginationOptions(options);
-  const find = ProductGroupOption.find(query)
-    .sort({ sortOrder: 1, createdAt: -1 })
-    .lean();
-
-  if (!pagination) {
-    const rows = await find;
-    return rows.map(serializeDoc);
-  }
-
-  const [rows, total] = await Promise.all([
-    find.skip(pagination.skip).limit(pagination.limit),
-    ProductGroupOption.countDocuments(query),
-  ]);
-
-  return {
-    items: rows.map(serializeDoc),
-    pagination: {
-      page: pagination.page,
-      limit: pagination.limit,
-      total,
-      pages: Math.ceil(total / pagination.limit),
-    },
-  };
+function listProductGroupOptions(productId, groupId, options) {
+  return menuCatalogAdminService.listProductGroupOptions(productId, groupId, options);
 }
 
-function normalizeOptionIds(value = [], fieldName = "optionIds") {
-  if (!Array.isArray(value)) throw new MenuValidationError(`${fieldName} must be an array`);
-  return [...new Set(value.map((item) => assertObjectId(item, `${fieldName}[]`)))];
+function normalizeOptionIds(value, fieldName) {
+  return menuCatalogAdminService.normalizeOptionIds(value, fieldName);
 }
 
-async function replaceProductGroupOptions(productId, groupId, body = {}, actor = {}) {
-  assertObjectId(productId, "productId");
-  assertObjectId(groupId, "groupId");
-  if (!isPlainObject(body)) throw new MenuValidationError("Request body must be an object");
-  const optionIds = normalizeOptionIds(body.optionIds || []);
-  const preserveOverrides = normalizeBoolean(body.preserveOverrides, "preserveOverrides", true);
-  const [product, groupRelation, options] = await Promise.all([
-    MenuProduct.findById(productId).lean(),
-    ProductOptionGroup.findOne({ productId, groupId }).lean(),
-    optionIds.length ? MenuOption.find({ _id: { $in: optionIds }, isActive: true }).lean() : [],
-  ]);
-  if (!product) throw new MenuNotFoundError("Product not found");
-  if (!groupRelation) throw new MenuValidationError("Product group relation does not exist", "RELATION_NOT_FOUND", 404);
-  if (options.length !== optionIds.length) {
-    throw new MenuValidationError("One or more options do not exist or are globally disabled", "OPTION_NOT_ALLOWED", 400);
-  }
-  const catalogItemsById = await loadCatalogItemsByIdForDocs(options);
-  const globallyAvailableOptions = filterGloballyAvailable(options, catalogItemsById);
-  if (globallyAvailableOptions.length !== options.length) {
-    throw new MenuValidationError("One or more options are linked to unavailable catalog items", "OPTION_NOT_AVAILABLE", 409);
-  }
-  const existingRelations = await ProductGroupOption.find({ productId, groupId }).lean();
-  const existingByOptionId = new Map(existingRelations.map((row) => [String(row.optionId), row]));
-  const optionIdSet = new Set(optionIds);
-
-  await ProductGroupOption.deleteMany({ productId, groupId, optionId: { $nin: optionIds } });
-  for (const option of options) {
-    const optionId = String(option._id);
-    const existing = existingByOptionId.get(optionId);
-    const overrideFields = preserveOverrides && existing
-      ? {
-        extraPriceHalala: existing.extraPriceHalala,
-        extraWeightUnitGrams: existing.extraWeightUnitGrams,
-        extraWeightPriceHalala: existing.extraWeightPriceHalala,
-      }
-      : {
-        extraPriceHalala: null,
-        extraWeightUnitGrams: null,
-        extraWeightPriceHalala: null,
-      };
-    await ProductGroupOption.updateOne(
-      { productId, groupId, optionId },
-      {
-        $set: {
-          productId,
-          groupId,
-          optionId,
-          ...overrideFields,
-          isActive: existing ? truthyByDefault(existing.isActive) : true,
-          isVisible: existing ? truthyByDefault(existing.isVisible) : true,
-          isAvailable: existing ? truthyByDefault(existing.isAvailable) : true,
-          sortOrder: existing ? Number(existing.sortOrder || 0) : Number(option.sortOrder || 0),
-        },
-      },
-      { upsert: true }
-    );
-  }
-
-  await writeMenuAudit({
-    entityType: "menu_product_group_option",
-    entityId: productId,
-    action: "product_group_options_replaced",
-    actor,
-    meta: {
-      productId,
-      groupId,
-      optionIds,
-      preserveOverrides,
-      removedOptionIds: existingRelations.map((row) => String(row.optionId)).filter((id) => !optionIdSet.has(id)),
-    },
-  });
-
-  return getProductComposer(productId, { contractVersion: "v4" });
+function replaceProductGroupOptions(productId, groupId, body, actor) {
+  return menuCatalogAdminService.replaceProductGroupOptions(productId, groupId, body, actor);
 }
 
-async function getProductGroupOptionPool(productId, groupId, queryOptions = {}) {
-  assertObjectId(productId, "productId");
-  assertObjectId(groupId, "groupId");
-  const includeDisabled = normalizeBoolean(queryOptions.includeDisabled, "includeDisabled", false);
-  const onlySuggested = normalizeBoolean(queryOptions.onlySuggested, "onlySuggested", false);
-  const suggestedGroupId = queryOptions.suggestedGroupId
-    ? assertObjectId(queryOptions.suggestedGroupId, "suggestedGroupId")
-    : groupId;
-  const optionQuery = includeDisabled ? {} : { isActive: true };
-  const search = queryOptions.search || queryOptions.q;
-  if (search !== undefined && search !== null && String(search).trim()) {
-    const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(escaped, "i");
-    optionQuery.$or = [{ key: regex }, { "name.ar": regex }, { "name.en": regex }];
-  }
-  if (onlySuggested) optionQuery.groupId = suggestedGroupId;
-
-  const [product, group, relation, optionRows, linkedRelations] = await Promise.all([
-    MenuProduct.findById(productId).lean(),
-    MenuOptionGroup.findById(groupId).lean(),
-    ProductOptionGroup.findOne({ productId, groupId }).lean(),
-    MenuOption.find(optionQuery).sort({ sortOrder: 1, createdAt: -1 }).lean(),
-    ProductGroupOption.find({ productId, groupId }).lean(),
-  ]);
-  if (!product) throw new MenuNotFoundError("Product not found");
-  if (!group) throw new MenuNotFoundError("Option group not found");
-  if (!relation) throw new MenuValidationError("Product group relation does not exist", "RELATION_NOT_FOUND", 404);
-
-  const groupsById = new Map([[String(group._id), group]]);
-  if (!groupsById.has(String(suggestedGroupId))) {
-    const suggestedGroup = await MenuOptionGroup.findById(suggestedGroupId).lean();
-    if (suggestedGroup) groupsById.set(String(suggestedGroup._id), suggestedGroup);
-  }
-  const linkedByOptionId = new Map(linkedRelations.map((row) => [String(row.optionId), row]));
-  return {
-    contractVersion: "dashboard_product_group_option_pool.v4",
-    productId,
-    groupId,
-    group: {
-      id: String(group._id),
-      key: group.key || "",
-      name: group.name || { ar: "", en: "" },
-    },
-    options: optionRows.map((option) => {
-      const optionId = String(option._id);
-      const linked = linkedByOptionId.get(optionId) || null;
-      const suggestedGroup = groupsById.get(String(option.groupId)) || null;
-      return {
-        optionId,
-        key: option.key || "",
-        name: option.name || { ar: "", en: "" },
-        isLinked: Boolean(linked),
-        productOptionId: linked ? String(linked._id) : null,
-        suggestedGroupId: option.groupId ? String(option.groupId) : null,
-        suggestedGroupKey: suggestedGroup ? suggestedGroup.key : null,
-        defaultPricing: serializeDefaultPricing(option),
-        overridePricing: linked ? serializeOverridePricing(linked, option.currency) : serializeOverridePricing({}, option.currency),
-        effectivePricing: linked ? serializeEffectivePricing(linked, option) : serializeDefaultPricing(option),
-        nutrition: option.nutrition || {},
-        status: statusTriple(option, linked || {}),
-      };
-    }),
-  };
+function getProductGroupOptionPool(productId, groupId, queryOptions) {
+  return menuCatalogAdminService.getProductGroupOptionPool(productId, groupId, queryOptions);
 }
 
-async function createProductGroupOption(productId, groupId, body, actor = {}) {
-  assertObjectId(productId, "productId");
-  assertObjectId(groupId, "groupId");
-  const relation = await ProductOptionGroup.findOne({ productId, groupId }).lean();
-  if (!relation) throw new MenuValidationError("Product group relation does not exist", "RELATION_NOT_FOUND", 404);
-  const payload = normalizeProductGroupOptionRelationPayload({ ...body, productId, groupId });
-  const option = await MenuOption.findOne({ _id: payload.optionId, isActive: true }).lean();
-  if (!option) throw new MenuValidationError("Option does not exist or is globally disabled", "OPTION_NOT_ALLOWED", 400);
-  const existing = await ProductGroupOption.findOne({ productId, groupId, optionId: payload.optionId }).lean();
-  if (existing) {
-    return updateEntity(ProductGroupOption, existing._id, { ...payload, isActive: true }, {
-      entityType: "menu_product_group_option",
-      actor,
-      action: "product_group_option_attached",
-      meta: { productId, groupId, optionId: payload.optionId },
-    });
-  }
-  const row = await createEntity(ProductGroupOption, payload, { entityType: "menu_product_group_option", actor });
-  await writeMenuAudit({
-    entityType: "menu_product_group_option",
-    entityId: row.id,
-    action: "product_group_option_attached",
-    actor,
-    meta: { productId, groupId, optionId: payload.optionId },
-  });
-  return row;
+function createProductGroupOption(productId, groupId, body, actor) {
+  return menuCatalogAdminService.createProductGroupOption(productId, groupId, body, actor);
 }
 
-async function deleteProductGroupOption(productId, groupId, optionId, actor = {}) {
-  assertObjectId(productId);
-  assertObjectId(groupId);
-  assertObjectId(optionId);
-  const result = await ProductGroupOption.deleteOne({ productId, groupId, optionId });
-  if (result.deletedCount > 0) {
-    await writeMenuAudit({ entityType: "menu_product_group_option", entityId: productId, action: "product_group_option_detached", actor, meta: { productId, groupId, optionId } });
-  }
-  return { deleted: result.deletedCount };
+function deleteProductGroupOption(productId, groupId, optionId, actor) {
+  return menuCatalogAdminService.deleteProductGroupOption(productId, groupId, optionId, actor);
 }
 
-async function updateProductGroupOption(productId, groupId, optionId, body, actor = {}, action = null) {
-  assertObjectId(productId, "productId");
-  assertObjectId(groupId, "groupId");
-  assertObjectId(optionId, "optionId");
-  
-  const existing = await ProductGroupOption.findOne({ productId, groupId, optionId }).lean();
-  if (!existing) throw new MenuNotFoundError("Product group option relation not found");
-
-  const payload = normalizeProductGroupOptionRelationPayload({ ...body, productId, groupId, optionId }, existing);
-  
-  // Use findOneAndUpdate as requested for atomic update and explicit query
-  const updated = await ProductGroupOption.findOneAndUpdate(
-    { productId, groupId, optionId },
-    { $set: payload },
-    { new: true }
-  ).lean();
-
-  if (!updated) throw new MenuNotFoundError("Product group option relation not found during update");
-
-  await writeMenuAudit({
-    entityType: "menu_product_group_option",
-    entityId: updated._id,
-    action: action || changeAction(payload, "product_group_option_override_changed"),
-    before: existing,
-    after: updated,
-    actor,
-    meta: { productId, groupId, optionId },
-  });
-
-  return serializeDoc(updated);
+function updateProductGroupOption(productId, groupId, optionId, body, actor, action) {
+  return menuCatalogAdminService.updateProductGroupOption(productId, groupId, optionId, body, actor, action);
 }
 
 function updateEntityField(Model, id, fieldName, value, options) {
