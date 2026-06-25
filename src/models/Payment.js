@@ -8,7 +8,7 @@ function normalizeOptionalProviderIdentifier(value) {
 
 const PaymentSchema = new mongoose.Schema(
   {
-    provider: { type: String, enum: ["moyasar"], required: true },
+    provider: { type: String, enum: ["moyasar", "cash"], required: true },
     type: {
       type: String,
       enum: [
@@ -41,6 +41,9 @@ const PaymentSchema = new mongoose.Schema(
     metadata: { type: mongoose.Schema.Types.Mixed },
     applied: { type: Boolean, default: false },
     paidAt: { type: Date },
+    method: { type: String, trim: true },
+    source: { type: String, trim: true },
+    collectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "DashboardUser" },
     operationScope: { type: String, trim: true },
     operationIdempotencyKey: { type: String, trim: true },
     operationRequestHash: { type: String, trim: true },

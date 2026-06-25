@@ -1021,6 +1021,221 @@ Handle 400 invalid payload/date/ID, 401/403 auth, 404 missing entity, 409 lifecy
 
 Money: `104500` halala → `1,045.00 ر.س`. Date: send `2026-07-01`; timestamp display converts an ISO instant to `Asia/Riyadh` without changing business-date strings.
 
+## Dashboard cash subscription creation
+
+### Backend status
+`READY` (Backend + Docs only; Dashboard frontend implementation pending).
+
+### Feature purpose
+Allows Dashboard cashiers and admins to create a paid cash subscription for an existing app user who pays cash in person at the restaurant. The backend dynamically recalculates the quote server-side, validates that the collected cash amount exactly matches the quote total, activates the subscription as paid/active, records a linked Payment record, and generates an audit log.
+
+### Roles
+- `admin`: allowed
+- `superadmin`: allowed
+- `cashier`: allowed ONLY for customer search/select (`GET /api/dashboard/users`), subscription quote (`POST /api/dashboard/subscriptions/quote`), and cash-paid subscription creation (`POST /api/dashboard/subscriptions`). Cashiers are strictly denied access to cancel, extend, freeze, unfreeze, skip, unskip, balance editing, refunds, arbitrary price overrides, non-cash paid marking, or payment gateway success marking.
+
+### Customer must already exist
+- `customerId` / `userId` must reference an existing app user.
+- Do not allow subscription creation by phone only.
+- Do not create a new user in this flow.
+- Customer search endpoint: `GET /api/dashboard/users?q=` (searches by name, phone, or email).
+
+### Endpoints
+
+#### Quote Endpoint
+```http
+POST /api/dashboard/subscriptions/quote
+```
+
+#### Create Endpoint
+```http
+POST /api/dashboard/subscriptions
+```
+
+### Exact Payloads
+
+#### Quote Payload
+```json
+{
+  "userId": "USER_ID",
+  "planId": "PLAN_ID",
+  "startDate": "2026-06-25",
+  "grams": 150,
+  "mealsPerDay": 2,
+  "deliveryMode": "pickup",
+  "branchId": "BRANCH_ID",
+  "premiumItems": [
+    {
+      "premiumKey": "beef_steak",
+      "qty": 2
+    }
+  ],
+  "addons": [
+    {
+      "addonId": "ADDON_ID",
+      "qty": 4
+    }
+  ]
+}
+```
+
+#### Create Cash Subscription Payload & Exact Payment Fields
+```json
+{
+  "userId": "USER_ID",
+  "planId": "PLAN_ID",
+  "startDate": "2026-06-25",
+  "grams": 150,
+  "mealsPerDay": 2,
+  "deliveryMode": "pickup",
+  "branchId": "BRANCH_ID",
+  "premiumItems": [
+    {
+      "premiumKey": "beef_steak",
+      "qty": 2
+    }
+  ],
+  "addons": [
+    {
+      "addonId": "ADDON_ID",
+      "qty": 4
+    }
+  ],
+  "payment": {
+    "method": "cash",
+    "status": "paid",
+    "collectedAmountHalala": 250000,
+    "paidAt": "2026-06-24T12:00:00.000Z"
+  },
+  "source": "dashboard_cashier",
+  "idempotencyKey": "dashboard-cash-subscription-unique-key"
+}
+```
+
+### Responses
+
+#### Quote Success Response
+```json
+{
+  "status": true,
+  "data": {
+    "currency": "SAR",
+    "moneyUnit": "halala",
+    "totalHalala": 250000,
+    "plan": {
+      "id": "PLAN_ID",
+      "name": "Plan Name",
+      "daysCount": 12,
+      "currency": "SAR"
+    },
+    "breakdown": {
+      "basePlanPriceHalala": 200000,
+      "subtotalBeforeVatHalala": 250000,
+      "subtotalHalala": 250000,
+      "vatPercentage": 0,
+      "vatHalala": 0,
+      "totalHalala": 250000,
+      "currency": "SAR"
+    },
+    "allowedPaymentMethods": ["cash"]
+  }
+}
+```
+
+#### Create Success Response DTO
+```json
+{
+  "status": true,
+  "data": {
+    "id": "SUBSCRIPTION_ID",
+    "status": "active",
+    "totalMeals": 24,
+    "remainingMeals": 24,
+    "checkoutCurrency": "SAR",
+    "totalPriceHalala": 250000
+  },
+  "meta": {
+    "createdByAdmin": true
+  }
+}
+```
+
+#### Error Responses
+
+##### Mismatch Error Response
+```json
+{
+  "status": false,
+  "message": "Collected amount does not match quote total",
+  "messageAr": "المبلغ المحصل لا يطابق إجمالي عرض السعر"
+}
+```
+
+##### Customer Not Found Response
+```json
+{
+  "status": false,
+  "message": "Customer account was not found",
+  "messageAr": "العميل غير موجود. يجب أن يكون لدى العميل حساب في التطبيق أولًا."
+}
+```
+
+### Required Dashboard Form Sections
+
+| Section | Fields |
+| --- | --- |
+| اختيار العميل | search existing customer |
+| اختيار الباقة | plan select |
+| طريقة الاستلام | pickup/delivery select |
+| الترقيات المميزة | multi-select + qty |
+| الإضافات | multi-select + qty |
+| عرض السعر | readonly backend quote |
+| الدفع النقدي | cash payment confirmation |
+
+### Required Arabic Labels
+* `اختيار العميل`
+* `ابحث برقم الجوال أو الاسم`
+* `العميل المحدد`
+* `العميل غير موجود. يجب أن يكون لدى العميل حساب في التطبيق أولًا.`
+* `اختيار الباقة`
+* `طريقة الاستلام`
+* `استلام من الفرع`
+* `توصيل`
+* `الترقيات المميزة`
+* `الوجبات المميزة لا تزيد إجمالي عدد الوجبات`
+* `الإضافات`
+* `الإضافات منفصلة عن الوجبات`
+* `احسب السعر`
+* `عرض السعر`
+* `جميع الأسعار محسوبة من النظام`
+* `الدفع`
+* `طريقة الدفع`
+* `كاش`
+* `المبلغ المحصل`
+* `تأكيد إنشاء الاشتراك`
+* `تم إنشاء الاشتراك وتسجيل الدفع النقدي بنجاح`
+* `المبلغ المحصل لا يطابق إجمالي عرض السعر`
+
+### Premium upgrades and add-ons business rules
+- Premium upgrades are meal-slot upgrades, not extra meals.
+- Premium upgrades must not increase total meal count.
+- Add-ons are separate entitlements/balances.
+- Add-ons must not decrement regular meals.
+- Add-ons must not decrement premium meals.
+- Backend owns pricing. Dashboard must not calculate total.
+
+### Mobile compatibility
+The created subscription is fully compatible and visible to mobile through existing mobile read APIs without Flutter changes.
+
+### Accounting impact
+`ACCOUNTING_SUBSCRIPTION_CASH_REVENUE_PENDING`
+
+### Unsupported/future features
+- Dashboard frontend implementation is pending (Backend + Docs only).
+- Partial cash payments are rejected.
+- Creating unpaid subscriptions via cash flow is unsupported.
+- Arbitrary price overrides by cashier are unsupported.
+
 ## 14. Unsupported / future features
 
 - Dashboard implementation is pending.

@@ -47,6 +47,8 @@ router.get("/orders/:id", dashboardAdminOrCashierRead, asyncHandler(controller.g
 router.get("/payments", dashboardAdminOrCashierRead, asyncHandler(controller.listPaymentsAdmin));
 router.get("/payments/:id/breakdown", dashboardAdminOrCashierRead, asyncHandler(controller.getPaymentAdmin));
 router.get("/payments/:id", dashboardAdminOrCashierRead, asyncHandler(controller.getPaymentAdmin));
+router.post("/subscriptions/quote", dashboardAdminOrCashierRead, asyncHandler(controller.quoteSubscriptionAdmin));
+router.post("/subscriptions", dashboardAdminOrCashierRead, asyncHandler(controller.createSubscriptionAdmin));
 router.post("/payments/:id/verify", dashboardRoleMiddleware(["admin"]), asyncHandler(controller.verifyPaymentAdmin));
 
 router.use(dashboardRoleMiddleware(["admin"]));
@@ -400,8 +402,6 @@ router.put("/users/:id", asyncHandler(controller.updateAppUser));
 router.get("/subscriptions/summary", asyncHandler(controller.getSubscriptionsSummaryAdmin));
 router.get("/subscriptions/export", asyncHandler(controller.exportSubscriptionsAdmin));
 router.get("/subscriptions", asyncHandler(controller.listSubscriptionsAdmin));
-router.post("/subscriptions/quote", asyncHandler(controller.quoteSubscriptionAdmin));
-router.post("/subscriptions", asyncHandler(controller.createSubscriptionAdmin));
 router.get("/subscriptions/:id/days", asyncHandler(controller.listSubscriptionDaysAdmin));
 router.get("/subscriptions/:id/audit-log", asyncHandler(controller.getSubscriptionAuditLogAdmin));
 router.get("/subscriptions/:id", asyncHandler(controller.getSubscriptionAdmin));

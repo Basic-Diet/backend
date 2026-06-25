@@ -380,6 +380,7 @@ function buildCanonicalActivationPayload({ userId, planId, contractVersion, cont
         : null,
     premiumBalance: premiumBalanceRows,
     addonSubscriptions,
+    addonBalance: legacyRuntimeData.addonBalance || [],
     deliveryMode: (delivery.mode || legacyDelivery.type) === "pickup" ? "pickup" : "delivery",
     deliveryAddress: Object.prototype.hasOwnProperty.call(delivery, "address") ? delivery.address || undefined : (legacyDelivery.address || undefined),
     deliveryWindow: slot.window ? String(slot.window) : undefined,

@@ -1469,6 +1469,10 @@ function serializeDashboardQuote(quote, lang) {
       currency: quote.breakdown.currency || "SAR",
     }),
     validation: { status: true },
+    currency: quote.breakdown.currency || "SAR",
+    moneyUnit: "halala",
+    totalHalala: quote.breakdown.totalHalala,
+    allowedPaymentMethods: ["cash"],
   };
 }
 
@@ -1658,9 +1662,19 @@ async function createSubscriptionAdmin(req, res, nextOrRuntimeOverrides = null, 
     return undefined;
   }
 
+  if (req.dashboardUserRole === "cashier") {
+    if (!body.payment || body.payment.method !== "cash") {
+      return errorResponse(res, 403, "FORBIDDEN", "Cashier role is only allowed to create cash-paid subscriptions");
+    }
+  }
+
   const user = await runtime.findClientUserById(userId);
   if (!user) {
-    return errorResponse(res, 404, "NOT_FOUND", "App user not found");
+    return res.status(404).json({
+      status: false,
+      message: "Customer account was not found",
+      messageAr: "العميل غير موجود. يجب أن يكون لدى العميل حساب في التطبيق أولًا."
+    });
   }
   if (user.isActive === false) {
     return errorResponse(res, 409, "INVALID", "App user is inactive");
@@ -1759,6 +1773,40 @@ async function createSubscriptionAdmin(req, res, nextOrRuntimeOverrides = null, 
       session,
     });
 
+    if (body.payment && body.payment.method === "cash") {
+      if (body.payment.status !== "paid") {
+        await session.abortTransaction();
+        session.endSession();
+        return errorResponse(res, 400, "INVALID", "Cash payment status must be paid");
+      }
+      if (Number(body.payment.collectedAmountHalala) !== Number(quote.breakdown.totalHalala)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          status: false,
+          message: "Collected amount does not match quote total",
+          messageAr: "المبلغ المحصل لا يطابق إجمالي عرض السعر"
+        });
+      }
+
+      await Payment.create([{
+        provider: "cash",
+        type: "subscription_activation",
+        status: "paid",
+        amount: Number(body.payment.collectedAmountHalala),
+        currency: quote.breakdown.currency || "SAR",
+        userId: user._id,
+        subscriptionId: subscription._id,
+        paidAt: body.payment.paidAt ? new Date(body.payment.paidAt) : new Date(),
+        method: "cash",
+        source: body.source || "dashboard_cashier",
+        collectedBy: req.dashboardUserId,
+        applied: true
+      }], { session });
+
+      subscription.status = "active";
+      await subscription.save({ session });
+    }
 
     await session.commitTransaction();
     session.endSession();
@@ -1786,6 +1834,30 @@ async function createSubscriptionAdmin(req, res, nextOrRuntimeOverrides = null, 
         startDate: dateUtils.toKSADateString(startDate),
       },
     });
+
+    if (body.payment && body.payment.method === "cash") {
+      const paymentDoc = await Payment.findOne({ subscriptionId: subscription._id, provider: "cash" }).lean();
+      await runtime.writeActivityLogSafely({
+        entityType: "subscription",
+        entityId: subscription._id,
+        action: "subscription_cash_payment_collected",
+        byUserId: req.dashboardUserId,
+        byRole: req.dashboardUserRole,
+        meta: {
+          userId: String(user._id),
+          subscriptionId: String(subscription._id),
+          paymentId: paymentDoc ? String(paymentDoc._id) : null,
+          quoteTotal: quote.breakdown.totalHalala,
+          collectedAmount: body.payment.collectedAmountHalala,
+          paymentMethod: "cash",
+          source: body.source || "dashboard_cashier",
+          premiumItems: body.premiumItems || [],
+          addons: body.addons || [],
+          fulfillmentMethod: body.fulfillmentMethod || body.deliveryMode || "pickup",
+          createdAt: new Date(),
+        },
+      }, { subscriptionId: String(subscription._id) });
+    }
 
     return res.status(201).json({
       status: true,

@@ -72,9 +72,9 @@ router.use("/dashboard/subscriptions", dashboardSubscriptionRoutes);
 router.use("/dashboard/accounting", dashboardAccountingRoutes);
 router.use("/dashboard/orders", dashboardOrderRoutes);
 router.use("/dashboard", dashboardBoardRoutes);
+router.use("/dashboard", adminRoutes);
 router.use("/dashboard/menu-identities-audit", dashboardMenuIdentityRoutes); // For internal audit
 router.use("/dashboard", dashboardMenuIdentityRoutes);
-router.use("/dashboard", adminRoutes);
 router.use("/admin", adminRoutes);
 router.use("/health", healthRoutes);
 router.use("/client", clientRoutes);
