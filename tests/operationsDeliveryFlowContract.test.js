@@ -23,6 +23,7 @@ const Zone = require("../src/models/Zone");
 const Setting = require("../src/models/Setting");
 const { DASHBOARD_JWT_SECRET } = require("../src/services/dashboardTokenService");
 const dateUtils = require("../src/utils/date");
+const TODAY_STR = dateUtils.getTodayKSADate();
 
 const TEST_TAG = `ops-deliv-flow-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const results = { passed: 0, failed: 0 };
@@ -156,7 +157,7 @@ async function seedBaseData() {
 
   const deliveryDay = await SubscriptionDay.create({
     subscriptionId: deliverySub._id,
-    date: "2026-06-20",
+    date: TODAY_STR,
     status: "open",
     mealSlots: [
       { slotIndex: 1, slotKey: "slot_1", selectionType: "standard_meal", status: "complete" },
@@ -187,7 +188,7 @@ async function seedBaseData() {
 
   const pickupDay = await SubscriptionDay.create({
     subscriptionId: pickupSub._id,
-    date: "2026-06-20",
+    date: TODAY_STR,
     status: "open",
     mealSlots: [
       { slotIndex: 1, slotKey: "slot_1", selectionType: "standard_meal", status: "complete" }
@@ -198,7 +199,7 @@ async function seedBaseData() {
 }
 
 async function seedAuthUsers() {
-  for (const role of ["superadmin", "admin", "kitchen", "courier"]) {
+  for (const role of ["superadmin", "admin", "kitchen", "courier", "cashier"]) {
     const authObj = await dashboardAuth(role, TEST_TAG);
     dashboardUsers.set(role, authObj.user);
   }
@@ -234,7 +235,7 @@ async function runTests() {
   // Section 3: Operations Queue list assertions
   await test("Operations list includes delivery and pickup days with correct DTO fields", async () => {
     const res = await request(app)
-      .get("/api/dashboard/ops/list?date=2026-06-20")
+      .get(`/api/dashboard/ops/list?date=${TODAY_STR}`)
       .set(auth("admin"));
     expectStatus(res, 200, "ops list");
 
@@ -326,7 +327,7 @@ async function runTests() {
     assert.strictEqual(deliv.customerPhone, seedData.client.phone);
     assert.strictEqual(deliv.status, "ready_for_delivery");
     assert.strictEqual(deliv.preparationStatus, "ready_for_delivery");
-    assert.strictEqual(deliv.scheduledDate, "2026-06-20");
+    assert.strictEqual(deliv.scheduledDate, TODAY_STR);
 
     // Assert counts are mapped from populated dayId
     assert.strictEqual(deliv.mealCount, 2, "Meal count should map to selections length");
@@ -361,13 +362,13 @@ async function runTests() {
     });
     const tempDay = await SubscriptionDay.create({
       subscriptionId: tempSub._id,
-      date: "2026-06-20",
+      date: TODAY_STR,
       status: "open",
     });
     const tempDelivery = await Delivery.create({
       subscriptionId: tempSub._id,
       dayId: tempDay._id,
-      date: "2026-06-20",
+      date: TODAY_STR,
       status: "scheduled",
     });
 
@@ -469,13 +470,13 @@ async function runTests() {
     });
     const tempDay = await SubscriptionDay.create({
       subscriptionId: tempSub._id,
-      date: "2026-06-20",
+      date: TODAY_STR,
       status: "ready_for_delivery",
     });
     const tempDelivery = await Delivery.create({
       subscriptionId: tempSub._id,
       dayId: tempDay._id,
-      date: "2026-06-20",
+      date: TODAY_STR,
       status: "ready_for_delivery",
     });
 
@@ -510,7 +511,7 @@ async function runTests() {
   await test("Branch pickup allowedActions and transition constraints when pickup request is missing vs present", async () => {
     // 1. Verify GET /api/dashboard/ops/list does not return "prepare", "ready_for_pickup", or "fulfill" for raw pickup subscription day
     const listRes = await request(app)
-      .get("/api/dashboard/ops/list?date=2026-06-20")
+      .get(`/api/dashboard/ops/list?date=${TODAY_STR}`)
       .set(auth("admin"));
     expectStatus(listRes, 200, "ops list for branch pickup check");
     const items = listRes.body.data;
@@ -555,7 +556,7 @@ async function runTests() {
       subscriptionId: seedData.pickupSub._id,
       subscriptionDayId: seedData.pickupDay._id,
       userId: seedData.client._id,
-      date: "2026-06-20",
+      date: TODAY_STR,
       mealCount: 1,
       status: "locked",
       creditsReserved: true,
@@ -566,7 +567,7 @@ async function runTests() {
     // The raw subscription_day should now be filtered out because a pickup request exists for it,
     // and instead the subscription_pickup_request DTO should be in the list.
     const listResWithRequest = await request(app)
-      .get("/api/dashboard/ops/list?date=2026-06-20")
+      .get(`/api/dashboard/ops/list?date=${TODAY_STR}`)
       .set(auth("admin"));
     expectStatus(listResWithRequest, 200, "ops list with pickup request");
     const itemsWithRequest = listResWithRequest.body.data;
@@ -603,7 +604,7 @@ async function runTests() {
     });
     const tempDay = await SubscriptionDay.create({
       subscriptionId: tempSub._id,
-      date: "2026-06-20",
+      date: TODAY_STR,
       status: "open",
       mealSlots: [
         { slotIndex: 1, slotKey: "slot_1", selectionType: "standard_meal", status: "complete" }
@@ -646,7 +647,7 @@ async function runTests() {
 
     // Assertion 4: After calling ready_for_delivery, GET /api/dashboard/ops/list exposes dispatch.
     const listRes = await request(app)
-      .get("/api/dashboard/ops/list?date=2026-06-20")
+      .get(`/api/dashboard/ops/list?date=${TODAY_STR}`)
       .set(auth("admin"));
     expectStatus(listRes, 200, "ops list check for dispatch");
     const items = listRes.body.data;
@@ -667,6 +668,35 @@ async function runTests() {
     await Subscription.deleteOne({ _id: tempSub._id });
     await SubscriptionDay.deleteOne({ _id: tempDay._id });
     await Delivery.deleteOne({ dayId: tempDay._id });
+  });
+
+  // Section 10: Direct Controller Security Contract
+  await test("Direct Controller Security Contract: Courier delivery action with valid courier role still works / missing role rejected with 403", async () => {
+    const courierController = require("../src/controllers/courierController");
+    const orderCourierController = require("../src/controllers/orderCourierController");
+
+    // Test 1: Courier delivery action with missing req.userRole is rejected with 403
+    let statusVal = null;
+    let jsonVal = null;
+    const resMock = {
+      status(s) { statusVal = s; return this; },
+      json(j) { jsonVal = j; return this; }
+    };
+    await courierController.markArrivingSoon({ params: { id: new mongoose.Types.ObjectId() } }, resMock);
+    assert.strictEqual(statusVal, 403, "Missing req.userRole in courierController must return 403");
+    assert.strictEqual(jsonVal.message, "Forbidden");
+
+    // Test 2: Order courier action with missing req.userRole is rejected with 403
+    await orderCourierController.markDelivered({ params: { id: new mongoose.Types.ObjectId() } }, resMock);
+    assert.strictEqual(statusVal, 403, "Missing req.userRole in orderCourierController must return 403");
+    assert.strictEqual(jsonVal.message, "Forbidden");
+
+    // Test 3: Cashier cannot perform courier-only delivery actions
+    await courierController.markCollect({ params: { id: new mongoose.Types.ObjectId() }, userRole: "cashier" }, resMock);
+    assert.strictEqual(statusVal, 403, "Cashier performing courier action must return 403");
+
+    await orderCourierController.markDelivered({ params: { id: new mongoose.Types.ObjectId() }, userRole: "cashier" }, resMock);
+    assert.strictEqual(statusVal, 403, "Cashier performing order courier action must return 403");
   });
 
   await cleanup();

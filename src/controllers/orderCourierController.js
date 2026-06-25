@@ -19,8 +19,18 @@ const errorResponse = require("../utils/errorResponse");
 const { ORDER_STATUSES } = require("../utils/orderState");
 const { getOrderFulfillmentMethod, shouldBlockOneTimeOrderDelivery } = require("../utils/oneTimeOrderDeliveryGate");
 const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
+const { ACTION_REGISTRY } = require("../services/dashboard/opsActionPolicy");
 
-async function listTodayOrders(_req, res) {
+async function listTodayOrders(req, res) {
+  if (!req.userRole) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
   try {
     const today = getTodayKSADate();
     const orders = await Order.find({
@@ -65,6 +75,25 @@ async function listTodayOrders(_req, res) {
 }
 
 async function markArrivingSoon(req, res) {
+  if (!req.userRole) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
+  const allowedRoles = (ACTION_REGISTRY["notify_arrival"] && ACTION_REGISTRY["notify_arrival"].roles) || ["superadmin", "admin", "courier"];
+  if (!allowedRoles.includes(req.userRole)) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
   try {
     validateObjectId(req.params.id, "orderId");
   } catch (err) {
@@ -75,6 +104,10 @@ async function markArrivingSoon(req, res) {
     const order = await Order.findById(req.params.id);
     if (!order) {
       return errorResponse(res, 404, "NOT_FOUND", "Order not found");
+    }
+    const targetBusinessDate = order.fulfillmentDate || order.deliveryDate || order.scheduledDate || order.date;
+    if (targetBusinessDate && targetBusinessDate < getTodayKSADate()) {
+      return errorResponse(res, 409, "HISTORICAL_MUTATION_FORBIDDEN", "Historical operational records cannot be modified");
     }
     if (shouldBlockOneTimeOrderDelivery(order)) {
       return errorResponse(res, 409, "DELIVERY_NOT_SUPPORTED", "One-time order delivery is disabled");
@@ -162,6 +195,25 @@ async function markArrivingSoon(req, res) {
 }
 
 async function markDelivered(req, res) {
+  if (!req.userRole) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
+  const allowedRoles = (ACTION_REGISTRY["fulfill"] && ACTION_REGISTRY["fulfill"].roles) || ["superadmin", "admin", "courier"];
+  if (!allowedRoles.includes(req.userRole)) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
   try {
     validateObjectId(req.params.id, "orderId");
   } catch (err) {
@@ -170,6 +222,12 @@ async function markDelivered(req, res) {
   const gateOrder = await Order.findById(req.params.id).lean();
   if (!gateOrder) {
     return errorResponse(res, 404, "NOT_FOUND", "Order not found");
+  }
+  const targetBusinessDate = gateOrder.fulfillmentDate || gateOrder.deliveryDate || gateOrder.scheduledDate || gateOrder.date;
+  if (targetBusinessDate && targetBusinessDate < getTodayKSADate()) {
+    if (gateOrder.status !== "fulfilled") {
+      return errorResponse(res, 409, "HISTORICAL_MUTATION_FORBIDDEN", "Historical operational records cannot be modified");
+    }
   }
   if (shouldBlockOneTimeOrderDelivery(gateOrder)) {
     return errorResponse(res, 409, "DELIVERY_NOT_SUPPORTED", "One-time order delivery is disabled");
@@ -264,6 +322,25 @@ async function markDelivered(req, res) {
 }
 
 async function markCancelled(req, res) {
+  if (!req.userRole) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
+  const allowedRoles = (ACTION_REGISTRY["cancel"] && ACTION_REGISTRY["cancel"].roles) || ["superadmin", "admin", "courier"];
+  if (!allowedRoles.includes(req.userRole)) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
   try {
     validateObjectId(req.params.id, "orderId");
   } catch (err) {
@@ -272,6 +349,12 @@ async function markCancelled(req, res) {
   const gateOrder = await Order.findById(req.params.id).lean();
   if (!gateOrder) {
     return errorResponse(res, 404, "NOT_FOUND", "Order not found");
+  }
+  const targetBusinessDate = gateOrder.fulfillmentDate || gateOrder.deliveryDate || gateOrder.scheduledDate || gateOrder.date;
+  if (targetBusinessDate && targetBusinessDate < getTodayKSADate()) {
+    if (gateOrder.status !== ORDER_STATUSES.CANCELLED && gateOrder.status !== "canceled") {
+      return errorResponse(res, 409, "HISTORICAL_MUTATION_FORBIDDEN", "Historical operational records cannot be modified");
+    }
   }
   if (shouldBlockOneTimeOrderDelivery(gateOrder)) {
     return errorResponse(res, 409, "DELIVERY_NOT_SUPPORTED", "One-time order delivery is disabled");

@@ -9,6 +9,7 @@ const { executeDashboardOrderAction } = require("../../services/orders/orderDash
 const { validateSubscriptionDayOperationalGate } = require("../../services/dashboard/subscriptionDayOperationalGateService");
 const errorResponse = require("../../utils/errorResponse");
 const { getRequestLang } = require("../../utils/i18n");
+const dateUtils = require("../../utils/date");
 // Settlement on read is DISABLED — see pastSubscriptionDaySettlementService.js
 
 /**
@@ -71,6 +72,17 @@ async function handleAction(req, res) {
       if (!doc) {
         return errorResponse(res, 404, "NOT_FOUND", "Entity not found");
       }
+      const targetBusinessDate = doc.date || doc.fulfillmentDate || doc.deliveryDate || doc.scheduledDate || doc.pickupDate || doc.serviceDate;
+      if (targetBusinessDate && targetBusinessDate < dateUtils.getTodayKSADate()) {
+        let isIdempotentReplay = false;
+        if (action === "fulfill" && doc.status === "fulfilled") isIdempotentReplay = true;
+        if (action === "no_show" && doc.status === "no_show") isIdempotentReplay = true;
+        if (action === "cancel" && ["canceled", "cancelled", "delivery_canceled", "canceled_at_branch", "no_show"].includes(doc.status)) isIdempotentReplay = true;
+        const isAdminNoShow = action === "no_show" && ["admin", "superadmin"].includes(String(role || ""));
+        if (!isIdempotentReplay && !isAdminNoShow) {
+          return errorResponse(res, 409, "HISTORICAL_MUTATION_FORBIDDEN", "Historical operational records cannot be modified");
+        }
+      }
       const validation = opsActionPolicy.validateAction({
         entityType,
         status: doc.status,
@@ -98,6 +110,17 @@ async function handleAction(req, res) {
       const doc = await Model.findById(entityId).lean();
       if (!doc) {
         return errorResponse(res, 404, "NOT_FOUND", "Entity not found");
+      }
+      const targetBusinessDate = doc.date || doc.fulfillmentDate || doc.deliveryDate || doc.scheduledDate || doc.pickupDate || doc.serviceDate;
+      if (targetBusinessDate && targetBusinessDate < dateUtils.getTodayKSADate()) {
+        let isIdempotentReplay = false;
+        if (action === "fulfill" && doc.status === "fulfilled") isIdempotentReplay = true;
+        if (action === "no_show" && doc.status === "no_show") isIdempotentReplay = true;
+        if (action === "cancel" && ["canceled", "cancelled", "delivery_canceled", "canceled_at_branch", "no_show"].includes(doc.status)) isIdempotentReplay = true;
+        const isAdminNoShow = action === "no_show" && ["admin", "superadmin"].includes(String(role || ""));
+        if (!isIdempotentReplay && !isAdminNoShow) {
+          return errorResponse(res, 409, "HISTORICAL_MUTATION_FORBIDDEN", "Historical operational records cannot be modified");
+        }
       }
 
       // 2. Validate action using Policy Engine
@@ -188,6 +211,12 @@ async function readyForDelivery(req, res) {
     const doc = await SubscriptionDay.findById(id).lean();
     if (!doc) {
       return errorResponse(res, 404, "NOT_FOUND", "Entity not found");
+    }
+    const targetBusinessDate = doc.date || doc.fulfillmentDate || doc.deliveryDate || doc.scheduledDate || doc.pickupDate || doc.serviceDate;
+    if (targetBusinessDate && targetBusinessDate < dateUtils.getTodayKSADate()) {
+      if (doc.status !== "ready_for_delivery") {
+        return errorResponse(res, 409, "HISTORICAL_MUTATION_FORBIDDEN", "Historical operational records cannot be modified");
+      }
     }
 
     const sub = await Subscription.findById(doc.subscriptionId)

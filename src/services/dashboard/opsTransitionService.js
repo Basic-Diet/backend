@@ -26,6 +26,7 @@ const {
 } = require("../subscription/subscriptionAccessGuardService");
 const { lockDaySnapshot } = require("../subscription/subscriptionDayOperationalSnapshotService");
 const { validateDayBeforeLockOrPrepare } = require("../subscription/subscriptionDayExecutionValidationService");
+const dateUtils = require("../../utils/date");
 
 /**
  * Unified Operations Transition Service.
@@ -59,8 +60,39 @@ async function executeAction(actionId, { entityId, entityType, userId, role, pay
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
+    const Model = normalizedEntityType === "subscription_pickup_request"
+      ? SubscriptionPickupRequest
+      : normalizedEntityType === "subscription"
+        ? SubscriptionDay
+        : Order;
+
+    const targetDoc = await Model.findById(entityId).session(session).lean();
+    if (!targetDoc) throw new Error("Entity not found");
+
+    const targetBusinessDate = targetDoc.date || targetDoc.fulfillmentDate || targetDoc.deliveryDate || targetDoc.scheduledDate || targetDoc.pickupDate || targetDoc.serviceDate;
+    if (!targetBusinessDate) {
+      logger.warn("Target operational document has no date field; not eligible for historical mutation guard", { entityId, entityType, actionId });
+    } else {
+      const currentKSABusinessDate = dateUtils.getTodayKSADate();
+      if (targetBusinessDate < currentKSABusinessDate) {
+        let isIdempotentReplay = false;
+        if (normalizedActionId === "fulfill" && targetDoc.status === "fulfilled") isIdempotentReplay = true;
+        if (normalizedActionId === "no_show" && targetDoc.status === "no_show") isIdempotentReplay = true;
+        if (normalizedActionId === "cancel" && ["canceled", "cancelled", "delivery_canceled", "canceled_at_branch", "no_show"].includes(targetDoc.status)) isIdempotentReplay = true;
+
+        const isAdminNoShow = normalizedActionId === "no_show" && ["admin", "superadmin"].includes(String(role || ""));
+
+        if (!isIdempotentReplay && !isAdminNoShow) {
+          const err = new Error("Historical operational records cannot be modified");
+          err.code = "HISTORICAL_MUTATION_FORBIDDEN";
+          err.status = 409;
+          throw err;
+        }
+      }
+    }
+
     if (normalizedEntityType === "order") {
-      const order = await Order.findById(entityId).session(session).lean();
+      const order = targetDoc;
       if (shouldBlockOneTimeOrderDelivery(order)) {
         throw createOneTimeOrderDeliveryDisabledError();
       }

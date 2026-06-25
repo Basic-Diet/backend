@@ -22,8 +22,28 @@ const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
 const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
 const opsTransitionService = require("../services/dashboard/opsTransitionService");
+const { ACTION_REGISTRY } = require("../services/dashboard/opsActionPolicy");
 
 async function executeCanonicalDeliveryAction(req, res, action, payload = {}) {
+  if (!req.userRole) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
+  const allowedRoles = (ACTION_REGISTRY[action] && ACTION_REGISTRY[action].roles) || ["superadmin", "admin", "courier"];
+  if (!allowedRoles.includes(req.userRole)) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
   const delivery = await Delivery.findById(req.params.id);
   if (!delivery) return errorResponse(res, 404, "NOT_FOUND", "Delivery not found");
   try {
@@ -31,7 +51,7 @@ async function executeCanonicalDeliveryAction(req, res, action, payload = {}) {
       entityId: delivery.dayId,
       entityType: "subscription",
       userId: req.dashboardUserId || req.userId,
-      role: req.userRole || "courier",
+      role: req.userRole,
       payload,
     });
     const updatedDelivery = await Delivery.findById(delivery._id);
@@ -56,6 +76,15 @@ function appendDeliveryCancellationAudit(day, actorId) {
 }
 
 async function listTodayDeliveries(req, res) {
+  if (!req.userRole) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
   try {
     const today = getTodayKSADate();
 
@@ -359,6 +388,15 @@ async function markDelivered(req, res) {
 }
 
 async function markCancelled(req, res) {
+  if (!req.userRole) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
   let canonicalCancellation;
   try {
     canonicalCancellation = parseDeliveryCancellationInput(req.body || {});
@@ -532,6 +570,25 @@ async function markCancelled(req, res) {
 }
 
 async function markPickup(req, res) {
+  if (!req.userRole) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
+  const allowedRoles = (ACTION_REGISTRY["pickup"] && ACTION_REGISTRY["pickup"].roles) || ["superadmin", "admin", "courier"];
+  if (!allowedRoles.includes(req.userRole)) {
+    return res.status(403).json({
+      ok: false,
+      status: false,
+      message: "Forbidden",
+      messageAr: "غير مصرح بتنفيذ هذا الإجراء",
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
   try {
     const { id } = req.params;
     try {
@@ -574,7 +631,7 @@ async function markPickup(req, res) {
       entityId: String(delivery.dayId),
       entityType: "subscription",
       userId: req.userId,
-      role: req.userRole || "courier",
+      role: req.userRole,
       payload: {},
     });
 

@@ -8,11 +8,27 @@ module.exports = (res, status, code, message, details) => {
         ? message.details
         : undefined;
 
+  const localizedMsg = localizeErrorMessage(message, res && res.req ? res.req : undefined);
+
+  if (code === "HISTORICAL_MUTATION_FORBIDDEN") {
+    return res.status(status || 409).json({
+      ok: false,
+      status: false,
+      message: localizedMsg || "Historical operational records cannot be modified",
+      messageAr: "لا يمكن تعديل سجلات تشغيلية تخص تاريخًا سابقًا",
+      error: {
+        code,
+        message: localizedMsg || "Historical operational records cannot be modified",
+        ...(resolvedDetails && { details: resolvedDetails }),
+      },
+    });
+  }
+
   return res.status(status).json({
     ok: false,
     error: {
       code,
-      message: localizeErrorMessage(message, res && res.req ? res.req : undefined),
+      message: localizedMsg,
       ...(resolvedDetails && { details: resolvedDetails }),
     },
   });
