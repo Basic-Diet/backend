@@ -4,7 +4,11 @@
 
 Status: `BACKEND_READY_DASHBOARD_PENDING`
 
-Backend-only Phase 1 is complete. Dashboard integration/rendering is pending; this document does not claim Dashboard readiness. Flutter/mobile contracts are unchanged.
+- Backend is ready.
+- Dashboard UI is pending.
+- Flutter UI is pending for password auth.
+- Current Dashboard should consume documented endpoints only.
+- Do not mark as fully `READY`.
 
 ## 2. Screen ownership
 
@@ -1023,38 +1027,87 @@ Money: `104500` halala → `1,045.00 ر.س`. Date: send `2026-07-01`; timestamp 
 
 ## Dashboard cash subscription creation
 
-### Backend status
-`READY` (Backend + Docs only; Dashboard frontend implementation pending).
+This section details the complete flow for creating a cash-paid subscription from the Dashboard:
 
-### Feature purpose
-Allows Dashboard cashiers and admins to create a paid cash subscription for an existing app user who pays cash in person at the restaurant. The backend dynamically recalculates the quote server-side, validates that the collected cash amount exactly matches the quote total, activates the subscription as paid/active, records a linked Payment record, and generates an audit log.
+1. Dashboard user searches for an existing customer.
+2. Customer must already have an app account.
+3. Dashboard user selects a plan/package.
+4. Dashboard user selects fulfillment method:
+   - pickup
+   - delivery
+5. Dashboard user selects premium upgrades if needed.
+6. Dashboard user selects add-ons if needed.
+7. Dashboard calls backend quote endpoint.
+8. Backend returns authoritative total.
+9. Customer pays cash.
+10. Dashboard sends create request with cash payment object.
+11. Backend recalculates quote server-side.
+12. Backend rejects partial/mismatched payments.
+13. Backend creates active/paid subscription.
+14. Backend creates cash Payment record.
+15. Backend creates ActivityLog.
+16. Customer sees subscription in mobile app through existing APIs.
 
-### Roles
-- `admin`: allowed
-- `superadmin`: allowed
-- `cashier`: allowed ONLY for customer search/select (`GET /api/dashboard/users`), subscription quote (`POST /api/dashboard/subscriptions/quote`), and cash-paid subscription creation (`POST /api/dashboard/subscriptions`). Cashiers are strictly denied access to cancel, extend, freeze, unfreeze, skip, unskip, balance editing, refunds, arbitrary price overrides, non-cash paid marking, or payment gateway success marking.
+### Key Architectural Guidelines
+- Premium upgrades do not add meals.
+- Add-ons are separate from meals.
+- Dashboard must not calculate totals.
+- Dashboard only displays halala as SAR by dividing by 100.
+- Flutter does not need backend contract changes for reading created subscriptions.
 
-### Customer must already exist
-- `customerId` / `userId` must reference an existing app user.
-- Do not allow subscription creation by phone only.
-- Do not create a new user in this flow.
-- Customer search endpoint: `GET /api/dashboard/users?q=` (searches by name, phone, or email).
+---
 
-### Endpoints
+## Required endpoints for this flow
 
-#### Quote Endpoint
+### A. Customer search
+
+Verified endpoint:
+
+```http
+GET /api/dashboard/users?q=
+```
+
+Purpose:
+Search existing customers by phone, name, or email.
+
+Roles:
+- admin
+- superadmin
+- cashier
+
+Query params table:
+
+| Param | Type | Required | Frontend control | Notes |
+|---|---|---:|---|---|
+| `q` | string | Yes | text/search input | phone/name/email |
+
+Request example:
+
+```http
+GET {{baseUrl}}/api/dashboard/users?q=0501234567
+Authorization: Bearer <dashboardToken>
+```
+
+Frontend notes:
+- Customer must already exist.
+- Do not create a subscription from a phone number only.
+- If no customer found, show:
+  `العميل غير موجود. يجب أن يكون لدى العميل حساب في التطبيق أولًا.`
+- Do not create a new app user inside subscription creation.
+
+### B. Quote
+
 ```http
 POST /api/dashboard/subscriptions/quote
 ```
 
-#### Create Endpoint
-```http
-POST /api/dashboard/subscriptions
-```
+Roles:
+- admin
+- superadmin
+- cashier
 
-### Exact Payloads
+Quote payload example:
 
-#### Quote Payload
 ```json
 {
   "userId": "USER_ID",
@@ -1079,7 +1132,56 @@ POST /api/dashboard/subscriptions
 }
 ```
 
-#### Create Cash Subscription Payload & Exact Payment Fields
+Quote response example:
+
+```json
+{
+  "status": true,
+  "data": {
+    "currency": "SAR",
+    "moneyUnit": "halala",
+    "totalHalala": 250000,
+    "plan": {
+      "id": "PLAN_ID",
+      "name": "Plan Name",
+      "daysCount": 12,
+      "currency": "SAR"
+    },
+    "breakdown": {
+      "basePlanPriceHalala": 200000,
+      "subtotalBeforeVatHalala": 250000,
+      "subtotalHalala": 250000,
+      "vatPercentage": 0,
+      "vatHalala": 0,
+      "totalHalala": 250000,
+      "currency": "SAR"
+    },
+    "allowedPaymentMethods": ["cash"]
+  }
+}
+```
+
+Frontend rules:
+- Call quote before create.
+- Do not submit cash create without quote.
+- Use `totalHalala` / `breakdown.totalHalala` from backend.
+- Display SAR only:
+  `SAR = halala / 100`
+- Do not calculate premium/add-on/plan total locally.
+
+### C. Create cash subscription
+
+```http
+POST /api/dashboard/subscriptions
+```
+
+Roles:
+- admin
+- superadmin
+- cashier
+
+Create payload example:
+
 ```json
 {
   "userId": "USER_ID",
@@ -1112,37 +1214,8 @@ POST /api/dashboard/subscriptions
 }
 ```
 
-### Responses
+Create response example:
 
-#### Quote Success Response
-```json
-{
-  "status": true,
-  "data": {
-    "currency": "SAR",
-    "moneyUnit": "halala",
-    "totalHalala": 250000,
-    "plan": {
-      "id": "PLAN_ID",
-      "name": "Plan Name",
-      "daysCount": 12,
-      "currency": "SAR"
-    },
-    "breakdown": {
-      "basePlanPriceHalala": 200000,
-      "subtotalBeforeVatHalala": 250000,
-      "subtotalHalala": 250000,
-      "vatPercentage": 0,
-      "vatHalala": 0,
-      "totalHalala": 250000,
-      "currency": "SAR"
-    },
-    "allowedPaymentMethods": ["cash"]
-  }
-}
-```
-
-#### Create Success Response DTO
 ```json
 {
   "status": true,
@@ -1160,9 +1233,8 @@ POST /api/dashboard/subscriptions
 }
 ```
 
-#### Error Responses
+Mismatch error:
 
-##### Mismatch Error Response
 ```json
 {
   "status": false,
@@ -1171,30 +1243,63 @@ POST /api/dashboard/subscriptions
 }
 ```
 
-##### Customer Not Found Response
+Customer not found error:
+
 ```json
 {
   "status": false,
   "message": "Customer account was not found",
-  "messageAr": "العميل غير موجود. يجب أن يكون لدى العميل حساب في التطبيق أولًا."
+  "messageAr": "العميل غير موجود. يجب أن يكون لدى العميل حساب في التطبيق أولا."
 }
 ```
 
-### Required Dashboard Form Sections
+Frontend rules:
+- Submit disabled until quote exists.
+- Submit disabled if collected amount does not equal quote total.
+- Phase 1 does not support partial payment.
+- Do not expose arbitrary price override.
+- Payment method is cash only in this flow.
+- Backend recalculates quote again on create.
 
-| Section | Fields |
-| --- | --- |
-| اختيار العميل | search existing customer |
-| اختيار الباقة | plan select |
-| طريقة الاستلام | pickup/delivery select |
-| الترقيات المميزة | multi-select + qty |
-| الإضافات | multi-select + qty |
-| عرض السعر | readonly backend quote |
-| الدفع النقدي | cash payment confirmation |
+---
 
-### Required Arabic Labels
+## Dashboard form guide
+
+### Required sections
+
+| Section | Arabic title | Fields / controls |
+|---|---|---|
+| Customer | `اختيار العميل` | search input, result list, selected customer card |
+| Plan | `اختيار الباقة` | plan select, plan summary |
+| Fulfillment | `طريقة الاستلام` | pickup/delivery select, branch selector, zone/address selector if delivery |
+| Premium upgrades | `الترقيات المميزة` | multi-select + quantity |
+| Add-ons | `الإضافات` | multi-select + quantity |
+| Quote | `عرض السعر` | quote button, readonly price breakdown |
+| Cash payment | `الدفع النقدي` | readonly cash method, collected amount, confirm button |
+
+### Document control types
+
+| Field | Arabic label | Control | Required | Options / Notes |
+|---|---|---|---:|---|
+| `userId` | العميل | search/select | Yes | from `GET /api/dashboard/users?q=` |
+| `planId` | الباقة | select | Yes | active plans only |
+| `startDate` | تاريخ البداية | date | Yes | `YYYY-MM-DD` |
+| `grams` | الجرامات | number/select | Depends on plan | backend validation |
+| `mealsPerDay` | عدد الوجبات يوميًا | number/select | Depends on plan | backend validation |
+| `deliveryMode` | طريقة الاستلام | select | Yes | `pickup`, `delivery` |
+| `branchId` | الفرع | select | Required for pickup | existing branch IDs |
+| `deliveryZoneId` | منطقة التوصيل | select | Required for delivery when used | existing zone IDs |
+| `premiumItems` | الترقيات المميزة | multi-select + qty | No | `premiumKey`, `qty` |
+| `addons` | الإضافات | multi-select + qty | No | `addonId`, `qty` |
+| `payment.method` | طريقة الدفع | readonly/select | Yes | `cash` only |
+| `payment.collectedAmountHalala` | المبلغ المحصل | money-halala | Yes | must equal quote total |
+| `source` | مصدر العملية | hidden | Yes | `dashboard_cashier` |
+| `idempotencyKey` | مفتاح منع التكرار | hidden/computed | Recommended | unique per submit attempt |
+
+### Arabic labels/messages
+
 * `اختيار العميل`
-* `ابحث برقم الجوال أو الاسم`
+* `ابحث برقم الجوال أو الاسم أو البريد الإلكتروني`
 * `العميل المحدد`
 * `العميل غير موجود. يجب أن يكون لدى العميل حساب في التطبيق أولًا.`
 * `اختيار الباقة`
@@ -1208,7 +1313,7 @@ POST /api/dashboard/subscriptions
 * `احسب السعر`
 * `عرض السعر`
 * `جميع الأسعار محسوبة من النظام`
-* `الدفع`
+* `الدفع النقدي`
 * `طريقة الدفع`
 * `كاش`
 * `المبلغ المحصل`
@@ -1216,25 +1321,181 @@ POST /api/dashboard/subscriptions
 * `تم إنشاء الاشتراك وتسجيل الدفع النقدي بنجاح`
 * `المبلغ المحصل لا يطابق إجمالي عرض السعر`
 
-### Premium upgrades and add-ons business rules
-- Premium upgrades are meal-slot upgrades, not extra meals.
-- Premium upgrades must not increase total meal count.
-- Add-ons are separate entitlements/balances.
-- Add-ons must not decrement regular meals.
-- Add-ons must not decrement premium meals.
-- Backend owns pricing. Dashboard must not calculate total.
+---
 
-### Mobile compatibility
-The created subscription is fully compatible and visible to mobile through existing mobile read APIs without Flutter changes.
+## Customer password support during subscription operations
 
-### Accounting impact
-`ACCOUNTING_SUBSCRIPTION_CASH_REVENUE_PENDING`
+A customer may come to the restaurant to subscribe in cash but may have forgotten their app password. Password reset is a separate account-management action and must not be mixed into subscription creation.
 
-### Unsupported/future features
-- Dashboard frontend implementation is pending (Backend + Docs only).
-- Partial cash payments are rejected.
-- Creating unpaid subscriptions via cash flow is unsupported.
-- Arbitrary price overrides by cashier are unsupported.
+Backend endpoint:
+
+```http
+POST /api/dashboard/users/:id/reset-password
+```
+
+Purpose:
+Admin/superadmin sets a new temporary password for an existing customer.
+
+Roles:
+- admin
+- superadmin
+
+Not allowed:
+- cashier
+- courier
+- kitchen
+
+Request body:
+
+```json
+{
+  "newPassword": "Temporary123!",
+  "confirmPassword": "Temporary123!",
+  "forcePasswordChange": true,
+  "reason": "Customer forgot password"
+}
+```
+
+Success response:
+
+```json
+{
+  "status": true,
+  "message": "Password reset successfully",
+  "messageAr": "تم إعادة تعيين كلمة المرور بنجاح",
+  "data": {
+    "userId": "USER_ID",
+    "forcePasswordChange": true,
+    "passwordSetAt": "2026-06-25T12:00:00.000Z"
+  }
+}
+```
+
+Forbidden response:
+
+```json
+{
+  "status": false,
+  "message": "Forbidden",
+  "messageAr": "ليس لديك صلاحية لإعادة تعيين كلمة مرور العميل"
+}
+```
+
+Customer not found response:
+
+```json
+{
+  "status": false,
+  "message": "Customer account was not found",
+  "messageAr": "العميل غير موجود"
+}
+```
+
+Frontend rules:
+- Admin/superadmin only can see reset password action.
+- Cashier must not see reset password action.
+- Do not display old password.
+- Do not request old password.
+- Do not show or store `passwordHash`.
+- New password must be min 8 characters.
+- `confirmPassword` must match.
+- `forcePasswordChange` should default to `true`.
+- Show Arabic success/error messages.
+- After reset, tell customer to login with temporary password and change it in the app.
+- This action should be available from customer/account context, not from subscription lifecycle actions.
+- It may be linked from subscription create selected customer card only for admin/superadmin.
+
+Suggested Arabic UI labels:
+* `إعادة تعيين كلمة المرور`
+* `كلمة المرور المؤقتة`
+* `تأكيد كلمة المرور`
+* `سبب إعادة التعيين`
+* `إجبار العميل على تغيير كلمة المرور بعد الدخول`
+* `تم إعادة تعيين كلمة المرور بنجاح`
+* `ليس لديك صلاحية لإعادة تعيين كلمة مرور العميل`
+
+---
+
+## Authentication notes for customer accounts
+
+- OTP is disabled/configurable, not deleted.
+- Password auth is now the primary customer auth backend mode.
+- Environment flags:
+  - `AUTH_OTP_ENABLED=false`
+  - `AUTH_PASSWORD_LOGIN_ENABLED=true`
+- Dashboard admin auth is separate and unchanged.
+- Customer password reset is admin/superadmin only.
+- Cashier cash subscription creation remains allowed, but cashier password reset is denied.
+- Do not build OTP send/verify actions into the subscription screen.
+- Do not send SMS from dashboard subscription flow.
+
+Mention customer mobile auth endpoints only as context, not Dashboard implementation:
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/change-password`
+
+`Flutter auth README will document mobile screens separately.`
+
+---
+
+## Role matrix
+
+| Action | Admin | Superadmin | Cashier | Notes |
+|---|---|---|---:|---|
+| Search customer | Yes | Yes | Yes | `GET /api/dashboard/users?q=` |
+| Quote subscription | Yes | Yes | Yes | backend-owned pricing |
+| Create cash subscription | Yes | Yes | Yes | cash only for cashier |
+| Reset customer password | Yes | Yes | No | account action, not subscription lifecycle |
+| Cancel subscription | Yes | Yes | No | lifecycle action |
+| Extend subscription | Yes | Yes | No | lifecycle action |
+| Freeze/unfreeze | Yes | Yes | No | lifecycle action |
+| Skip/unskip day | Yes | Yes | No | lifecycle action |
+| Edit balances | Yes | Yes | No | if supported |
+| Manual deduction | According to existing contract | According to existing contract | According to existing contract | do not change |
+
+---
+
+## Business safety section
+
+- Existing customer only.
+- No creating app users from subscription create.
+- Cash payment only for this dashboard cash flow.
+- No partial payment.
+- No arbitrary price override.
+- Backend pricing authority.
+- Backend recalculates quote during create.
+- Payment record is created as cash.
+- ActivityLog is created.
+- Subscription appears to mobile through existing subscription APIs.
+- Premium upgrades do not add meals.
+- Add-ons remain separate.
+- Password reset is separate from subscription creation.
+- Cashier cannot reset passwords.
+- OTP is disabled/configurable and no SMS is sent from this flow.
+- Accounting impact remains:
+  `ACCOUNTING_SUBSCRIPTION_CASH_REVENUE_PENDING`
+
+---
+
+## Dashboard implementation checklist
+
+- [ ] Search existing customer through `GET /api/dashboard/users?q=`.
+- [ ] Do not allow subscription creation without selected `userId`.
+- [ ] Call quote before create.
+- [ ] Display all money values as SAR by dividing halala by 100.
+- [ ] Keep quote values readonly.
+- [ ] Send `payment.method="cash"` for cash collection.
+- [ ] Send `payment.status="paid"`.
+- [ ] Send `payment.collectedAmountHalala` exactly equal to quote total.
+- [ ] Disable submit if collected amount does not match quote total.
+- [ ] Send `source="dashboard_cashier"`.
+- [ ] Keep add-ons separate from premium upgrades.
+- [ ] Keep premium upgrades as meal-slot upgrades.
+- [ ] Hide lifecycle admin actions from cashier.
+- [ ] Hide reset password action from cashier.
+- [ ] Show reset password action only for admin/superadmin.
+- [ ] Show Arabic backend `messageAr` when available.
+- [ ] Do not call OTP send/verify from subscription flow.
 
 ## 14. Unsupported / future features
 
