@@ -21,6 +21,7 @@ const {
 const { applyPromoCodeToSubscriptionQuote } = require("../promoCodeService");
 const { getRestaurantBusinessDate } = require("../restaurantHoursService");
 const { resolveCanonicalPremiumIdentity, normalizePremiumItemKey } = require("../../utils/subscription/premiumIdentity");
+const { resolvePremiumUpgrade } = require("./premiumUpgradeConfigService");
 const {
   assertPremiumUpgradeLimit,
   buildPremiumUpgradeLimit,
@@ -534,6 +535,7 @@ async function resolveCheckoutQuoteOrThrow(
 
   for (const item of premiumItems) {
     let resolved;
+    let doc = null;
     
     if (hasPremiumKey) {
       try {
@@ -545,21 +547,9 @@ async function resolveCheckoutQuoteOrThrow(
         err.code = "INVALID_PREMIUM_ITEM";
         throw err;
       }
-      
-      const doc = resolved.canonicalProteinDoc || null;
-      premiumTotalHalala += resolved.unitExtraFeeHalala * item.qty;
-      resolvedPremiumItems.push({
-        protein: doc,
-        qty: item.qty,
-        unitExtraFeeHalala: resolved.unitExtraFeeHalala,
-        currency: SYSTEM_CURRENCY,
-        premiumKey: resolved.premiumKey,
-        canonicalProteinId: resolved.canonicalProteinId,
-        name: resolved.name,
-        priceSource: resolved.resolutionSource || null,
-      });
+      doc = resolved.canonicalProteinDoc || null;
     } else {
-      const doc = premiumById.get(item.id);
+      doc = premiumById.get(item.id);
       if (!doc) {
         const err = new Error(`Invalid premium protein: ${item.id}`);
         err.code = "INVALID_PREMIUM_ITEM";
@@ -589,20 +579,53 @@ async function resolveCheckoutQuoteOrThrow(
           throw resolveErr;
         }
       }
-
-      premiumTotalHalala += resolved.unitExtraFeeHalala * item.qty;
-      resolvedPremiumItems.push({
-        protein: doc,
-        qty: item.qty,
-        unitExtraFeeHalala: resolved.unitExtraFeeHalala,
-        currency: SYSTEM_CURRENCY,
-        premiumKey: resolved.premiumKey,
-        canonicalProteinId: resolved.canonicalProteinId,
-        name: resolved.name,
-        priceSource: resolved.resolutionSource || null,
-      });
     }
+
+    const premiumKey = resolved.premiumKey || (doc && (doc.premiumKey || doc.key)) || item.premiumKey;
+    if (!premiumKey) {
+      const err = new Error("Cannot resolve premium identity: missing premiumKey");
+      err.code = "INVALID_PREMIUM_ITEM";
+      throw err;
+    }
+
+    let unitExtraFeeHalala = Number(resolved.unitExtraFeeHalala || 0);
+    let priceSource = resolved.resolutionSource || null;
+    let isExplicitlyFree = false;
+
+    try {
+      const upgrade = await resolvePremiumUpgrade(premiumKey);
+      unitExtraFeeHalala = Number(upgrade.priceHalala);
+      priceSource = "resolvePremiumUpgrade";
+      if (unitExtraFeeHalala === 0) {
+        isExplicitlyFree = true;
+      }
+    } catch (upgradeErr) {
+      if (!unitExtraFeeHalala) {
+        const err = new Error(`Premium upgrade is not configured or available: ${premiumKey}`);
+        err.code = "INVALID_PREMIUM_ITEM";
+        throw err;
+      }
+    }
+
+    if (!Number.isSafeInteger(unitExtraFeeHalala) || (unitExtraFeeHalala === 0 && !isExplicitlyFree) || unitExtraFeeHalala < 0) {
+      const err = new Error(`Premium upgrade has invalid canonical pricing: ${premiumKey}`);
+      err.code = "INVALID_PREMIUM_ITEM";
+      throw err;
+    }
+
+    resolvedPremiumItems.push({
+      protein: doc,
+      qty: item.qty,
+      unitExtraFeeHalala,
+      currency: SYSTEM_CURRENCY,
+      premiumKey,
+      canonicalProteinId: resolved.canonicalProteinId,
+      name: resolved.name,
+      priceSource,
+    });
   }
+
+  premiumTotalHalala = resolvedPremiumItems.reduce((sum, row) => sum + Number(row.qty || 0) * Number(row.unitExtraFeeHalala || 0), 0);
 
   let addonsTotalHalala = 0;
   const resolvedAddonItems = [];
