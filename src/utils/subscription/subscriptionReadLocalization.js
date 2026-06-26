@@ -405,12 +405,29 @@ function localizeSubscriptionReadPayload(subscription, { lang, addonNames = new 
 
   // Canonical aliases for frontend compatibility
   localized.premiumSummary = localized.premiumBalance || [];
+  localized.addonBalances = Array.isArray(localized.addonBalance) ? localized.addonBalance.map(row => {
+    const purchasedQty = Number(row.purchasedQty != null ? row.purchasedQty : row.qty || 0);
+    const remainingQty = Number(row.remainingQty != null ? row.remainingQty : Math.max(0, purchasedQty - Number(row.consumedQty || 0)));
+    return {
+      addonPlanId: row.addonPlanId || row.addonId || null,
+      addonId: row.addonId || row.addonPlanId || null,
+      name: row.name || "",
+      category: row.category || "",
+      purchasedDailyQty: Number(row.purchasedDailyQty || 0),
+      includedTotalQty: Number(row.includedTotalQty != null ? row.includedTotalQty : purchasedQty),
+      purchasedQty,
+      consumedQty: Number(row.consumedQty != null ? row.consumedQty : Math.max(0, purchasedQty - remainingQty)),
+      reservedQty: Number(row.reservedQty || 0),
+      remainingQty,
+      currency: row.currency || "SAR",
+    };
+  }) : [];
   localized.addonsSummary = (localized.addonBalance || []).map(row => ({
     addonId: row.addonId,
     name: row.name,
-    purchasedQtyTotal: row.qty || 0,
-    remainingQtyTotal: (row.qty || 0) - (row.consumedQty || 0),
-    consumedQtyTotal: row.consumedQty || 0
+    purchasedQtyTotal: row.purchasedQty != null ? row.purchasedQty : row.qty || 0,
+    remainingQtyTotal: row.remainingQty != null ? row.remainingQty : (row.qty || 0) - (row.consumedQty || 0),
+    consumedQtyTotal: row.consumedQty != null ? row.consumedQty : Math.max(0, Number(row.purchasedQty || row.qty || 0) - Number(row.remainingQty || 0))
   }));
 
   return localized;

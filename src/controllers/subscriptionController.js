@@ -339,7 +339,10 @@ function buildCheckoutRequestHash({ userId, quote }) {
     .map((item) => ({
       id: String(item.addon && item.addon._id ? item.addon._id : item.addonId || ""),
       qty: Number(item.qty || 0),
+      quantityPerDay: Number(item.quantityPerDay || item.qty || 1),
+      includedTotalQty: Number(item.includedTotalQty || 0),
       unitPriceHalala: Number(item.unitPriceHalala || 0),
+      totalHalala: Number(item.totalHalala || 0),
       currency: normalizeCurrencyValue(item.addon && item.addon.currency ? item.addon.currency : item.currency),
     }))
     .sort((a, b) => a.id.localeCompare(b.id));

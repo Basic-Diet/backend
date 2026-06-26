@@ -1451,9 +1451,15 @@ function serializeDashboardQuote(quote, lang) {
     })),
     addonPlans: (quote.addonItems || []).map((item) => ({
       addonId: item.addon && item.addon._id ? String(item.addon._id) : null,
+      addonPlanId: item.addonPlanId || (item.addon && item.addon._id ? String(item.addon._id) : null),
       name: item.addon ? pickLang(item.addon.name, lang) : "",
       category: item.category || (item.addon && item.addon.category) || "",
+      quantityPerDay: Number(item.quantityPerDay || item.qty || 1),
+      daysCount: Number(item.daysCount || item.durationDays || quote.plan && quote.plan.daysCount || 0),
+      includedTotalQty: Number(item.includedTotalQty || 0),
+      unitPlanPriceHalala: Number(item.unitPlanPriceHalala || item.unitPriceHalala || 0),
       unitPriceHalala: Number(item.unitPriceHalala || 0),
+      priceHalala: Number(item.totalHalala || 0),
       totalHalala: Number(item.totalHalala || 0),
       currency: item.currency || "SAR",
     })),
@@ -1713,13 +1719,7 @@ async function createSubscriptionAdmin(req, res, nextOrRuntimeOverrides = null, 
     const endDate = addDays(startDate, daysCount - 1);
     const totalMeals = daysCount * mealsPerDay;
 
-    const addonBalance = quote.addonItems.map((item) => ({
-      addonId: item.addon._id,
-      purchasedQty: Number(item.qty || 0),
-      remainingQty: Number(item.qty || 0),
-      unitPriceHalala: Number(item.unitPriceHalala || 0),
-      currency: item.currency || "SAR",
-    }));
+    const addonBalance = Array.isArray(quote.addonBalance) ? quote.addonBalance : [];
     const premiumBalance = quote.premiumItems.map((item) => {
       const rawProteinId = item.canonicalProteinId || (item.protein && item.protein._id ? item.protein._id : null);
       const normalizedProteinId = rawProteinId == null
@@ -4593,7 +4593,7 @@ async function normalizeAddonBalanceRowsOrThrow(rows) {
   if (!Array.isArray(rows)) {
     throw createControlledError(400, "INVALID", "addonBalance must be an array");
   }
-  const addonIds = rows.map((row) => row && row.addonId).filter(Boolean);
+  const addonIds = rows.map((row) => row && (row.addonId || row.addonPlanId)).filter(Boolean);
   for (const addonId of addonIds) {
     try {
       validateObjectId(addonId, "addonId");
@@ -4606,10 +4606,21 @@ async function normalizeAddonBalanceRowsOrThrow(rows) {
     throw createControlledError(404, "NOT_FOUND", "One or more addonBalance addonIds were not found");
   }
   return rows.map((row) => ({
-    addonId: row.addonId,
+    addonPlanId: row.addonPlanId || row.addonId,
+    addonId: row.addonId || row.addonPlanId,
+    name: row.name || "",
+    category: row.category || "",
+    purchasedDailyQty: normalizeNonNegativeIntegerField(row.purchasedDailyQty === undefined ? row.quantityPerDay : row.purchasedDailyQty, "addonBalance.purchasedDailyQty"),
+    includedTotalQty: normalizeNonNegativeIntegerField(row.includedTotalQty === undefined ? row.purchasedQty : row.includedTotalQty, "addonBalance.includedTotalQty"),
     purchasedQty: normalizeNonNegativeIntegerField(row.purchasedQty, "addonBalance.purchasedQty"),
+    consumedQty: normalizeNonNegativeIntegerField(row.consumedQty || 0, "addonBalance.consumedQty"),
+    reservedQty: normalizeNonNegativeIntegerField(row.reservedQty || 0, "addonBalance.reservedQty"),
     remainingQty: normalizeNonNegativeIntegerField(row.remainingQty, "addonBalance.remainingQty"),
-    unitPriceHalala: normalizeNonNegativeIntegerField(row.unitPriceHalala, "addonBalance.unitPriceHalala"),
+    extraPurchasedQty: normalizeNonNegativeIntegerField(row.extraPurchasedQty || 0, "addonBalance.extraPurchasedQty"),
+    overageConsumedQty: normalizeNonNegativeIntegerField(row.overageConsumedQty || 0, "addonBalance.overageConsumedQty"),
+    unitIncludedPriceHalala: normalizeNonNegativeIntegerField(row.unitIncludedPriceHalala === undefined ? row.unitPriceHalala : row.unitIncludedPriceHalala, "addonBalance.unitIncludedPriceHalala"),
+    overageUnitPriceHalala: normalizeNonNegativeIntegerField(row.overageUnitPriceHalala === undefined ? row.unitPriceHalala : row.overageUnitPriceHalala, "addonBalance.overageUnitPriceHalala"),
+    unitPriceHalala: normalizeNonNegativeIntegerField(row.unitPriceHalala === undefined ? row.unitIncludedPriceHalala : row.unitPriceHalala, "addonBalance.unitPriceHalala"),
     currency: String(row.currency || "SAR").trim().toUpperCase(),
     purchasedAt: row.purchasedAt ? new Date(row.purchasedAt) : new Date(),
   }));

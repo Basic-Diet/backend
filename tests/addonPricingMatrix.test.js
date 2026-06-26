@@ -203,6 +203,40 @@ async function runTests() {
     assert.strictEqual(resolvedQuote.addonSubscriptions[0].priceHalala, 800);
     assert.strictEqual(resolvedQuote.addonSubscriptions[0].maxPerDay, 2);
     assert.strictEqual(resolvedQuote.addonSubscriptions[0].priceSource, "base_plan_addon_price");
+    assert.strictEqual(resolvedQuote.addonSubscriptions[0].quantityPerDay, 1);
+    assert.strictEqual(resolvedQuote.addonSubscriptions[0].includedTotalQty, 30);
+    assert.strictEqual(resolvedQuote.addonBalance[0].purchasedDailyQty, 1);
+    assert.strictEqual(resolvedQuote.addonBalance[0].includedTotalQty, 30);
+    assert.strictEqual(resolvedQuote.addonBalance[0].purchasedQty, 30);
+    assert.strictEqual(resolvedQuote.addonBalance[0].remainingQty, 30);
+
+    const quantityQuote = await resolveCheckoutQuoteOrThrow(
+      { ...quotePayload, addons: [{ addonPlanId: addonPlan._id, quantityPerDay: 2 }] },
+      {
+        enforceActivePlan: true,
+        allowMissingDeliveryAddress: true,
+      }
+    );
+    assert.strictEqual(quantityQuote.breakdown.addonsTotalHalala, 1600);
+    assert.strictEqual(quantityQuote.addonSubscriptions[0].quantityPerDay, 2);
+    assert.strictEqual(quantityQuote.addonSubscriptions[0].includedTotalQty, 60);
+    assert.strictEqual(quantityQuote.addonBalance[0].purchasedQty, 60);
+    assert.strictEqual(quantityQuote.addonBalance[0].remainingQty, 60);
+
+    for (const invalidQty of [0, -1, 1.5, "2"]) {
+      try {
+        await resolveCheckoutQuoteOrThrow(
+          { ...quotePayload, addons: [{ addonPlanId: addonPlan._id, quantityPerDay: invalidQty }] },
+          {
+            enforceActivePlan: true,
+            allowMissingDeliveryAddress: true,
+          }
+        );
+        assert.fail(`Should have rejected invalid quantity ${invalidQty}`);
+      } catch (err) {
+        assert.strictEqual(err.code, "VALIDATION_ERROR");
+      }
+    }
 
     // Test quote failure when pricing matrix row is missing
     await AddonPlanPrice.deleteOne({ _id: createdRowId });
@@ -270,6 +304,14 @@ async function runTests() {
           menuProductIds: [allowedProduct._id],
         },
       ],
+      addonBalance: [
+        {
+          _id: new mongoose.Types.ObjectId(),
+          addonId: addonPlan._id,
+          category: "snack",
+          remainingQty: 7,
+        },
+      ],
     };
 
     // Valid selection (allowedProduct)
@@ -290,6 +332,82 @@ async function runTests() {
     assert.strictEqual(day1.addonSelections.length, 1);
     assert.strictEqual(day1.addonSelections[0].source, "subscription");
     assert.strictEqual(day1.addonSelections[0].priceHalala, 0);
+
+    const flexDay = { addonSelections: [] };
+    await reconcileAddonInclusions(
+      subscription,
+      flexDay,
+      [
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+      ],
+      {
+        resolveChoiceProductById: async (id) => {
+          if (id === String(allowedProduct._id)) {
+            return { product: allowedProduct, addonCategory: "snack" };
+          }
+          return null;
+        },
+      }
+    );
+    assert.strictEqual(flexDay.addonSelections.length, 6);
+    assert.ok(flexDay.addonSelections.every((selection) => selection.source === "subscription"));
+    assert.ok(flexDay.addonSelections.every((selection) => selection.priceHalala === 0));
+
+    // Overage selection (remainingQty = 1, requested = 6)
+    const overageSub = {
+      _id: new mongoose.Types.ObjectId(),
+      addonSubscriptions: [
+        {
+          addonId: addonPlan._id,
+          name: "Snack Plan",
+          category: "snack",
+          maxPerDay: 1,
+          menuProductIds: [allowedProduct._id],
+        },
+      ],
+      addonBalance: [
+        {
+          _id: new mongoose.Types.ObjectId(),
+          addonId: addonPlan._id,
+          category: "snack",
+          remainingQty: 1,
+        },
+      ],
+    };
+
+    const overageDay = { addonSelections: [] };
+    await reconcileAddonInclusions(
+      overageSub,
+      overageDay,
+      [
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+        String(allowedProduct._id),
+      ],
+      {
+        resolveChoiceProductById: async (id) => {
+          if (id === String(allowedProduct._id)) {
+            return { product: allowedProduct, addonCategory: "snack" };
+          }
+          return null;
+        },
+      }
+    );
+    assert.strictEqual(overageDay.addonSelections.length, 6);
+    assert.strictEqual(overageDay.addonSelections[0].source, "subscription");
+    assert.strictEqual(overageDay.addonSelections[0].priceHalala, 0);
+    for (let i = 1; i < 6; i++) {
+      assert.strictEqual(overageDay.addonSelections[i].source, "pending_payment");
+      assert.strictEqual(overageDay.addonSelections[i].priceHalala, 1500);
+    }
 
     // Invalid selection (forbiddenProduct)
     const day2 = { addonSelections: [] };

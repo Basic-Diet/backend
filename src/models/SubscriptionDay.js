@@ -206,6 +206,7 @@ const SubscriptionDaySchema = new mongoose.Schema(
     addonSelections: [
       {
         addonId: { type: mongoose.Schema.Types.ObjectId, ref: "Addon", required: true },
+        addonPlanId: { type: mongoose.Schema.Types.ObjectId, ref: "Addon", default: null },
         name: { type: String, default: "" },
         category: { type: String, required: true },
         source: {

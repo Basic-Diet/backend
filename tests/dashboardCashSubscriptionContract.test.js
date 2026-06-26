@@ -28,6 +28,7 @@ const AddonPlanPrice = require("../src/models/AddonPlanPrice");
 const { DASHBOARD_JWT_SECRET } = require("../src/services/dashboardTokenService");
 
 const TEST_TAG = `sub-cash-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+const VALID_START_DATE = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 const results = { passed: 0, failed: 0 };
 const dashboardUsers = new Map();
 const createdSubscriptionIds = [];
@@ -213,7 +214,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -232,7 +233,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -253,7 +254,7 @@ async function runTests() {
       .send({
         userId: fakeId,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -273,7 +274,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.inactivePlan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -290,7 +291,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -308,7 +309,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -331,7 +332,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -351,7 +352,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -368,7 +369,7 @@ async function runTests() {
     const payload = {
       userId: seedData.client._id,
       planId: seedData.plan._id,
-      startDate: "2026-06-25",
+      startDate: VALID_START_DATE,
       grams: 150,
       mealsPerDay: 2,
       deliveryMode: "pickup",
@@ -446,7 +447,7 @@ async function runTests() {
     const sub = await Subscription.findById(createdSubId).lean();
     assert.strictEqual(sub.addonBalance.length, 1);
     assert.strictEqual(String(sub.addonBalance[0].addonId), String(seedData.addon._id));
-    assert.strictEqual(sub.addonBalance[0].purchasedQty, 1);
+    assert.strictEqual(sub.addonBalance[0].purchasedQty, 21);
   });
 
   await test("19. Premium upgrades do not increase total meal count.", async () => {
@@ -485,7 +486,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -503,7 +504,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",
@@ -521,7 +522,7 @@ async function runTests() {
       .send({
         userId: seedData.client._id,
         planId: seedData.plan._id,
-        startDate: "2026-06-25",
+        startDate: VALID_START_DATE,
         grams: 150,
         mealsPerDay: 2,
         deliveryMode: "pickup",

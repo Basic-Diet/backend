@@ -264,6 +264,35 @@ function buildSubscriptionSummariesFromCatalog(subscription, catalog) {
   };
 }
 
+function serializeAddonBalances(subscription, catalog) {
+  const addonNames = catalog && catalog.addonNames instanceof Map ? catalog.addonNames : new Map();
+  return (Array.isArray(subscription && subscription.addonBalance) ? subscription.addonBalance : []).map((row) => {
+    const addonId = row.addonId ? String(row.addonId) : null;
+    const purchasedQty = Math.max(0, Math.floor(Number(row.purchasedQty || 0)));
+    const remainingQty = Math.max(0, Math.floor(Number(row.remainingQty || 0)));
+    const consumedQty = Math.max(0, Math.floor(Number(row.consumedQty != null ? row.consumedQty : purchasedQty - remainingQty)));
+    return {
+      id: row._id ? String(row._id) : null,
+      addonPlanId: row.addonPlanId ? String(row.addonPlanId) : addonId,
+      addonId,
+      name: row.name || (addonId ? addonNames.get(addonId) || "" : ""),
+      category: row.category || "",
+      purchasedDailyQty: Math.max(0, Math.floor(Number(row.purchasedDailyQty || 0))),
+      includedTotalQty: Math.max(0, Math.floor(Number(row.includedTotalQty != null ? row.includedTotalQty : purchasedQty))),
+      purchasedQty,
+      consumedQty,
+      reservedQty: Math.max(0, Math.floor(Number(row.reservedQty || 0))),
+      remainingQty,
+      extraPurchasedQty: Math.max(0, Math.floor(Number(row.extraPurchasedQty || 0))),
+      overageConsumedQty: Math.max(0, Math.floor(Number(row.overageConsumedQty || 0))),
+      unitIncludedPriceHalala: Number(row.unitIncludedPriceHalala != null ? row.unitIncludedPriceHalala : row.unitPriceHalala || 0),
+      overageUnitPriceHalala: Number(row.overageUnitPriceHalala != null ? row.overageUnitPriceHalala : row.unitPriceHalala || 0),
+      unitPriceHalala: Number(row.unitPriceHalala || 0),
+      currency: row.currency || "SAR",
+    };
+  });
+}
+
 function buildAdminSubscriptionDisplayId(subscription) {
   return `SUB-${String(subscription && subscription._id ? subscription._id : "").slice(-6).toUpperCase()}`;
 }
@@ -278,7 +307,8 @@ function serializeSubscriptionForClientFromCatalog(subscription, catalog, contra
   const data = { ...subscription };
   const id = subscription && subscription._id ? String(subscription._id) : null;
   delete data.__v;
-  delete data.addonBalance;
+  const addonBalances = serializeAddonBalances(subscription, catalog);
+  data.addonBalance = addonBalances;
   delete data.addonSelections;
   const businessDate = dateUtils.getTodayKSADate();
   data.status = resolveEffectiveSubscriptionStatus(data, businessDate) || data.status;
@@ -304,7 +334,7 @@ function serializeSubscriptionForClientFromCatalog(subscription, catalog, contra
   };
   // ────────────────────────────────────────────────────────────────────────────
 
-  return { ...data, id, displayId: id ? buildAdminSubscriptionDisplayId(subscription) : null, mealBalance, plan: planId ? { id: planId, name: planName } : null, planName, deliveryAddress: subscription.deliveryAddress || null, deliverySlot, premiumSummary, addonsSummary, contract: contractView.contract };
+  return { ...data, id, displayId: id ? buildAdminSubscriptionDisplayId(subscription) : null, mealBalance, plan: planId ? { id: planId, name: planName } : null, planName, deliveryAddress: subscription.deliveryAddress || null, deliverySlot, premiumSummary, addonsSummary, addonBalances, contract: contractView.contract };
 }
 
 function serializeClientUserSummary(userDoc) {

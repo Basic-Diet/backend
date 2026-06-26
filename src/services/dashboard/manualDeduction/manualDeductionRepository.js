@@ -105,6 +105,7 @@ async function deductAtomically({ subscription, counts, session }) {
     if (!update.$inc) update.$inc = {};
     counts.addons.forEach((addonRequest, index) => {
       update.$inc[`addonBalance.$[a${index}].remainingQty`] = -addonRequest.qty;
+      update.$inc[`addonBalance.$[a${index}].consumedQty`] = addonRequest.qty;
       arrayFilters.push({ [`a${index}.addonId`]: new mongoose.Types.ObjectId(addonRequest.addonId) });
     });
   }

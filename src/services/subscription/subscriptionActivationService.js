@@ -260,6 +260,38 @@ function assertPremiumBalanceMatchesContractPricing(contractSnapshot, rows) {
   }
 }
 
+function buildAddonBalanceRowsFromEntitlements(addonSubscriptions, { daysCount = 0 } = {}) {
+  return (Array.isArray(addonSubscriptions) ? addonSubscriptions : []).map((row) => {
+    const quantityPerDay = Math.max(1, Math.floor(Number(row && (row.quantityPerDay || row.purchasedDailyQty) || 1)));
+    const includedTotalQty = Math.max(0, Math.floor(Number(
+      row && row.includedTotalQty != null ? row.includedTotalQty : Number(daysCount || 0) * quantityPerDay
+    )));
+    const unitPriceHalala = Number(row && (row.unitPlanPriceHalala != null ? row.unitPlanPriceHalala : row.priceHalala) || 0);
+    const extraPurchasedQty = Math.max(0, Math.floor(Number(row && row.extraPurchasedQty || 0)));
+    const purchasedQty = includedTotalQty + extraPurchasedQty;
+    const addonPlanId = row && (row.addonPlanId || row.addonId);
+    return {
+      addonPlanId,
+      addonId: row && (row.addonId || row.addonPlanId),
+      name: row && (row.addonPlanName || row.name || ""),
+      category: row && row.category || "",
+      purchasedDailyQty: quantityPerDay,
+      includedTotalQty,
+      purchasedQty,
+      consumedQty: 0,
+      reservedQty: 0,
+      remainingQty: purchasedQty,
+      extraPurchasedQty,
+      overageConsumedQty: 0,
+      unitIncludedPriceHalala: unitPriceHalala,
+      overageUnitPriceHalala: unitPriceHalala,
+      unitPriceHalala,
+      currency: row && row.currency || SYSTEM_CURRENCY,
+      purchasedAt: new Date(),
+    };
+  }).filter((row) => row.addonId);
+}
+
 async function resolveActivationPremiumBalanceRows(draft, contractSnapshot) {
   const fromDraft = await toCanonicalPremiumBalanceRows(draft);
   const fromContract = await toPremiumBalanceRowsFromContractEntitlements(contractSnapshot);
@@ -341,6 +373,9 @@ function buildCanonicalActivationPayload({ userId, planId, contractVersion, cont
   if ((!addonSubscriptions || addonSubscriptions.length === 0) && snapshot.entitlementContract && Array.isArray(snapshot.entitlementContract.addonSubscriptions)) {
     addonSubscriptions = snapshot.entitlementContract.addonSubscriptions;
   }
+  const addonBalanceRows = Array.isArray(legacyRuntimeData.addonBalance) && legacyRuntimeData.addonBalance.length > 0
+    ? legacyRuntimeData.addonBalance
+    : buildAddonBalanceRowsFromEntitlements(addonSubscriptions, { daysCount });
   const end = addDays(start, daysCount - 1);
 
   const subscriptionPayload = {
@@ -380,7 +415,7 @@ function buildCanonicalActivationPayload({ userId, planId, contractVersion, cont
         : null,
     premiumBalance: premiumBalanceRows,
     addonSubscriptions,
-    addonBalance: legacyRuntimeData.addonBalance || [],
+    addonBalance: addonBalanceRows,
     deliveryMode: (delivery.mode || legacyDelivery.type) === "pickup" ? "pickup" : "delivery",
     deliveryAddress: Object.prototype.hasOwnProperty.call(delivery, "address") ? delivery.address || undefined : (legacyDelivery.address || undefined),
     deliveryWindow: slot.window ? String(slot.window) : undefined,

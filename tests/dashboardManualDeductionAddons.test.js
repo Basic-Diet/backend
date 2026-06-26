@@ -215,6 +215,10 @@ async function testAddonDeduction() {
   assert.strictEqual(res.body.data.remaining.regularMeals, 4);
   assert.strictEqual(res.body.data.remaining.totalMeals, 6);
   assert.strictEqual(res.body.data.remaining.premiumMeals, 2);
+
+  const afterDeduction = await Subscription.findById(testSubscription._id).lean();
+  assert.strictEqual(afterDeduction.addonBalance[0].remainingQty, 3);
+  assert.strictEqual(afterDeduction.addonBalance[0].consumedQty, 2);
 }
 
 async function testCombinedDeduction() {
@@ -230,6 +234,10 @@ async function testCombinedDeduction() {
   assert.strictEqual(res.body.data.remaining.premiumMeals, 1); // 2 - 1
   assert.strictEqual(res.body.data.remaining.totalMeals, 4); // 6 - 2
   assert.strictEqual(res.body.data.remaining.addons[0].remainingQty, 2); // 3 - 1
+
+  const afterCombined = await Subscription.findById(testSubscription._id).lean();
+  assert.strictEqual(afterCombined.addonBalance[0].remainingQty, 2);
+  assert.strictEqual(afterCombined.addonBalance[0].consumedQty, 3);
 }
 
 async function testErrors() {

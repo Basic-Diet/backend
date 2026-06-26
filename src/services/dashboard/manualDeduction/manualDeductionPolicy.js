@@ -38,12 +38,19 @@ function resolveAddonBalances(subscription) {
     const name = entitlement ? (entitlement.name || entitlement.addonPlanName || "") : "";
     const remainingQty = Math.max(0, Math.floor(Number(row.remainingQty) || 0));
     const totalQty = Math.max(0, Math.floor(Number(row.purchasedQty) || 0));
+    const consumedQty = Math.max(0, Math.floor(Number(row.consumedQty != null ? row.consumedQty : totalQty - remainingQty) || 0));
     return {
       addonId: String(row.addonId),
+      addonPlanId: row.addonPlanId ? String(row.addonPlanId) : String(row.addonId),
       name,
+      category: row.category || (entitlement && entitlement.category) || "",
+      purchasedDailyQty: Math.max(0, Math.floor(Number(row.purchasedDailyQty || 0))),
+      includedTotalQty: Math.max(0, Math.floor(Number(row.includedTotalQty != null ? row.includedTotalQty : totalQty))),
       remainingQty,
       totalQty,
-      consumedQty: Math.max(0, totalQty - remainingQty),
+      purchasedQty: totalQty,
+      consumedQty,
+      reservedQty: Math.max(0, Math.floor(Number(row.reservedQty || 0))),
     };
   });
 }

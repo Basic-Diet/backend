@@ -339,12 +339,12 @@ function normalizeCheckoutAddonSelectionsOrThrow(rawItems, itemName = "addons") 
     throw err;
   }
 
-  const selectedIds = new Set();
+  const byId = new Map();
   for (const item of rawItems) {
     const addonId = typeof item === "string"
       ? item
       : item && typeof item === "object" && !Array.isArray(item)
-        ? (item.id || item.addonId)
+        ? (item.addonPlanId || item.id || item.addonId)
         : null;
 
     try {
@@ -355,10 +355,61 @@ function normalizeCheckoutAddonSelectionsOrThrow(rawItems, itemName = "addons") 
       throw err;
     }
 
-    selectedIds.add(String(addonId));
+    let quantityPerDay = 1;
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const rawQty = item.quantityPerDay !== undefined
+        ? item.quantityPerDay
+        : item.qty !== undefined
+          ? item.qty
+          : item.quantity;
+      if (rawQty !== undefined) {
+        quantityPerDay = Number(rawQty);
+        if (!Number.isInteger(quantityPerDay) || quantityPerDay < 1 || typeof rawQty === "string") {
+          const err = new Error("quantityPerDay must be an integer >= 1");
+          err.code = "VALIDATION_ERROR";
+          throw err;
+        }
+      }
+    }
+
+    const key = String(addonId);
+    const existing = byId.get(key);
+    byId.set(key, {
+      id: key,
+      addonPlanId: key,
+      quantityPerDay: (existing ? existing.quantityPerDay : 0) + quantityPerDay,
+    });
   }
 
-  return Array.from(selectedIds.values()).map((id) => ({ id }));
+  return Array.from(byId.values());
+}
+
+function buildAddonBalanceRowsFromQuote(quote) {
+  const planDaysCount = Number(quote && quote.plan && quote.plan.daysCount || 0);
+  return (Array.isArray(quote && quote.addonItems) ? quote.addonItems : []).map((item) => {
+    const addon = item.addon || {};
+    const quantityPerDay = Math.max(1, Math.floor(Number(item.quantityPerDay || item.qty || 1)));
+    const includedTotalQty = Math.max(0, Math.floor(Number(item.includedTotalQty != null ? item.includedTotalQty : planDaysCount * quantityPerDay)));
+    const unitPriceHalala = Number(item.unitPlanPriceHalala != null ? item.unitPlanPriceHalala : item.unitPriceHalala || 0);
+    return {
+      addonPlanId: item.addonPlanId || addon._id,
+      addonId: item.addonPlanId || addon._id,
+      name: addon.name || item.name || "",
+      category: item.category || addon.category || "",
+      purchasedDailyQty: quantityPerDay,
+      includedTotalQty,
+      purchasedQty: includedTotalQty + Number(item.extraPurchasedQty || 0),
+      consumedQty: 0,
+      reservedQty: 0,
+      remainingQty: includedTotalQty + Number(item.extraPurchasedQty || 0),
+      extraPurchasedQty: Number(item.extraPurchasedQty || 0),
+      overageConsumedQty: 0,
+      unitIncludedPriceHalala: unitPriceHalala,
+      overageUnitPriceHalala: unitPriceHalala,
+      unitPriceHalala,
+      currency: item.currency || "SAR",
+    };
+  });
 }
 
 function resolveDeliveryInput(payload = {}) {
@@ -521,7 +572,7 @@ async function resolveCheckoutQuoteOrThrow(
       ? Promise.resolve([])
       : (premiumIds.length ? BuilderProtein.find({ _id: { $in: premiumIds }, isActive: true, isPremium: true }).lean() : Promise.resolve([])),
     hasPremiumKey ? Promise.resolve([]) : findMenuPremiumOptionsByIds(premiumIds),
-    addonIds.length ? Addon.find({ _id: { $in: addonIds }, isActive: true }).lean() : Promise.resolve([]),
+    addonIds.length ? Addon.find({ _id: { $in: addonIds }, isActive: true, isArchived: { $ne: true } }).lean() : Promise.resolve([]),
   ]);
 
   const premiumDocs = builderPremiumDocs.concat(menuPremiumDocs.map(mapMenuPremiumOptionForQuote));
@@ -657,10 +708,13 @@ async function resolveCheckoutQuoteOrThrow(
       assertSystemCurrencyOrThrow(doc.currency || SYSTEM_CURRENCY, `Addon plan ${item.id} currency`);
     }
 
+    const quantityPerDay = Math.max(1, Math.floor(Number(item.quantityPerDay || 1)));
+    const daysCount = Number(plan.daysCount || 0);
+    const includedTotalQty = daysCount * quantityPerDay;
     const lineTotal = resolveAddonChargeTotalHalala({
       unitPriceHalala: unit,
-      qty: 1,
-      daysCount: Number(plan.daysCount || 0),
+      qty: quantityPerDay,
+      daysCount,
       mealsPerDay: Number(mealsPerDay || 0),
       addon: doc,
     });
@@ -668,12 +722,18 @@ async function resolveCheckoutQuoteOrThrow(
     addonsTotalHalala += lineTotal;
     resolvedAddonItems.push({
       addon: doc,
+      addonPlanId: doc._id,
       category: doc.category,
-      qty: 1,
+      qty: quantityPerDay,
+      quantityPerDay,
       billingMode: resolveSubscriptionAddonBillingMode(doc, { defaultMode: "per_day" }),
-      durationDays: Number(plan.daysCount || 0),
+      durationDays: daysCount,
+      daysCount,
+      includedTotalQty,
+      unitPlanPriceHalala: unit,
       unitPriceHalala: unit,
       totalHalala: lineTotal,
+      priceHalala: lineTotal,
       currency: SYSTEM_CURRENCY,
     });
   }
@@ -782,6 +842,11 @@ async function resolveCheckoutQuoteOrThrow(
     maxPerDay: item.addon.maxPerDay || 1,
     basePlanId: plan._id,
     priceHalala: Number(item.unitPriceHalala || 0),
+    quantityPerDay: Number(item.quantityPerDay || item.qty || 1),
+    purchasedDailyQty: Number(item.quantityPerDay || item.qty || 1),
+    includedTotalQty: Number(item.includedTotalQty || 0),
+    unitPlanPriceHalala: Number(item.unitPlanPriceHalala || item.unitPriceHalala || 0),
+    totalHalala: Number(item.totalHalala || 0),
     currency: item.currency || SYSTEM_CURRENCY,
     menuProductIds: item.addon.menuProductIds || [],
     priceSource: "base_plan_addon_price",
@@ -803,6 +868,7 @@ async function resolveCheckoutQuoteOrThrow(
     premiumItems: resolvedPremiumItems,
     addonItems: resolvedAddonItems,
     addonSubscriptions,
+    addonBalance: [],
     breakdown: {
       basePlanPriceHalala,
       basePlanGrossHalala: basePlanPriceHalala,
@@ -829,9 +895,12 @@ async function resolveCheckoutQuoteOrThrow(
     quote = promoResult.quote;
   }
 
+  quote.addonBalance = buildAddonBalanceRowsFromQuote(quote);
+
   return quote;
 }
 
 module.exports = {
   resolveCheckoutQuoteOrThrow,
+  buildAddonBalanceRowsFromQuote,
 };
