@@ -261,12 +261,13 @@ function buildFulfillmentReadFields({
   fulfillmentState = {},
   statusLabel = "",
 } = {}) {
-  const mode = subscription && subscription.deliveryMode === "pickup" ? "pickup" : "delivery";
+  const baseMode = subscription && subscription.deliveryMode === "pickup" ? "pickup" : "delivery";
+  const mode = day && day.fulfillmentModeOverride ? day.fulfillmentModeOverride : baseMode;
   // Resolve pickupLocationId: prefer stored value, fall back to contractSnapshot, then
   // auto-select the only available location when pickup mode has exactly one option.
-  let effectivePickupLocationId = subscription && subscription.pickupLocationId
-    ? subscription.pickupLocationId
-    : null;
+  let effectivePickupLocationId = day && day.pickupLocationIdOverride
+    ? day.pickupLocationIdOverride
+    : (subscription && subscription.pickupLocationId ? subscription.pickupLocationId : null);
   if (mode === "pickup" && !effectivePickupLocationId) {
     const fromSnapshot = subscription
       && subscription.contractSnapshot
@@ -308,7 +309,11 @@ function buildFulfillmentReadFields({
   });
 
   return {
-    deliveryMode: mode,
+    deliveryMode: baseMode,
+    fulfillmentModeOverride: day && day.fulfillmentModeOverride ? day.fulfillmentModeOverride : null,
+    effectiveFulfillmentMode: mode,
+    pickupLocationIdOverride: day && day.pickupLocationIdOverride ? day.pickupLocationIdOverride : null,
+    firstDayFulfillmentOverride: Boolean(day && day.fulfillmentModeOverride),
     pickupLocation,
     deliveryAddress,
     deliveryWindow,

@@ -165,18 +165,20 @@ async function reconcileAddonInclusions(
       continue;
     }
 
-    if (entitlement) {
-      if (Array.isArray(entitlement.menuProductIds) && entitlement.menuProductIds.length > 0) {
-        const allowedIds = entitlement.menuProductIds.map((id) => String(id));
-        if (!allowedIds.includes(String(doc._id))) {
-          throw {
-            status: 400,
-            code: "INVALID_ADDON_SELECTION",
-            message: `Selected product ${doc.name?.en || doc._id} is not allowed for addon entitlement category ${category}`,
-          };
-        }
+    // Determine whether this item is covered by the entitlement's explicit allowlist.
+    // menuProductIds acts as a coverage-eligibility gate, NOT a rejection gate:
+    //   - item IN menuProductIds   → eligible for subscription balance coverage
+    //   - item NOT IN menuProductIds → falls through to pending_payment (no balance consumed)
+    //   - menuProductIds empty/absent → all items of matching category are balance-eligible
+    let isRestrictedByPlan = false;
+    if (entitlement && Array.isArray(entitlement.menuProductIds) && entitlement.menuProductIds.length > 0) {
+      const allowedIds = entitlement.menuProductIds.map((id) => String(id));
+      if (!allowedIds.includes(String(doc._id))) {
+        isRestrictedByPlan = true;
       }
+    }
 
+    if (entitlement && !isRestrictedByPlan) {
       let canCover = false;
       if (hasAddonBalance) {
         const bucket = findAddonBalanceBucket(subscription, {

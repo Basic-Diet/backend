@@ -202,6 +202,96 @@ async function run() {
   assert.strictEqual(mixedState.paymentRequirement.pendingAmountHalala, expectedTotal,
     `Total must be premiumFee(2000) + snackPrice(1300) = ${expectedTotal}`);
   assert.strictEqual(mixedState.paymentRequirement.amountHalala, expectedTotal);
+
+  // ─── Regression tests: INVALID_ADDON_SELECTION bug fix ───────────────────────
+  // Scenario: subscription has a juice entitlement with a non-empty menuProductIds
+  // allowlist (Juice A only).  Juice B is a valid active item in category juice
+  // but NOT in that allowlist.  Before the fix this threw INVALID_ADDON_SELECTION;
+  // after the fix it must be accepted as pending_payment.
+
+  const JUICE_A_ID = "507f191e810c19729de87010"; // in allowlist
+  const JUICE_B_ID = "507f191e810c19729de87011"; // NOT in allowlist (Berry Blast scenario)
+  const JUICE_PLAN_ID = "507f191e810c19729de87012";
+
+  const restrictedResolveChoiceProductById = async (id) => {
+    if (String(id) === JUICE_A_ID) {
+      return choice({ id, category: "juice", name: "Juice A", priceHalala: 1000 });
+    }
+    if (String(id) === JUICE_B_ID) {
+      return choice({ id, category: "juice", name: "Berry Blast", priceHalala: 1100 });
+    }
+    return null;
+  };
+
+  const subscriptionWithRestrictedPlan = {
+    addonSubscriptions: [
+      {
+        addonId: JUICE_PLAN_ID,
+        addonPlanId: JUICE_PLAN_ID,
+        category: "juice",
+        name: "Juice Plan A Only",
+        maxPerDay: 1,
+        menuProductIds: [JUICE_A_ID], // only Juice A is in the allowlist
+      },
+    ],
+  };
+
+  // Test A: valid item outside menuProductIds → pending_payment (NOT rejected)
+  const testADay = { addonSelections: [] };
+  await reconcileAddonInclusions(
+    subscriptionWithRestrictedPlan,
+    testADay,
+    [JUICE_B_ID],
+    { resolveChoiceProductById: restrictedResolveChoiceProductById }
+  );
+  assert.strictEqual(testADay.addonSelections.length, 1,
+    "Test A: Berry Blast must appear in addonSelections");
+  assert.strictEqual(String(testADay.addonSelections[0].addonId), JUICE_B_ID,
+    "Test A: addonId must match Juice B");
+  assert.strictEqual(testADay.addonSelections[0].source, "pending_payment",
+    "Test A: Juice B not in menuProductIds → source must be pending_payment, not INVALID_ADDON_SELECTION");
+  assert.strictEqual(testADay.addonSelections[0].priceHalala, 1100,
+    "Test A: pending_payment price must equal the item's priceHalala");
+
+  // Test B: item inside menuProductIds with legacy balance → subscription coverage
+  const subscriptionWithBalance = {
+    addonSubscriptions: [
+      {
+        addonId: JUICE_PLAN_ID,
+        addonPlanId: JUICE_PLAN_ID,
+        category: "juice",
+        name: "Juice Plan A Only",
+        maxPerDay: 1,
+        menuProductIds: [JUICE_A_ID],
+      },
+    ],
+    // Legacy balance path (no addonBalance array) — simulatedRemaining uses category key
+  };
+
+  const testBDay = { addonSelections: [] };
+  await reconcileAddonInclusions(
+    subscriptionWithBalance,
+    testBDay,
+    [JUICE_A_ID],
+    { resolveChoiceProductById: restrictedResolveChoiceProductById }
+  );
+  assert.strictEqual(testBDay.addonSelections.length, 1,
+    "Test B: Juice A must appear in addonSelections");
+  assert.strictEqual(testBDay.addonSelections[0].source, "subscription",
+    "Test B: Juice A is in menuProductIds and has balance → source must be subscription");
+  assert.strictEqual(testBDay.addonSelections[0].priceHalala, 0,
+    "Test B: subscription-covered item must have priceHalala 0");
+
+  // Test C: invalid item (not in catalog) still rejects with INVALID_ONE_TIME_ADDON_SELECTION
+  await assertRejectsWithCode(
+    () => reconcileAddonInclusions(
+      subscriptionWithRestrictedPlan,
+      { addonSelections: [] },
+      ["507f191e810c19729de87099"], // unknown ID — resolves to null
+      { resolveChoiceProductById: restrictedResolveChoiceProductById }
+    ),
+    "INVALID_ONE_TIME_ADDON_SELECTION"
+  );
 }
 
 run()

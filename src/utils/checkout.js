@@ -34,6 +34,7 @@ function buildCheckoutRequestHash({ userId, quote }) {
     startDate: quote.startDate ? new Date(quote.startDate).toISOString() : null,
     delivery: {
       type: quote.delivery && quote.delivery.type ? quote.delivery.type : "delivery",
+      firstDayFulfillmentOverride: quote.delivery && quote.delivery.firstDayFulfillmentOverride ? quote.delivery.firstDayFulfillmentOverride : null,
       zoneId:
         quote.delivery && quote.delivery.zoneId
           ? String(quote.delivery.zoneId)
@@ -89,6 +90,7 @@ function normalizeCheckoutDeliveryForPersistence(delivery = {}) {
 
   return {
     type: normalizedType,
+    firstDayFulfillmentOverride: delivery && delivery.firstDayFulfillmentOverride ? delivery.firstDayFulfillmentOverride : null,
     address: delivery && delivery.address ? delivery.address : null,
     zoneId: normalizedType === "delivery" ? (delivery && delivery.zoneId ? delivery.zoneId : null) : null,
     zoneName:

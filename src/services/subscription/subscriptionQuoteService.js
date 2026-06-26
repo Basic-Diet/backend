@@ -446,8 +446,9 @@ function resolveDeliveryInput(payload = {}) {
   const isDelivery = normalizedType === "delivery";
   const zoneId = isDelivery && delivery.zoneId ? delivery.zoneId : null;
   const zoneName = isDelivery && delivery.zoneName ? String(delivery.zoneName || "").trim() : "";
+  const firstDayFulfillmentOverride = delivery.firstDayFulfillmentOverride || null;
 
-  return { type: normalizedType, address, slot, pickupLocationId, zoneId, zoneName };
+  return { type: normalizedType, address, slot, pickupLocationId, zoneId, zoneName, firstDayFulfillmentOverride };
 }
 
 async function parseFutureStartDate(rawValue) {
@@ -740,6 +741,7 @@ async function resolveCheckoutQuoteOrThrow(
 
   const windows = await getSettingValue("delivery_windows", []);
   if (delivery.type === "pickup") {
+    delivery.firstDayFulfillmentOverride = null;
     const pickupLocations = await getSettingValue("pickup_locations", []);
     const activePickupLocations = Array.isArray(pickupLocations)
       ? pickupLocations.filter((location) => location && location.isActive !== false)
@@ -776,6 +778,23 @@ async function resolveCheckoutQuoteOrThrow(
 
   let deliveryFeeHalala = 0;
   if (delivery.type === "delivery") {
+    if (delivery.firstDayFulfillmentOverride) {
+      const overrideObj = delivery.firstDayFulfillmentOverride;
+      const overrideType = overrideObj && typeof overrideObj === "object" ? overrideObj.type : overrideObj;
+      const overrideLocId = overrideObj && typeof overrideObj === "object" ? overrideObj.pickupLocationId : null;
+      if (overrideType === "pickup" && overrideLocId) {
+        const pickupLocations = await getSettingValue("pickup_locations", []);
+        const activePickupLocations = Array.isArray(pickupLocations)
+          ? pickupLocations.filter((location) => location && location.isActive !== false)
+          : [];
+        const resolvedPickupLocation = resolvePickupLocationSelection(activePickupLocations, overrideLocId, lang, windows);
+        if (!resolvedPickupLocation) {
+          const err = new Error("Invalid pickup location in firstDayFulfillmentOverride");
+          err.code = "VALIDATION_ERROR";
+          throw err;
+        }
+      }
+    }
     if (!delivery.zoneId) {
       throw createDeliverySlotError("VALIDATION_ERROR", "Delivery zone is required for delivery subscriptions");
     }

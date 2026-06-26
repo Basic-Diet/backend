@@ -91,6 +91,7 @@ const CheckoutDraftSchema = new mongoose.Schema(
         enum: ["delivery", "pickup"],
         required: true,
       },
+      firstDayFulfillmentOverride: { type: mongoose.Schema.Types.Mixed, default: null },
       address: { type: mongoose.Schema.Types.Mixed },
       zoneId: { type: mongoose.Schema.Types.ObjectId, default: null },
       zoneName: { type: String, default: "" },

@@ -530,9 +530,13 @@ async function _createSubscriptionPickupRequestForClientInternal({
 
   // Phase 5: Centralized ownership and status check (preserves existing behavior)
   assertSubscriptionActiveAndOwned({ subscription, userId, date });
+  const policyDayQuery = SubscriptionDay.findOne({ subscriptionId: subscription._id, date });
+  if (session) policyDayQuery.session(session);
+  const policyDay = await policyDayQuery.lean();
   try {
     assertFulfillmentMethodAllowed({
       subscription,
+      day: policyDay,
       date,
       requestedMethod: "pickup",
     });
@@ -544,7 +548,7 @@ async function _createSubscriptionPickupRequestForClientInternal({
   }
 
   await assertRestaurantOpenForOrdering({
-    pickupLocationId: subscription.pickupLocationId,
+    pickupLocationId: policyDay && policyDay.pickupLocationIdOverride ? policyDay.pickupLocationIdOverride : subscription.pickupLocationId,
     deliveryMode: "pickup",
   });
 
@@ -714,8 +718,11 @@ async function getPickupAvailabilityForClient({
   if (!subscription) throw createServiceError("NOT_FOUND", "Subscription not found", 404);
 
   assertSubscriptionActiveAndOwned({ subscription, userId, date });
+  const dayQuery = SubscriptionDay.findOne({ subscriptionId: subscription._id, date });
+  if (session) dayQuery.session(session);
+  const day = await dayQuery.lean();
   try {
-    assertFulfillmentMethodAllowed({ subscription, date, requestedMethod: "pickup" });
+    assertFulfillmentMethodAllowed({ subscription, day, date, requestedMethod: "pickup" });
   } catch (err) {
     if (err && err.code === "FULFILLMENT_METHOD_NOT_ALLOWED") {
       throw createServiceError("INVALID_DELIVERY_MODE", "Delivery mode is not pickup", 400);
@@ -724,9 +731,6 @@ async function getPickupAvailabilityForClient({
   }
   assertDateInsideSubscriptionRange({ subscription, date });
 
-  const dayQuery = SubscriptionDay.findOne({ subscriptionId: subscription._id, date });
-  if (session) dayQuery.session(session);
-  const day = await dayQuery.lean();
   const pickupRequests = await findBlockingPickupRequests({ subscriptionId: subscription._id, date, session });
   const catalogMaps = day ? await loadPickupAvailabilityCatalogMaps(day, { session }) : {};
   const fullAvailability = buildAvailabilityFromDay({

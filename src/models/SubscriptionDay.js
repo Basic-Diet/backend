@@ -289,6 +289,8 @@ const SubscriptionDaySchema = new mongoose.Schema(
       notes: { type: String },
     },
     deliveryWindowOverride: { type: String },
+    fulfillmentModeOverride: { type: String, enum: ["pickup", "delivery", null], default: null },
+    pickupLocationIdOverride: { type: String, default: null },
     customSalads: [
       {
         items: [

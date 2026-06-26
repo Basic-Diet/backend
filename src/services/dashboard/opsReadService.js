@@ -76,7 +76,8 @@ async function listOperations({ date, role, lang = "ar" }) {
   // 5. Map to DTOs
   const dayDTOs = days.filter((day) => {
     const sub = subMap.get(String(day.subscriptionId));
-    if (sub && sub.deliveryMode === "pickup" && pickupRequestDayKeys.has(`${String(day.subscriptionId)}:${day.date}`)) {
+    const effectiveMode = day.fulfillmentModeOverride || (sub && sub.deliveryMode === "pickup" ? "pickup" : "delivery");
+    if (effectiveMode === "pickup" && pickupRequestDayKeys.has(`${String(day.subscriptionId)}:${day.date}`)) {
       return false;
     }
     return true;

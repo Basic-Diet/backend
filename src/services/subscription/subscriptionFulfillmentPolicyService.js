@@ -53,18 +53,23 @@ function isFirstSubscriptionDay({ subscription, date } = {}) {
   return Boolean(startDate && normalizedDate === startDate);
 }
 
-function buildFulfillmentPolicy({ subscription, date } = {}) {
+function buildFulfillmentPolicy({ subscription, day, date } = {}) {
   const normalizedMode = String(subscription && subscription.deliveryMode || "").trim() === "pickup"
     ? "pickup"
     : "delivery";
-  const isFirstDay = isFirstSubscriptionDay({ subscription, date });
+  const effectiveDate = String(date || (day && day.date) || "").trim();
+  const isFirstDay = isFirstSubscriptionDay({ subscription, date: effectiveDate });
+  const effectiveFulfillmentMode = (isFirstDay && day && day.fulfillmentModeOverride)
+    ? day.fulfillmentModeOverride
+    : normalizedMode;
   const allowedMethods = normalizedMode === "pickup"
     ? ["pickup"]
-    : (isFirstDay ? ["delivery", "pickup"] : ["delivery"]);
+    : ((isFirstDay && day && day.fulfillmentModeOverride === "pickup") ? ["delivery", "pickup"] : ["delivery"]);
 
   return {
     subscriptionMode: normalizedMode,
-    date: String(date || "").trim(),
+    effectiveFulfillmentMode,
+    date: effectiveDate,
     isPickupSubscription: normalizedMode === "pickup",
     isDeliverySubscription: normalizedMode === "delivery",
     isFirstSubscriptionDay: isFirstDay,
@@ -75,10 +80,10 @@ function buildFulfillmentPolicy({ subscription, date } = {}) {
   };
 }
 
-function assertFulfillmentMethodAllowed({ subscription, date, requestedMethod } = {}) {
+function assertFulfillmentMethodAllowed({ subscription, day, date, requestedMethod } = {}) {
   const method = String(requestedMethod || "").trim();
-  const range = assertDateInsideSubscriptionRange({ subscription, date });
-  const policy = buildFulfillmentPolicy({ subscription, date: range.date });
+  const range = assertDateInsideSubscriptionRange({ subscription, date: date || (day && day.date) });
+  const policy = buildFulfillmentPolicy({ subscription, day, date: range.date });
   if (!["delivery", "pickup"].includes(method)) {
     throw createFulfillmentPolicyError("INVALID_FULFILLMENT_METHOD", "Fulfillment method must be delivery or pickup", 400);
   }

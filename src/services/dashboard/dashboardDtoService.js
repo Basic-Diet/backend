@@ -59,7 +59,8 @@ function resolveUiMetadata(status, lang) {
 
 function mapSubscriptionDayToDTO(day, delivery, subscription, user, role, lang, catalogMaps = {}, pickupRequest = null) {
   const status = day.status;
-  const mode = subscription && subscription.deliveryMode === "pickup" ? "pickup" : "delivery";
+  const baseMode = subscription && subscription.deliveryMode === "pickup" ? "pickup" : "delivery";
+  const mode = day && day.fulfillmentModeOverride ? day.fulfillmentModeOverride : baseMode;
   const ui = resolveUiMetadata(status, lang);
   const fulfillmentState = buildSubscriptionDayFulfillmentState({
     subscription,
@@ -101,6 +102,11 @@ function mapSubscriptionDayToDTO(day, delivery, subscription, user, role, lang, 
     id: String(day._id),
     type: "subscription",
     mode,
+    deliveryMode: baseMode,
+    fulfillmentModeOverride: day.fulfillmentModeOverride || null,
+    effectiveFulfillmentMode: mode,
+    pickupLocationIdOverride: day.pickupLocationIdOverride || null,
+    firstDayFulfillmentOverride: Boolean(day.fulfillmentModeOverride),
     reference: `SUB-${String(day.subscriptionId).slice(-6).toUpperCase()}`,
     status,
     statusLabel: day.status, // To be localized

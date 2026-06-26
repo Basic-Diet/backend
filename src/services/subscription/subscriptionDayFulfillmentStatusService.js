@@ -88,7 +88,7 @@ async function getDayFulfillmentStatusForClient({
   const fulfillmentState = buildSubscriptionDayFulfillmentState({ subscription: sub, day });
 
   // 5. Load pickup locations (only needed for pickup mode, but cheap)
-  const pickupLocations = sub.deliveryMode === "pickup"
+  const pickupLocations = sub.deliveryMode === "pickup" || day.fulfillmentModeOverride === "pickup"
     ? await getPickupLocationsSetting()
     : [];
 
@@ -104,14 +104,19 @@ async function getDayFulfillmentStatusForClient({
 
   const status = String(day.status || "open");
   const deliveryMode = readFields.deliveryMode;
+  const effectiveFulfillmentMode = readFields.effectiveFulfillmentMode || deliveryMode;
   const isTerminal = TERMINAL_STATUSES.has(status);
-  const pollingIntervalSeconds = resolvePollingIntervalSeconds(status, deliveryMode);
+  const pollingIntervalSeconds = resolvePollingIntervalSeconds(status, effectiveFulfillmentMode);
 
   // 7. Compose response
   const data = {
     subscriptionId,
     date,
     deliveryMode,
+    fulfillmentModeOverride: readFields.fulfillmentModeOverride || null,
+    effectiveFulfillmentMode,
+    pickupLocationIdOverride: readFields.pickupLocationIdOverride || null,
+    firstDayFulfillmentOverride: Boolean(readFields.firstDayFulfillmentOverride),
     status,
     statusLabel: readFields.fulfillmentSummary?.statusLabel || "",
     message: readFields.fulfillmentSummary?.message || "",
@@ -130,10 +135,10 @@ async function getDayFulfillmentStatusForClient({
     lockedMessage: readFields.lockedMessage || null,
 
     // Pickup-specific fields (null for delivery)
-    pickupCode: deliveryMode === "pickup" && status === "ready_for_pickup"
+    pickupCode: effectiveFulfillmentMode === "pickup" && status === "ready_for_pickup"
       ? (day.pickupCode || null)
       : null,
-    pickupCodeIssuedAt: deliveryMode === "pickup" && day.pickupCodeIssuedAt
+    pickupCodeIssuedAt: effectiveFulfillmentMode === "pickup" && day.pickupCodeIssuedAt
       ? new Date(day.pickupCodeIssuedAt).toISOString()
       : null,
 

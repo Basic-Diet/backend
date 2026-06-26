@@ -445,10 +445,21 @@ function buildCanonicalActivationPayload({ userId, planId, contractVersion, cont
     premiumBalancePreview: JSON.stringify(subscriptionPayload.premiumBalance),
   });
 
-  const dayEntries = Array.from({ length: daysCount }, (_, index) => ({
-    date: toKSADateString(addDays(start, index)),
-    status: "open",
-  }));
+  const dayEntries = Array.from({ length: daysCount }, (_, index) => {
+    const isFirstDay = index === 0;
+    const overrideObj = legacyRuntimeData.delivery?.firstDayFulfillmentOverride;
+    const overrideType = overrideObj && typeof overrideObj === "object" ? overrideObj.type : overrideObj;
+    const overrideLocId = overrideObj && typeof overrideObj === "object" ? overrideObj.pickupLocationId : null;
+    const isPickupOverride = isFirstDay && overrideType === "pickup";
+    return {
+      date: toKSADateString(addDays(start, index)),
+      status: "open",
+      fulfillmentModeOverride: isPickupOverride ? "pickup" : null,
+      pickupLocationIdOverride: isPickupOverride
+        ? String(overrideLocId || delivery.pickupLocationId || legacyRuntimeData.delivery?.pickupLocationId || legacyRuntimeData.resolvedPickupLocationId || "") || null
+        : null,
+    };
+  });
   return { subscriptionPayload, dayEntries };
 }
 
@@ -463,9 +474,12 @@ async function buildCanonicalSubscriptionActivationPayload({ draft }) {
   const deliveryFromDraft = draft.delivery && typeof draft.delivery === "object" ? draft.delivery : {};
   const deliveryFromSnapshot = snapshot.delivery && typeof snapshot.delivery === "object" ? snapshot.delivery : {};
   const deliveryMode = deliveryFromSnapshot.mode || deliveryFromDraft.type || "";
-  const hasPickupLocationId = !!(deliveryFromSnapshot.pickupLocationId || deliveryFromDraft.pickupLocationId);
+  const overrideObj = deliveryFromDraft.firstDayFulfillmentOverride;
+  const overrideType = overrideObj && typeof overrideObj === "object" ? overrideObj.type : overrideObj;
+  const overrideLocId = overrideObj && typeof overrideObj === "object" ? overrideObj.pickupLocationId : null;
+  const hasPickupLocationId = !!(deliveryFromSnapshot.pickupLocationId || deliveryFromDraft.pickupLocationId || overrideLocId);
   let resolvedPickupLocationId = null;
-  if (deliveryMode === "pickup" && !hasPickupLocationId) {
+  if ((deliveryMode === "pickup" || overrideType === "pickup") && !hasPickupLocationId) {
     try {
       const availableLocations = await getPickupLocationsSetting();
       if (Array.isArray(availableLocations) && availableLocations.length === 1) {
