@@ -1208,7 +1208,7 @@ async function buildSubscriptionBuilderCatalogV2({ builderCatalog, context = {},
   });
 }
 
-async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = true, includeV3 = false } = {}) {
+async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = true, includeV3 = false, ignorePublishedMealBuilder = false } = {}) {
   const coldSandwichCategory = await MenuCategory.findOne(activeCatalogQuery({ key: "cold_sandwiches" })).lean();
   const [proteinGroupData, carbGroupData, sandwichRows, basicMealProduct, premiumLargeSaladProductDoc, premiumLargeSaladUpgrade, premiumConfigState] = await Promise.all([
     getGroupOptionsWithGroup(MENU_PROTEIN_GROUP_KEY),
@@ -1229,7 +1229,7 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
     })).lean(),
     MenuProduct.findOne(activeCatalogQuery({
       key: PREMIUM_LARGE_SALAD_PREMIUM_KEY,
-      itemType: "premium_large_salad",
+      itemType: { $in: ["premium_large_salad", "basic_salad"] },
       ...availableForChannelQuery("subscription"),
     })).lean(),
     resolveSubscriptionPremiumUpgradePricing(PREMIUM_LARGE_SALAD_PREMIUM_KEY).catch(() => null),
@@ -1400,7 +1400,7 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
       },
     })
     : null;
-  if (includeV3) {
+  if (includeV3 && !ignorePublishedMealBuilder) {
     try {
       const mealBuilderConfigService = require("../subscription/mealBuilderConfigService");
       const publishedBuilderPlannerCatalog = await mealBuilderConfigService.buildPlannerCatalogFromPublishedBuilder({ lang });
@@ -1420,8 +1420,8 @@ async function getSubscriptionBuilderCatalog({ lang = "en" } = {}) {
   return builderCatalog;
 }
 
-async function getSubscriptionBuilderCatalogWithV2({ lang = "en", includeV3 = false } = {}) {
-  return buildSubscriptionBuilderCatalogBundle({ lang, includeV3 });
+async function getSubscriptionBuilderCatalogWithV2({ lang = "en", includeV3 = false, ignorePublishedMealBuilder = false } = {}) {
+  return buildSubscriptionBuilderCatalogBundle({ lang, includeV3, ignorePublishedMealBuilder });
 }
 
 module.exports = {

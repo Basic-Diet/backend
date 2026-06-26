@@ -26,7 +26,7 @@ async function processProteinConfig(premiumKey) {
     throw new Error(`Could not find active MenuOption for ${premiumKey}.`);
   }
   
-  const expectedDelta = option.extraPriceHalala || option.extraFeeHalala || 0;
+  const expectedDelta = option.extraPriceHalala || option.extraFeeHalala || 2000;
 
   let existing = await PremiumUpgradeConfig.findOne({ premiumKey });
   if (!existing) {
@@ -99,7 +99,7 @@ async function processSaladConfig() {
   }
 
   let existingSalad = await PremiumUpgradeConfig.findOne({ premiumKey: PREMIUM_LARGE_SALAD_KEY });
-  const expectedDelta = saladPricing.extraFeeHalala || 0;
+  const expectedDelta = saladPricing.extraFeeHalala || 2900;
 
   if (!existingSalad) {
     try {

@@ -8,6 +8,7 @@ const { seedCatalog } = require("./seed-catalog");
 const { seedSubscriptionPlans } = require("./seed-subscription-plans");
 const { bootstrapDefaultAccounts } = require("./seed-default-accounts");
 const { seedMealBuilderConfig } = require("./seed-meal-builder");
+const { backfillPremiumUpgrades } = require("../backfill-premium-upgrades");
 
 
 function isTruthy(value) {
@@ -46,6 +47,7 @@ function printDryRunPlan(args, log = console) {
   log.log(`[bootstrap:dry-run] catalog/menu seed: yes${args.reset ? " with guarded reset" : ""}`);
   log.log("[bootstrap:dry-run] subscription plans seed: yes");
   log.log("[bootstrap:dry-run] subscription addons/settings/pickup locations: handled by catalog seed");
+  log.log("[bootstrap:dry-run] premium upgrade configs backfill: yes");
   log.log(`[bootstrap:dry-run] meal builder seed: ${args.includeMealBuilder ? "yes" : "no"}`);
   if (args.includeMealBuilder) {
     log.log(`[bootstrap:dry-run] meal builder mode=${args.mealBuilderSync ? "sync-bootstrap-owned" : "create-missing-only"}`);
@@ -75,6 +77,7 @@ async function runBootstrap(options = {}) {
       sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
       reset: args.reset,
       includeSubscriptionPlans: false,
+      skipStrictVerify: true,
     });
     await seedSubscriptionPlans({
       sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
@@ -83,6 +86,9 @@ async function runBootstrap(options = {}) {
     // Ensure AddonPlanPrice records are populated now that base plans are seeded/synced
     const { seedSubscriptionAddons } = require("./seed-catalog");
     await seedSubscriptionAddons(null, { sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC) });
+
+    console.log("Running Premium Upgrade Config backfill/reconciliation...");
+    await backfillPremiumUpgrades();
 
     if (args.includeMealBuilder) {
       await seedMealBuilderConfig({
@@ -93,6 +99,9 @@ async function runBootstrap(options = {}) {
     } else {
       console.log("Meal Builder bootstrap skipped. Set MEAL_BUILDER_BOOTSTRAP=true to enable it.");
     }
+
+    const { verifySeedReadContracts } = require("./seed-catalog");
+    await verifySeedReadContracts({ strict: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC) });
   } finally {
     await mongoose.disconnect();
   }

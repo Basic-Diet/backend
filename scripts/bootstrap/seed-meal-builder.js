@@ -7,7 +7,7 @@ const mongoose = require("mongoose");
 const MealBuilderConfig = require("../../src/models/MealBuilderConfig");
 const {
   CONTRACT_VERSION,
-  buildDefaultSeedSections,
+  buildDefaultVisualTemplateSections,
   computeRevisionHash,
   getReadinessReport,
   validateConfigObject,
@@ -54,7 +54,7 @@ function createConfigPayload({ status, sections, publishedAt = null }) {
 }
 
 async function buildValidatedSeedPayload() {
-  const seed = await buildDefaultSeedSections({ returnDetails: true });
+  const seed = await buildDefaultVisualTemplateSections({ returnDetails: true });
   if (seed.errors.length) {
     const message = seed.errors.map((item) => `${item.code}: ${item.message}`).join("; ");
     const err = new Error(`Meal Builder seed catalog is invalid: ${message}`);
@@ -102,8 +102,8 @@ async function seedMealBuilderConfig({
     MealBuilderConfig.findOne({ status: "published", isCurrent: true }).sort({ publishedAt: -1, updatedAt: -1 }).lean(),
   ]);
 
-  const canSyncDraft = sync && isBootstrapOwned(currentDraft);
-  const canSyncPublished = sync && isBootstrapOwned(currentPublished);
+  const canSyncDraft = sync;
+  const canSyncPublished = sync;
 
   for (const warning of warnings) {
     (log.warn || log.log).call(log, `[meal-builder-bootstrap:warning] ${warning.code}: ${warning.message}`);

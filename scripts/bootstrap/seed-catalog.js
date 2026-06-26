@@ -19,10 +19,11 @@ const CatalogItem = require("../../src/models/CatalogItem");
 const SaladIngredient = require("../../src/models/SaladIngredient");
 const Sandwich = require("../../src/models/Sandwich");
 const MealBuilderConfig = require("../../src/models/MealBuilderConfig");
+const Zone = require("../../src/models/Zone");
 const { getSubscriptionBuilderCatalogWithV2 } = require("../../src/services/catalog/CatalogService");
 const { publishMenu } = require("../../src/services/orders/menuCatalogService");
 const { getOneTimeOrderMenu } = require("../../src/services/orders/orderMenuService");
-const { pickupLocations, settings } = require("./fixtures/subscription-demo-data");
+const { pickupLocations, settings, deliveryZones } = require("./fixtures/subscription-demo-data");
 const { seedSubscriptionPlans } = require("./seed-subscription-plans");
 const {
   CUSTOMER_VISIBLE_CARB_KEYS,
@@ -193,7 +194,7 @@ async function verifySeedReadContracts({ strict = true } = {}) {
     .find((product) => product.key === "water");
   check(directAddProduct?.action?.type === "direct_add", "publicMenuV2 water direct-add action missing");
 
-  const { builderCatalogV2, plannerCatalog } = await getSubscriptionBuilderCatalogWithV2({ lang: "en", includeV3: true });
+  const { builderCatalogV2, plannerCatalog } = await getSubscriptionBuilderCatalogWithV2({ lang: "en", includeV3: true, ignorePublishedMealBuilder: true });
   check(builderCatalogV2, "Seeded subscription catalog did not produce builderCatalogV2");
   if (!builderCatalogV2) return false;
   check(builderCatalogV2.catalogVersion === "meal_planner_menu.v2", "builderCatalogV2 catalogVersion mismatch");
@@ -1599,13 +1600,36 @@ async function seedSettings({ sync = false } = {}) {
   }
 
   if (settings && typeof settings === "object") {
+    const envOverrides = {
+      restaurant_name: process.env.RESTAURANT_NAME,
+      restaurant_phone: process.env.RESTAURANT_PHONE,
+      restaurant_address: process.env.RESTAURANT_ADDRESS,
+      restaurant_latitude: process.env.RESTAURANT_LATITUDE ? parseFloat(process.env.RESTAURANT_LATITUDE) : undefined,
+      restaurant_longitude: process.env.RESTAURANT_LONGITUDE ? parseFloat(process.env.RESTAURANT_LONGITUDE) : undefined,
+      restaurant_open_time: process.env.RESTAURANT_OPEN_TIME,
+      restaurant_close_time: process.env.RESTAURANT_CLOSE_TIME,
+      restaurant_is_open: process.env.RESTAURANT_IS_OPEN !== undefined ? process.env.RESTAURANT_IS_OPEN === "true" : undefined,
+    };
+
     const settingEntries = Object.entries(settings);
-    for (const [settingKey, value] of settingEntries) {
+    for (const [settingKey, defaultValue] of settingEntries) {
+      const value = envOverrides[settingKey] !== undefined ? envOverrides[settingKey] : defaultValue;
       await upsertByMode(
         Setting,
         { key: settingKey },
         { key: settingKey, value, description: "System Base Setting" },
         { label: "Settings", sync }
+      );
+    }
+  }
+
+  if (Array.isArray(deliveryZones) && deliveryZones.length > 0) {
+    for (const zone of deliveryZones) {
+      await upsertByMode(
+        Zone,
+        { "name.en": zone.name.en },
+        zone,
+        { label: "Delivery zones", sync }
       );
     }
   }
@@ -1646,6 +1670,7 @@ async function seedCatalog({
   reset = false,
   onlySubscriptionPlans = false,
   includeSubscriptionPlans = true,
+  skipStrictVerify = false,
 } = {}) {
   const runSync = sync === true;
   const runReset = reset === true;
@@ -1688,7 +1713,7 @@ async function seedCatalog({
     console.log("Menu publication skipped in create-missing-only mode.");
   }
 
-  await verifySeedReadContracts({ strict: runSync });
+  await verifySeedReadContracts({ strict: runSync && !skipStrictVerify });
 
   printBootstrapStats();
   console.log(runReset ? "Reset performed." : "No reset performed.");

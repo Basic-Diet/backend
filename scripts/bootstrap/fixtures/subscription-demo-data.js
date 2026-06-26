@@ -11,6 +11,23 @@ const settings = {
   one_time_premium_price: 42,
   custom_salad_base_price: 18,
   custom_meal_base_price: 25,
+  restaurant_name: "BasicDiet145",
+  restaurant_phone: "+966500000000",
+  restaurant_address: "King Fahd Road, Riyadh, KSA",
+  restaurant_latitude: 24.7136,
+  restaurant_longitude: 46.6753,
+  restaurant_open_time: "08:00",
+  restaurant_close_time: "22:00",
+  restaurant_is_open: true,
+  restaurant_hours: [
+    { dayOfWeek: 0, openTime: "08:00", closeTime: "22:00", isClosed: false },
+    { dayOfWeek: 1, openTime: "08:00", closeTime: "22:00", isClosed: false },
+    { dayOfWeek: 2, openTime: "08:00", closeTime: "22:00", isClosed: false },
+    { dayOfWeek: 3, openTime: "08:00", closeTime: "22:00", isClosed: false },
+    { dayOfWeek: 4, openTime: "08:00", closeTime: "22:00", isClosed: false },
+    { dayOfWeek: 5, openTime: "12:00", closeTime: "22:00", isClosed: false },
+    { dayOfWeek: 6, openTime: "08:00", closeTime: "22:00", isClosed: false },
+  ],
 };
 
 const deliveryZones = [
