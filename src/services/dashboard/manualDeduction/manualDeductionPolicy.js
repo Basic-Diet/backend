@@ -69,18 +69,22 @@ function validateCounts({ regularMeals, premiumMeals, addons }) {
   const regular = normalizeCount(regularMeals);
   const premium = normalizeCount(premiumMeals);
 
-  let validAddons = [];
+  const addonCountById = new Map();
   let addonsTotal = 0;
   if (addons && Array.isArray(addons)) {
-    validAddons = addons.map((addon) => {
+    addons.forEach((addon) => {
       const qty = normalizeCount(addon.qty);
       if (!addon.addonId || qty < 0) {
         throw new ManualDeductionError("INVALID_ADDON_COUNT", "Invalid addon count or missing addonId", 400);
       }
+      const addonId = String(addon.addonId);
       addonsTotal += qty;
-      return { addonId: String(addon.addonId), qty };
-    }).filter((addon) => addon.qty > 0);
+      addonCountById.set(addonId, (addonCountById.get(addonId) || 0) + qty);
+    });
   }
+  const validAddons = Array.from(addonCountById.entries())
+    .map(([addonId, qty]) => ({ addonId, qty }))
+    .filter((addon) => addon.qty > 0);
 
   if (
     !Number.isInteger(regular)

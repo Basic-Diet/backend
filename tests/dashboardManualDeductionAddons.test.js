@@ -29,6 +29,7 @@ let kitchenToken;
 let plan;
 let customer;
 let addon;
+let addon2;
 let testSubscription;
 
 function issueDashboardToken(userId, role = "admin") {
@@ -64,7 +65,7 @@ async function cleanup() {
   await Subscription.deleteMany({ userId: { $in: userIds } });
   await User.deleteMany({ phone: "+966511119999" });
   await Plan.deleteMany({ "name.en": TEST_PREFIX });
-  await Addon.deleteMany({ "name.en": `${TEST_PREFIX}-addon` });
+  await Addon.deleteMany({ "name.en": { $regex: TEST_PREFIX } });
   await DashboardUser.deleteMany({ email: { $regex: TEST_PREFIX } });
 }
 
@@ -117,6 +118,13 @@ async function setup() {
     priceHalala: 1000,
     isActive: true,
   });
+  addon2 = await Addon.create({
+    name: { ar: "Second Test Addon", en: `${TEST_PREFIX}-addon-2` },
+    category: "juice",
+    currency: "SAR",
+    priceHalala: 800,
+    isActive: true,
+  });
 
   customer = await User.create({
     phone: "+966511119999",
@@ -146,13 +154,26 @@ async function setup() {
       name: "Test Addon",
       category: "Snack",
       maxPerDay: 1,
+    }, {
+      addonId: addon2._id,
+      name: "Second Test Addon",
+      category: "Juice",
+      maxPerDay: 1,
     }],
     addonBalance: [{
       addonId: addon._id,
       purchasedQty: 5,
       remainingQty: 5,
+    }, {
+      addonId: addon2._id,
+      purchasedQty: 4,
+      remainingQty: 4,
     }],
   });
+}
+
+function addonBalanceById(rows) {
+  return new Map((rows || []).map((row) => [String(row.addonId), row]));
 }
 
 async function testRoles() {
@@ -177,12 +198,16 @@ async function testSearchResponse() {
   assert.strictEqual(sub.remainingPremiumMeals, 2);
   assert.strictEqual(sub.remainingMeals, 7);
   assert(Array.isArray(sub.addonBalances), "addonBalances is an array");
-  assert.strictEqual(sub.addonBalances.length, 1);
-  assert.strictEqual(sub.addonBalances[0].addonId, String(addon._id));
-  assert.strictEqual(sub.addonBalances[0].name, "Test Addon");
-  assert.strictEqual(sub.addonBalances[0].remainingQty, 5);
-  assert.strictEqual(sub.addonBalances[0].totalQty, 5);
-  assert.strictEqual(sub.addonBalances[0].consumedQty, 0);
+  assert.strictEqual(sub.addonBalances.length, 2);
+  const balances = addonBalanceById(sub.addonBalances);
+  assert.strictEqual(balances.get(String(addon._id)).name, "Test Addon");
+  assert.strictEqual(balances.get(String(addon._id)).remainingQty, 5);
+  assert.strictEqual(balances.get(String(addon._id)).totalQty, 5);
+  assert.strictEqual(balances.get(String(addon._id)).consumedQty, 0);
+  assert.strictEqual(balances.get(String(addon2._id)).name, "Second Test Addon");
+  assert.strictEqual(balances.get(String(addon2._id)).remainingQty, 4);
+  assert.strictEqual(balances.get(String(addon2._id)).totalQty, 4);
+  assert.strictEqual(balances.get(String(addon2._id)).consumedQty, 0);
 }
 
 async function testOldPayloadStillWorks() {
@@ -209,7 +234,9 @@ async function testAddonDeduction() {
   const res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send(payload), adminToken);
   assert.strictEqual(res.status, 200, res.text);
   assert.strictEqual(res.body.data.deducted.addons[0].qty, 2);
-  assert.strictEqual(res.body.data.remaining.addons[0].remainingQty, 3); // 5 - 2
+  const responseBalances = addonBalanceById(res.body.data.remaining.addons);
+  assert.strictEqual(responseBalances.get(String(addon._id)).remainingQty, 3); // 5 - 2
+  assert.strictEqual(responseBalances.get(String(addon2._id)).remainingQty, 4);
   
   // Verify regular meals unaffected
   assert.strictEqual(res.body.data.remaining.regularMeals, 4);
@@ -219,6 +246,8 @@ async function testAddonDeduction() {
   const afterDeduction = await Subscription.findById(testSubscription._id).lean();
   assert.strictEqual(afterDeduction.addonBalance[0].remainingQty, 3);
   assert.strictEqual(afterDeduction.addonBalance[0].consumedQty, 2);
+  assert.strictEqual(afterDeduction.addonBalance[1].remainingQty, 4);
+  assert.strictEqual(afterDeduction.addonBalance[1].consumedQty, 0);
 }
 
 async function testCombinedDeduction() {
@@ -233,11 +262,46 @@ async function testCombinedDeduction() {
   assert.strictEqual(res.body.data.remaining.regularMeals, 3); // 4 - 1
   assert.strictEqual(res.body.data.remaining.premiumMeals, 1); // 2 - 1
   assert.strictEqual(res.body.data.remaining.totalMeals, 4); // 6 - 2
-  assert.strictEqual(res.body.data.remaining.addons[0].remainingQty, 2); // 3 - 1
+  const responseBalances = addonBalanceById(res.body.data.remaining.addons);
+  assert.strictEqual(responseBalances.get(String(addon._id)).remainingQty, 2); // 3 - 1
+  assert.strictEqual(responseBalances.get(String(addon2._id)).remainingQty, 4);
 
   const afterCombined = await Subscription.findById(testSubscription._id).lean();
   assert.strictEqual(afterCombined.addonBalance[0].remainingQty, 2);
   assert.strictEqual(afterCombined.addonBalance[0].consumedQty, 3);
+  assert.strictEqual(afterCombined.addonBalance[1].remainingQty, 4);
+  assert.strictEqual(afterCombined.addonBalance[1].consumedQty, 0);
+}
+
+async function testMultipleAddonFullDeduction() {
+  const payload = {
+    regularMeals: 0,
+    premiumMeals: 0,
+    addons: [
+      { addonId: String(addon._id), qty: 1 },
+      { addonId: String(addon._id), qty: 1 },
+      { addonId: String(addon2._id), qty: 4 },
+    ],
+    reason: "test_multiple_addons_full_deduction"
+  };
+  const res = await auth(request(app).post(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deduction`).send(payload), cashierToken);
+  assert.strictEqual(res.status, 200, res.text);
+
+  const deducted = addonBalanceById(res.body.data.deducted.addons);
+  assert.strictEqual(deducted.get(String(addon._id)).qty, 2, "duplicate addon request rows are combined");
+  assert.strictEqual(deducted.get(String(addon2._id)).qty, 4, "second addon fully deducted");
+
+  const responseBalances = addonBalanceById(res.body.data.remaining.addons);
+  assert.strictEqual(responseBalances.get(String(addon._id)).remainingQty, 0);
+  assert.strictEqual(responseBalances.get(String(addon2._id)).remainingQty, 0);
+  assert.strictEqual(res.body.data.remaining.totalMeals, 4, "addon-only deduction does not affect meal balance");
+
+  const afterFullDeduction = await Subscription.findById(testSubscription._id).lean();
+  const storedBalances = addonBalanceById(afterFullDeduction.addonBalance);
+  assert.strictEqual(storedBalances.get(String(addon._id)).remainingQty, 0);
+  assert.strictEqual(storedBalances.get(String(addon._id)).consumedQty, 5);
+  assert.strictEqual(storedBalances.get(String(addon2._id)).remainingQty, 0);
+  assert.strictEqual(storedBalances.get(String(addon2._id)).consumedQty, 4);
 }
 
 async function testErrors() {
@@ -262,15 +326,17 @@ async function testActivityLog() {
   const res = await auth(request(app).get(`/api/dashboard/subscriptions/${testSubscription._id}/manual-deductions`), cashierToken);
   assert.strictEqual(res.status, 200);
   const items = res.body.data.items;
-  assert.strictEqual(items.length, 3, "should have 3 logs");
+  assert.strictEqual(items.length, 4, "should have 4 logs");
   
-  // The first log is the combined deduction (most recent)
-  const combinedLog = items[0];
-  assert.strictEqual(combinedLog.deducted.regularMeals, 1);
-  assert.strictEqual(combinedLog.deducted.premiumMeals, 1);
-  assert.strictEqual(combinedLog.deducted.total, 2);
-  assert.strictEqual(combinedLog.deducted.addons.length, 1);
-  assert.strictEqual(combinedLog.deducted.addons[0].qty, 1);
+  // The first log is the full addon deduction (most recent)
+  const fullAddonLog = items[0];
+  assert.strictEqual(fullAddonLog.deducted.regularMeals, 0);
+  assert.strictEqual(fullAddonLog.deducted.premiumMeals, 0);
+  assert.strictEqual(fullAddonLog.deducted.total, 0);
+  assert.strictEqual(fullAddonLog.deducted.addons.length, 2);
+  const deducted = addonBalanceById(fullAddonLog.deducted.addons);
+  assert.strictEqual(deducted.get(String(addon._id)).qty, 2);
+  assert.strictEqual(deducted.get(String(addon2._id)).qty, 4);
 }
 
 async function run() {
@@ -281,6 +347,7 @@ async function run() {
     await testOldPayloadStillWorks();
     await testAddonDeduction();
     await testCombinedDeduction();
+    await testMultipleAddonFullDeduction();
     await testErrors();
     await testActivityLog();
     console.log("dashboard manual deduction phase 2 addons tests passed");
