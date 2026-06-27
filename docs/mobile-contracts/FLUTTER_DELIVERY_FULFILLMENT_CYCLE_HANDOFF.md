@@ -283,16 +283,31 @@ Submits a request to lock and prepare selected items for pickup.
 
 * **Path**: `/api/subscriptions/:id/pickup-requests`
 * **Method**: `POST`
-* **Request Body**:
+* **Preferred Request Body (explicit pickup item IDs)**:
 ```json
 {
   "date": "2026-07-01",
-  "mealCount": 1,
-  "selectedMealSlotIds": ["slot_1"],
   "selectedPickupItemIds": ["slot_1"],
   "idempotencyKey": "pickup_req_idempotency_123"
 }
 ```
+* **Legacy fallback body (slot IDs only)**:
+```json
+{
+  "date": "2026-07-01",
+  "selectedMealSlotIds": ["slot_1"],
+  "idempotencyKey": "pickup_req_idempotency_124"
+}
+```
+* **Legacy count-only body**: Use `mealCount` only when the UI is not selecting explicit items.
+```json
+{
+  "date": "2026-07-01",
+  "mealCount": 1,
+  "idempotencyKey": "pickup_req_idempotency_125"
+}
+```
+Do not send the same meal slot in both `selectedPickupItemIds` and `selectedMealSlotIds`.
 * **Success Response (200 OK)**:
 ```json
 {

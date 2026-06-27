@@ -37,7 +37,7 @@ const { runMongoTransactionWithRetry } = require("../mongoTransactionRetryServic
 async function executeAction(actionId, { entityId, entityType, userId, role, payload = {} }) {
   // Phase 5: Admin role check for admin-specific operations only
   // Courier role is allowed for dispatch operations
-  const adminOnlyActions = ["lock", "no_show", "reopen"];
+  const adminOnlyActions = ["lock", "reopen"];
   const normalizedActionId = actionId === "start_preparation"
     ? "prepare"
     : actionId === "ready-for-pickup"
@@ -80,9 +80,9 @@ async function executeAction(actionId, { entityId, entityType, userId, role, pay
         if (normalizedActionId === "no_show" && targetDoc.status === "no_show") isIdempotentReplay = true;
         if (normalizedActionId === "cancel" && ["canceled", "cancelled", "delivery_canceled", "canceled_at_branch", "no_show"].includes(targetDoc.status)) isIdempotentReplay = true;
 
-        const isAdminNoShow = normalizedActionId === "no_show" && ["admin", "superadmin"].includes(String(role || ""));
+        const isPrivilegedNoShow = normalizedActionId === "no_show" && ["admin", "superadmin", "kitchen"].includes(String(role || ""));
 
-        if (!isIdempotentReplay && !isAdminNoShow) {
+        if (!isIdempotentReplay && !isPrivilegedNoShow) {
           const err = new Error("Historical operational records cannot be modified");
           err.code = "HISTORICAL_MUTATION_FORBIDDEN";
           err.status = 409;

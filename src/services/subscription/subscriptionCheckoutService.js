@@ -1,4 +1,5 @@
 const CheckoutDraft = require("../../models/CheckoutDraft");
+const Subscription = require("../../models/Subscription");
 const { RECONCILE_MODES, reconcileCheckoutDraft } = require("../../services/reconciliationService");
 const { isPendingCheckoutReusable, buildCheckoutReusePayload } = require("./subscriptionCheckoutHelpers");
 const { serializeSubscriptionForClient } = require("./subscriptionClientSerializationService");
@@ -183,6 +184,7 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
   let checkoutStage = "pre_draft";
   let providerInvoiceId = "";
   let paymentUrl = "";
+  let paidCheckoutPayment = null;
   let normalizedPremiumItems = [];
   let breakdown = null;
   let quote = null;
@@ -273,6 +275,7 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
       if (currentPayment && currentPayment.status === "paid") {
         checkoutStage = "post_payment";
         draft = currentDraft;
+        paidCheckoutPayment = currentPayment;
         providerInvoiceId = getInvoiceResponseId(currentPayment.invoiceResponse);
         paymentUrl = getInvoiceResponseUrl(currentPayment.invoiceResponse);
       } else if (!draft && !releasedFailedDraftForRetry) {
@@ -650,14 +653,15 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
     if (checkoutStage === "post_payment") {
       checkoutStage = "finalizing_payment";
       const finalizationResult = await runtime.finalizeSubscriptionDraftPaymentFlow(
-        { draft, payment: null },
+        { draft, payment: paidCheckoutPayment },
         runtime
       );
-      if (finalizationResult.subscription) {
+      if (finalizationResult.applied && finalizationResult.subscriptionId) {
+        const subscription = await Subscription.findById(finalizationResult.subscriptionId).lean();
         return {
           ok: true,
           data: {
-            subscription: await serializeSubscriptionForClient(finalizationResult.subscription, lang),
+            subscription: subscription ? await serializeSubscriptionForClient(subscription, lang) : null,
             checkoutStatusLabel: resolveReadLabel("checkoutStatuses", "completed", lang),
             paymentStatusLabel: resolveReadLabel("paymentStatuses", "paid", lang),
             checkedProvider: true,

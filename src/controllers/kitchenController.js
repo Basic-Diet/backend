@@ -1080,7 +1080,6 @@ async function verifyPickup(req, res) {
 }
 
 async function markPickupNoShow(req, res) {
-  return executeCanonicalDayAction(req, res, "no_show", { noShow: true });
   /* Historical implementation retained below for reference. */
   const { dayId } = req.params;
   try {

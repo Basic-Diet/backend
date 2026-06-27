@@ -3,7 +3,6 @@ const BuilderProtein = require("../../models/BuilderProtein");
 const MenuOption = require("../../models/MenuOption");
 const MenuOptionGroup = require("../../models/MenuOptionGroup");
 const Addon = require("../../models/Addon");
-const AddonPlanPrice = require("../../models/AddonPlanPrice");
 const Zone = require("../../models/Zone");
 const Setting = require("../../models/Setting");
 const dateUtils = require("../../utils/date");
@@ -573,7 +572,7 @@ async function resolveCheckoutQuoteOrThrow(
       ? Promise.resolve([])
       : (premiumIds.length ? BuilderProtein.find({ _id: { $in: premiumIds }, isActive: true, isPremium: true }).lean() : Promise.resolve([])),
     hasPremiumKey ? Promise.resolve([]) : findMenuPremiumOptionsByIds(premiumIds),
-    addonIds.length ? Addon.find({ _id: { $in: addonIds }, isActive: true, isArchived: { $ne: true } }).lean() : Promise.resolve([]),
+    addonIds.length ? Addon.find({ _id: { $in: addonIds }, isArchived: { $ne: true } }).lean() : Promise.resolve([]),
   ]);
 
   const premiumDocs = builderPremiumDocs.concat(menuPremiumDocs.map(mapMenuPremiumOptionForQuote));
@@ -683,31 +682,19 @@ async function resolveCheckoutQuoteOrThrow(
       err.code = "INVALID_SELECTION";
       throw err;
     }
+    if (doc.isActive === false) {
+      const err = new Error(`Addon plan ${item.id} not found or inactive`);
+      err.code = "NOT_FOUND";
+      throw err;
+    }
     if (resolveSubscriptionAddonBillingMode(doc, { defaultMode: "per_day" }) !== "per_day") {
       const err = new Error(`Addon ${item.id} must use per_day billing for subscription checkout`);
       err.code = "INVALID_SELECTION";
       throw err;
     }
 
-    let unit;
-    if (doc.kind === "plan") {
-      const matrixPrice = await AddonPlanPrice.findOne({
-        addonPlanId: doc._id,
-        basePlanId: plan._id,
-        isActive: true,
-      }).lean();
-
-      if (!matrixPrice) {
-        const err = new Error(`Addon plan ${doc.name.en || doc._id} has no active price resolved for the base plan ${plan.name.en || plan._id}`);
-        err.code = "PRICE_MATRIX_NOT_FOUND";
-        throw err;
-      }
-      unit = matrixPrice.priceHalala;
-      assertSystemCurrencyOrThrow(matrixPrice.currency || SYSTEM_CURRENCY, `Addon plan price matrix currency`);
-    } else {
-      unit = resolveAddonUnitPriceHalala(doc);
-      assertSystemCurrencyOrThrow(doc.currency || SYSTEM_CURRENCY, `Addon plan ${item.id} currency`);
-    }
+    const unit = resolveAddonUnitPriceHalala(doc);
+    assertSystemCurrencyOrThrow(doc.currency || SYSTEM_CURRENCY, `Addon plan ${item.id} currency`);
 
     const quantityPerDay = Math.max(1, Math.floor(Number(item.quantityPerDay || 1)));
     const daysCount = Number(plan.daysCount || 0);

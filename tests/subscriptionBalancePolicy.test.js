@@ -29,6 +29,7 @@ const {
   performDaySelectionValidation,
 } = require("../src/services/subscription/subscriptionSelectionService");
 const { markPickupNoShow } = require("../src/controllers/kitchenController");
+const dateUtils = require("../src/utils/date");
 const BuilderProtein = require("../src/models/BuilderProtein");
 const BuilderCarb = require("../src/models/BuilderCarb");
 const MealCategory = require("../src/models/MealCategory");
@@ -37,6 +38,7 @@ const SaladIngredient = require("../src/models/SaladIngredient");
 const Sandwich = require("../src/models/Sandwich");
 
 const TEST_TAG = `balance-policy-${Date.now()}`;
+dateUtils.getTodayKSADate = () => "2026-06-01";
 const PLANNER_IDS = {
   regularProtein: "507f191e810c19729de870a1",
   premiumProtein: "507f191e810c19729de870a2",
@@ -448,7 +450,7 @@ async function runTests() {
     const deliveryOpsDay = await SubscriptionDay.create({
       subscriptionId: sub1._id,
       date: "2026-06-08",
-      status: "in_preparation",
+      status: "ready_for_delivery",
       lockedSnapshot: {
         mealsPerDay: 2,
         requiredMealCount: 2,
@@ -591,7 +593,7 @@ async function runTests() {
       const validation3 = await performDaySelectionValidation({
         userId: sub3.userId,
         subscriptionId: sub3._id,
-        date: "2026-06-20",
+        date: "2026-07-01",
         mealSlots: buildStandardSlots(3),
       });
       assert.strictEqual(validation3.valid, true, "Validation accepts 3 slots when requiredMealCount is 1 and remainingMeals is 7");
@@ -604,7 +606,7 @@ async function runTests() {
         await performDaySelectionValidation({
           userId: sub3.userId,
           subscriptionId: sub3._id,
-          date: "2026-06-20",
+          date: "2026-07-01",
           mealSlots: buildStandardSlots(8),
         });
         assert.fail("Should have thrown MEAL_SLOT_COUNT_EXCEEDED");
@@ -617,7 +619,7 @@ async function runTests() {
       const saveResult = await performDaySelectionUpdate({
         userId: sub3.userId,
         subscriptionId: sub3._id,
-        date: "2026-06-21",
+        date: "2026-07-02",
         mealSlots: buildStandardSlots(3),
       });
       assert.strictEqual(saveResult.day.mealSlots.length, 3, "Save accepts 3 slots");
@@ -629,7 +631,7 @@ async function runTests() {
         await performDaySelectionValidation({
           userId: legacySub.userId,
           subscriptionId: legacySub._id,
-          date: "2026-06-20",
+          date: "2026-07-01",
           mealSlots: buildStandardSlots(2),
         });
         assert.fail("Should have kept requiredMealCount cap for legacy subscriptions");
@@ -641,7 +643,7 @@ async function runTests() {
       const premiumValidation = await performDaySelectionValidation({
         userId: sub3.userId,
         subscriptionId: sub3._id,
-        date: "2026-06-22",
+        date: "2026-07-03",
         mealSlots: [
           ...buildStandardSlots(2),
           {

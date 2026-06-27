@@ -379,7 +379,7 @@ Pickup selection controls:
 | --- | --- | --- |
 | `pickupItems[]` where `availability.canSelect=true` | multi-select checklist | `selectedPickupItemIds` |
 | `availableSlotIds[]` | multi-select checklist fallback for meal slots | `selectedMealSlotIds` |
-| `remainingMeals` / `summary.appendLimit` | numeric stepper limit | `mealCount` |
+| `remainingMeals` / `summary.appendLimit` | numeric stepper limit | `mealCount`, only for legacy count-based pickup without explicit item IDs |
 
 Disable confirm button when `summary.canCreatePickupRequest=false`.
 
@@ -394,22 +394,42 @@ Form controls:
 | Field | UI control | Required | Options / validation |
 | --- | --- | --- | --- |
 | `date` | hidden selected timeline date | yes | `YYYY-MM-DD`. |
-| `mealCount` | numeric stepper | yes | Minimum `1`; maximum `summary.appendLimit` or selected item count policy. |
+| `mealCount` | numeric stepper | conditional | Required only when not sending explicit item IDs. Minimum `1`; maximum `summary.appendLimit`. |
 | `selectedPickupItemIds` | multi-select checklist | preferred | Values from `pickupItems[].itemId`. |
 | `selectedMealSlotIds` | multi-select checklist fallback | optional | Values from `availableSlotIds[]`. |
 | `idempotencyKey` | hidden generated value | yes | Reuse for retry of the same confirmation tap. |
 
-Payload:
+Preferred payload using pickup item IDs:
+
+```json
+{
+  "date": "2026-07-01",
+  "selectedPickupItemIds": ["slot_1"],
+  "idempotencyKey": "pickup-uuid-123"
+}
+```
+
+Legacy fallback payload using only slot IDs:
+
+```json
+{
+  "date": "2026-07-01",
+  "selectedMealSlotIds": ["slot_1"],
+  "idempotencyKey": "pickup-uuid-124"
+}
+```
+
+Legacy count-only payload, only when the UI is not selecting specific items:
 
 ```json
 {
   "date": "2026-07-01",
   "mealCount": 1,
-  "selectedMealSlotIds": ["slot_1"],
-  "selectedPickupItemIds": ["slot_1"],
-  "idempotencyKey": "pickup-uuid-123"
+  "idempotencyKey": "pickup-uuid-125"
 }
 ```
+
+Do not send the same meal slot in both `selectedPickupItemIds` and `selectedMealSlotIds`. Prefer `selectedPickupItemIds` for the new Flutter flow.
 
 Success response:
 

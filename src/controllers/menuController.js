@@ -170,7 +170,7 @@ function buildSubscriptionMealCatalog({
   const mappedPremiumMeals = premiumMeals.map((meal) => resolvePremiumMealCatalogEntry(meal, lang));
   const mappedAddons = addons.map((addon) => {
     const entry = resolveAddonCatalogEntry(addon, lang);
-    if (addon.isAvailable === false) {
+    if (addon.isAvailable === false || addon.isActive === false) {
       entry.isAvailable = false;
     }
     return entry;
@@ -178,7 +178,7 @@ function buildSubscriptionMealCatalog({
   const mappedMealPlannerAddons = (Array.isArray(mealPlannerAddons) ? mealPlannerAddons : addons)
     .map((addon) => {
       const entry = resolveAddonCatalogEntry(addon, lang);
-      if (addon.isAvailable === false) {
+      if (addon.isAvailable === false || addon.isActive === false) {
         entry.isAvailable = false;
       }
       return entry;
@@ -349,7 +349,7 @@ async function getSubscriptionMenu(req, res) {
     MealCategory.find({}).sort({ sortOrder: 1, createdAt: -1 }).lean(),
     getMealPlannerCatalog({ lang }),
     Addon.find({ isActive: true, kind: "plan", billingMode: "per_day" }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
-    Addon.find({ isActive: true, kind: "item", billingMode: "flat_once" }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
+    Addon.find({ kind: "item", billingMode: "flat_once", isArchived: { $ne: true } }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
     getSettingValue("delivery_windows", []),
     getSettingValue("subscription_delivery_fee_halala", 0),
     Zone.find({}).sort({ isActive: -1, sortOrder: 1, createdAt: -1 }).lean(),
@@ -390,7 +390,7 @@ async function getSubscriptionMenu(req, res) {
     return data;
   });
 
-  const filteredMealPlannerAddons = filterAndDedupeCanonicalAddons(mealPlannerAddons);
+  const filteredMealPlannerAddons = mealPlannerAddons;
 
   const enrichedMealPlannerAddons = filteredMealPlannerAddons.map((addon) => {
     const data = { ...addon };
