@@ -242,6 +242,7 @@ function localizeTimelineReadPayload(timeline, lang) {
           dayNumber: day.calendar?.dayOfMonth || 0,
           deliveryMode: day.deliveryMode || null,
           status: day.status,
+          dayStatus: day.dayStatus || day.status || "open",
           statusLabel,
           isPast: Boolean(day.isPast),
           autoSettled: Boolean(day.autoSettled),

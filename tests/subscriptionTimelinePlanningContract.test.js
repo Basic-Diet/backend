@@ -156,6 +156,16 @@ test("confirmed commercially satisfied active day is planned", () => {
   }), "planned");
 });
 
+for (const rawStatus of ["locked", "in_preparation", "out_for_delivery", "ready_for_pickup", "ready_for_delivery", "preparing", "on_the_way"]) {
+  test(`${rawStatus} day renders as locked on timeline`, () => {
+    assert.strictEqual(resolveTimelineLegacyStatus({
+      day: buildDay({ status: rawStatus }),
+      isExtension: false,
+      isPlanned: false,
+    }), "locked");
+  });
+}
+
 test("inactive subscription never shows planned", () => {
   const result = derive({
     subscriptionStatus: "canceled",
@@ -185,6 +195,7 @@ test("localized timeline payload exposes additive planning fields", () => {
     days: [{
       date: DATE,
       status: "open",
+      dayStatus: "locked",
       calendar: {
         dayOfMonth: 10,
         weekday: { shortLabels: { en: "Wed" } },
@@ -196,6 +207,7 @@ test("localized timeline payload exposes additive planning fields", () => {
   }, "en");
   const day = payload.days[0];
   assert.strictEqual(day.timelineStatus, "pending_payment");
+  assert.strictEqual(day.dayStatus, "locked");
   assert.strictEqual(day.canShowAsPlanned, false);
   assert.strictEqual(day.paymentStatus, "pending");
   assert.strictEqual(day.orderStatus, "none");

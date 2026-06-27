@@ -150,10 +150,13 @@ function normalizeTimelineStatus(rawStatus) {
       return "no_show";
     case "consumed_without_preparation":
       return "consumed_without_preparation";
+    case "preparing":
+    case "on_the_way":
     case "locked":
     case "in_preparation":
     case "out_for_delivery":
     case "ready_for_pickup":
+    case "ready_for_delivery":
       return "locked";
     case "frozen":
       return "frozen";
@@ -592,8 +595,9 @@ async function buildSubscriptionTimeline(subscriptionId, options = {}) {
       today: businessDate,
     });
     const dayForFulfillment = projectedDay;
+    const dayStatus = String(dayForFulfillment.status || "open");
     const statusLabel = resolveReadLabel("timelineStatuses", status, lang)
-      || resolveReadLabel("dayStatuses", dayForFulfillment.status, lang);
+      || resolveReadLabel("dayStatuses", dayStatus, lang);
     const fulfillmentReadFields = buildFulfillmentReadFields({
       subscription,
       day: dayForFulfillment,
@@ -609,6 +613,7 @@ async function buildSubscriptionTimeline(subscriptionId, options = {}) {
     timelineDays.push({
       date: currentDate,
       status,
+      dayStatus,
       isPast,
       autoSettled: Boolean(dbDay && dbDay.autoSettled),
       settledAt: dbDay && dbDay.settledAt ? dbDay.settledAt : null,

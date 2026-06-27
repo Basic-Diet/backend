@@ -14,9 +14,12 @@ module.exports = {
     },
     dayStatuses: {
       open: "Open",
+      locked: "Locked",
       frozen: "Frozen",
       preparing: "Preparing",
+      in_preparation: "Preparing",
       on_the_way: "On the way",
+      out_for_delivery: "On the way",
       ready_for_pickup: "Ready for pickup",
       ready_for_delivery: "Ready for Delivery",
       fulfilled: "Fulfilled",

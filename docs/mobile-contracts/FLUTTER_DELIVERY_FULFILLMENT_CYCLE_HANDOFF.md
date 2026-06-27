@@ -2,6 +2,9 @@
 
 This document details the API contracts, data models, state machines, and business rules governing the subscription delivery and fulfillment lifecycle. It is designed to serve as an implementation-ready guide for mobile application development and Codex integration.
 
+For the Flutter team's screen-by-screen implementation checklist, form control types, select/multi-select options, and exact payload examples, see:
+[FLUTTER_TIMELINE_FULFILLMENT_FOR_FRONTEND.md](./FLUTTER_TIMELINE_FULFILLMENT_FOR_FRONTEND.md).
+
 ---
 
 ## 1. Context & Business Domain Overview
@@ -520,8 +523,9 @@ Gets the calendar list of subscription days.
         "day": "Wednesday",
         "month": "July",
         "dayNumber": 1,
-        "status": "open",
-        "statusLabel": "Open",
+        "status": "locked",
+        "dayStatus": "in_preparation",
+        "statusLabel": "Locked",
         "fulfillmentMode": "pickup",
         "fulfillmentModeOverride": "pickup",
         "pickupLocationIdOverride": "branch_main_override",
@@ -536,6 +540,7 @@ Gets the calendar list of subscription days.
         "month": "July",
         "dayNumber": 2,
         "status": "open",
+        "dayStatus": "open",
         "statusLabel": "Open",
         "fulfillmentMode": "delivery",
         "fulfillmentModeOverride": null,

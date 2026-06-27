@@ -15,9 +15,12 @@ module.exports = {
     },
     dayStatuses: {
       open: "مفتوح",
+      locked: "مغلق",
       frozen: "مجمد",
       preparing: "قيد التحضير",
+      in_preparation: "قيد التحضير",
       on_the_way: "في الطريق",
+      out_for_delivery: "في الطريق",
       ready_for_pickup: "جاهز للاستلام",
       ready_for_delivery: "جاهز للتوصيل",
       fulfilled: "مكتمل",

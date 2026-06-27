@@ -206,6 +206,10 @@ router.post("/:id/cancel", asyncHandler(controller.cancelSubscription));
  *                           status:
  *                             type: string
  *                             enum: [open, planned, locked, delivered, consumed_without_preparation, delivery_canceled, canceled_at_branch, no_show, frozen, skipped, extension]
+ *                           dayStatus:
+ *                             type: string
+ *                             description: Raw operational subscription-day status. Use status for the calendar badge; use dayStatus for detail screens.
+ *                             enum: [open, locked, in_preparation, out_for_delivery, ready_for_pickup, ready_for_delivery, fulfilled, consumed_without_preparation, delivery_canceled, canceled_at_branch, no_show, frozen, skipped]
  *                           statusLabel:
  *                             type: string
  *                           selectedMeals:
