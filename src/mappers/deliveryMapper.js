@@ -54,13 +54,12 @@ function buildAllowedAction({ id, type, entityId }) {
   }[id];
 
   if (!actionConfig) return null;
+  if (!actionConfig.endpoint) return null;
   return {
     id,
     label: actionConfig.label,
     method: actionConfig.method,
-    endpoint: actionConfig.endpoint || undefined,
-    disabled: !actionConfig.endpoint,
-    reason: actionConfig.endpoint ? undefined : "NO_COURIER_ENDPOINT_FOR_ACTION",
+    endpoint: actionConfig.endpoint,
   };
 }
 
@@ -80,22 +79,24 @@ function mapSubscriptionDelivery(delivery, user) {
   const premiumUpgradeCount = day ? (Array.isArray(day.premiumUpgradeSelections) ? day.premiumUpgradeSelections.length : 0) : 0;
 
   const statusResolved = resolveStatus(delivery.status, delivery.arrivingSoonReminderSentAt);
+  const hasPersistedDeliveryRecord = Boolean(delivery._id && (!dayIdStr || String(delivery._id) !== String(dayIdStr)));
+  const terminalStatus = ["delivered", "canceled", "failed"].includes(statusResolved);
 
-  const canCourierPickup = delivery.status === "ready_for_delivery";
-  const canMarkArrivingSoon = delivery.status === "out_for_delivery" && !delivery.arrivingSoonReminderSentAt;
-  const canMarkDelivered = statusResolved === "out_for_delivery" || statusResolved === "arriving_soon";
-  const canCancel = delivery.status !== "delivered" && delivery.status !== "canceled" && delivery.status !== "failed";
-
-  const allowedActionIds = [
-    canCourierPickup ? "pickup" : null,
-    canMarkArrivingSoon ? "arriving_soon" : null,
-    canMarkDelivered ? "delivered" : null,
-    canCancel && (delivery.status === "out_for_delivery" || delivery.status === "ready_for_delivery") ? "cancel" : null,
+  const candidateActionIds = [
+    hasPersistedDeliveryRecord && statusResolved === "ready_for_delivery" ? "pickup" : null,
+    hasPersistedDeliveryRecord && statusResolved === "out_for_delivery" && !delivery.arrivingSoonReminderSentAt ? "arriving_soon" : null,
+    hasPersistedDeliveryRecord && (statusResolved === "out_for_delivery" || statusResolved === "arriving_soon") ? "delivered" : null,
+    hasPersistedDeliveryRecord && !terminalStatus ? "cancel" : null,
   ].filter(Boolean);
-  const allowedActions = buildAllowedActions(allowedActionIds, {
+  const allowedActions = buildAllowedActions(candidateActionIds, {
     type: "subscription_delivery",
     entityId: String(delivery._id),
   });
+  const allowedActionIds = allowedActions.map((action) => action.id);
+  const canCourierPickup = allowedActionIds.includes("pickup");
+  const canMarkArrivingSoon = allowedActionIds.includes("arriving_soon");
+  const canMarkDelivered = allowedActionIds.includes("delivered");
+  const canCancel = allowedActionIds.includes("cancel");
 
   return {
     id: String(delivery._id),
@@ -167,23 +168,23 @@ function mapOneTimeOrderDelivery(order, user, delivery) {
     deliv.status || (order.status === "fulfilled" ? "delivered" : (order.status === "cancelled" || order.status === "canceled" ? "canceled" : "preparing")),
     deliv.arrivingSoonReminderSentAt
   );
-
-  const canCourierPickup = deliv.status === "ready_for_delivery";
-  const canMarkArrivingSoon = deliv.status === "out_for_delivery" && !deliv.arrivingSoonReminderSentAt;
-  const canMarkDelivered = statusResolved === "out_for_delivery" || statusResolved === "arriving_soon";
-  const canCancel = deliv.status !== "delivered" && deliv.status !== "canceled" && deliv.status !== "failed";
+  const terminalStatus = ["delivered", "canceled", "failed"].includes(statusResolved);
 
   const deliveryEntityId = deliv._id ? String(deliv._id) : String(order._id);
-  const allowedActionIds = [
-    canCourierPickup ? "pickup" : null,
-    canMarkArrivingSoon ? "arriving_soon" : null,
-    canMarkDelivered ? "delivered" : null,
-    canCancel && (deliv.status === "out_for_delivery" || deliv.status === "ready_for_delivery") ? "cancel" : null,
+  const candidateActionIds = [
+    statusResolved === "out_for_delivery" && !deliv.arrivingSoonReminderSentAt ? "arriving_soon" : null,
+    (statusResolved === "out_for_delivery" || statusResolved === "arriving_soon") ? "delivered" : null,
+    !terminalStatus ? "cancel" : null,
   ].filter(Boolean);
-  const allowedActions = buildAllowedActions(allowedActionIds, {
+  const allowedActions = buildAllowedActions(candidateActionIds, {
     type: "one_time_order",
     entityId: String(order._id),
   });
+  const allowedActionIds = allowedActions.map((action) => action.id);
+  const canCourierPickup = allowedActionIds.includes("pickup");
+  const canMarkArrivingSoon = allowedActionIds.includes("arriving_soon");
+  const canMarkDelivered = allowedActionIds.includes("delivered");
+  const canCancel = allowedActionIds.includes("cancel");
 
   return {
     id: deliveryEntityId,

@@ -1,0 +1,974 @@
+{
+  "info": {
+    "name": "Subscription Delivery QA",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 Auth",
+      "item": [
+        {
+          "name": "Customer Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"phone\": \"{{clientPhone}}\", \"password\": \"{{clientPassword}}\"}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Has token\", () => pm.expect(json.token).to.be.a(\"string\"));",
+                  "pm.environment.set(\"clientToken\", json.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dashboard Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{adminEmail}}\", \"password\": \"{{adminPassword}}\"}"
+            },
+            "url": "{{baseUrl}}/auth/dashboard/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Has token\", () => pm.expect(json.token).to.be.a(\"string\"));",
+                  "pm.environment.set(\"adminToken\", json.token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 First-Day Pickup Override",
+      "item": [
+        {
+          "name": "Timeline",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_pickupOverride}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Day 1 is today\", () => pm.expect(json.days[0].date).to.eql(\"{{day1Date}}\"));",
+                  "pm.test(\"Day 1 fulfillmentType is pickup\", () => pm.expect(json.days[0].fulfillmentType).to.eql(\"pickup\"));",
+                  "pm.test(\"Day 2 fulfillmentType is delivery\", () => pm.expect(json.days[1].fulfillmentType).to.eql(\"delivery\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Day 1 Fulfillment Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_pickupOverride}}/days/{{day1Date}}/fulfillment-status"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"fulfillmentType is pickup\", () => pm.expect(json.fulfillmentType).to.eql(\"pickup\"));",
+                  "pm.test(\"status is pending\", () => pm.expect(json.status).to.eql(\"pending\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Day 1 Pickup Availability",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_pickupOverride}}/days/{{day1Date}}/pickup-availability"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"available is true\", () => pm.expect(json.available).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Day 1 Pickup Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"branchId\": \"{{branchId}}\"}"
+            },
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_pickupOverride}}/days/{{day1Date}}/pickup-request"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Has pickupRequestId\", () => pm.expect(json._id).to.be.a(\"string\"));",
+                  "pm.environment.set(\"pickupRequestId\", json._id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pickup Request Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/pickup-requests/{{pickupRequestId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is pending\", () => pm.expect(json.status).to.eql(\"pending\"));",
+                  "pm.test(\"branchId matches\", () => pm.expect(json.branchId).to.eql(pm.environment.get(\"branchId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Day 2 Pickup Availability Must Fail",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_pickupOverride}}/days/{{day2Date}}/pickup-availability"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"available is false\", () => pm.expect(json.available).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Day 2 Pickup Request Must Fail",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"branchId\": \"{{branchId}}\"}"
+            },
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_pickupOverride}}/days/{{day2Date}}/pickup-request"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 400\", () => pm.response.to.have.status(400));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"errorCode is INVALID_DELIVERY_MODE\", () => pm.expect(json.errorCode).to.eql(\"INVALID_DELIVERY_MODE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Courier Queue Day 1 Exclusion Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/courier/queue?date={{day1Date}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["courier", "queue"],
+              "query": [{ "key": "date", "value": "{{day1Date}}" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const customerId = pm.environment.get(\"customerId\");",
+                  "const found = json.items && json.items.some(item => item.customerId === customerId);",
+                  "pm.test(\"Customer NOT in courier queue for day1 (pickup override)\", () => pm.expect(found).to.be.false);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Delivery Only Today",
+      "item": [
+        {
+          "name": "Timeline must start tomorrow",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_deliveryOnly}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"First day is tomorrow\", () => pm.expect(json.days[0].date).to.eql(pm.environment.get(\"tomorrow\")));",
+                  "pm.test(\"All days are delivery\", () => {",
+                  "  json.days.forEach(d => pm.expect(d.fulfillmentType).to.eql(\"delivery\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Courier Queue today must not include same-day delivery",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/courier/queue?date={{today}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["courier", "queue"],
+              "query": [{ "key": "date", "value": "{{today}}" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const subId = pm.environment.get(\"subscriptionId_deliveryOnly\");",
+                  "const found = json.items && json.items.some(item => item.subscriptionId === subId);",
+                  "pm.test(\"Delivery-only subscription NOT in today's courier queue\", () => pm.expect(found).to.be.false);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Renewal Pickup Override",
+      "item": [
+        {
+          "name": "Timeline",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_renewalPickup}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Day 1 is today\", () => pm.expect(json.days[0].date).to.eql(pm.environment.get(\"day1Date\")));",
+                  "pm.test(\"Day 1 fulfillmentType is pickup\", () => pm.expect(json.days[0].fulfillmentType).to.eql(\"pickup\"));",
+                  "pm.test(\"Day 2 fulfillmentType is delivery\", () => pm.expect(json.days[1].fulfillmentType).to.eql(\"delivery\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Day 1 Pickup Availability",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_renewalPickup}}/days/{{day1Date}}/pickup-availability"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"available is true\", () => pm.expect(json.available).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Day 2 Pickup Availability Must Fail",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_renewalPickup}}/days/{{day2Date}}/pickup-availability"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"available is false\", () => pm.expect(json.available).to.be.false);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Renewal Delivery Only",
+      "item": [
+        {
+          "name": "Timeline must start next service day",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_renewalDeliveryOnly}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"First day is tomorrow\", () => pm.expect(json.days[0].date).to.eql(pm.environment.get(\"tomorrow\")));",
+                  "pm.test(\"All days are delivery\", () => {",
+                  "  json.days.forEach(d => pm.expect(d.fulfillmentType).to.eql(\"delivery\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Courier Queue today must not include same-day delivery",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/courier/queue?date={{today}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["courier", "queue"],
+              "query": [{ "key": "date", "value": "{{today}}" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const subId = pm.environment.get(\"subscriptionId_renewalDeliveryOnly\");",
+                  "const found = json.items && json.items.some(item => item.subscriptionId === subId);",
+                  "pm.test(\"Renewal delivery-only NOT in today's courier queue\", () => pm.expect(found).to.be.false);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 Future Delivery Only",
+      "item": [
+        {
+          "name": "Timeline must start on futureDate",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_futureDeliveryOnly}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"First day is futureDate\", () => pm.expect(json.days[0].date).to.eql(pm.environment.get(\"futureDate\")));",
+                  "pm.test(\"All days are delivery\", () => {",
+                  "  json.days.forEach(d => pm.expect(d.fulfillmentType).to.eql(\"delivery\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "No forced pickup override",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_futureDeliveryOnly}}/days/{{futureDate}}/pickup-availability"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"available is false (no pickup override for future delivery-only)\", () => pm.expect(json.available).to.be.false);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 Cutoff and Chef Choice",
+      "item": [
+        {
+          "name": "Cutoff None Timeline",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_cutoffNone}}/days/{{cutoffNoneDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"cutoffStatus is none\", () => pm.expect(json.cutoffStatus).to.eql(\"none\"));",
+                  "pm.test(\"meals are customer-selected\", () => pm.expect(json.mealsSource).to.eql(\"customer\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cutoff Partial Timeline",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_cutoffPartial}}/days/{{cutoffPartialDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"cutoffStatus is partial\", () => pm.expect(json.cutoffStatus).to.eql(\"partial\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cutoff Full Timeline",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_cutoffFull}}/days/{{cutoffFullDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"cutoffStatus is full\", () => pm.expect(json.cutoffStatus).to.eql(\"full\"));",
+                  "pm.test(\"mealsSource is chefChoice\", () => pm.expect(json.mealsSource).to.eql(\"chefChoice\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kitchen Queue Chef Choice Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/kitchen/queue?date={{day1Date}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["kitchen", "queue"],
+              "query": [{ "key": "date", "value": "{{day1Date}}" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const subId = pm.environment.get(\"subscriptionId_cutoffFull\");",
+                  "const entry = json.items && json.items.find(item => item.subscriptionId === subId);",
+                  "pm.test(\"cutoffFull subscription is in kitchen queue\", () => pm.expect(entry).to.exist);",
+                  "pm.test(\"mealsSource is chefChoice\", () => pm.expect(entry.mealsSource).to.eql(\"chefChoice\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kitchen Queue Chef Choice Idempotency Recheck",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/kitchen/queue?date={{day1Date}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["kitchen", "queue"],
+              "query": [{ "key": "date", "value": "{{day1Date}}" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const subId = pm.environment.get(\"subscriptionId_cutoffFull\");",
+                  "const entries = json.items && json.items.filter(item => item.subscriptionId === subId);",
+                  "pm.test(\"No duplicate entries for cutoffFull subscription (idempotency)\", () => pm.expect(entries.length).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 Operational Delivery Timeline",
+      "item": [
+        {
+          "name": "Initial Timeline",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is pending\", () => pm.expect(json.status).to.eql(\"pending\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lock Day",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/admin/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/lock"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is locked\", () => pm.expect(json.status).to.eql(\"locked\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Timeline After Lock",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is locked\", () => pm.expect(json.status).to.eql(\"locked\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "In Preparation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/admin/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/in-preparation"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is in_preparation\", () => pm.expect(json.status).to.eql(\"in_preparation\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Timeline After In Preparation",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is in_preparation\", () => pm.expect(json.status).to.eql(\"in_preparation\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ready For Delivery",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/admin/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/ready-for-delivery"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is ready_for_delivery\", () => pm.expect(json.status).to.eql(\"ready_for_delivery\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Timeline After Ready",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is ready_for_delivery\", () => pm.expect(json.status).to.eql(\"ready_for_delivery\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Out For Delivery",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/admin/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/out-for-delivery"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is out_for_delivery\", () => pm.expect(json.status).to.eql(\"out_for_delivery\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Timeline After Out For Delivery",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is out_for_delivery\", () => pm.expect(json.status).to.eql(\"out_for_delivery\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fulfill",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/admin/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/fulfill"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is fulfilled\", () => pm.expect(json.status).to.eql(\"fulfilled\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Timeline After Fulfill",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{clientToken}}" }
+            ],
+            "url": "{{baseUrl}}/subscriptions/{{subscriptionId_operational}}/days/{{operationalDayId}}/timeline"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is fulfilled\", () => pm.expect(json.status).to.eql(\"fulfilled\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

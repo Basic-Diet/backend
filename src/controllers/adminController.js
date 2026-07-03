@@ -3290,7 +3290,8 @@ async function persistNormalizedSettings(normalizedSettings) {
   return persisted;
 }
 
-function normalizePickupLocationsOrThrow(value) {
+function normalizePickupLocationsOrThrow(value, options = {}) {
+  const requireAddress = options.requireAddress !== false;
   if (!Array.isArray(value)) {
     throw createControlledError(400, "INVALID", "pickup_locations must be an array");
   }
@@ -3304,7 +3305,7 @@ function normalizePickupLocationsOrThrow(value) {
       throw createControlledError(400, "INVALID", `Pickup location at index ${index} must be an object`);
     }
 
-    const id = String(loc.id || loc.code || loc.branchId || loc.pickupLocationId || "").trim();
+    const id = String(loc.id || loc.key || loc.code || loc.slug || loc.branchId || loc.pickupLocationId || loc.locationId || "").trim();
     if (!id) {
       throw createControlledError(400, "INVALID", `Pickup location at index ${index} must have a non-empty id`);
     }
@@ -3314,13 +3315,19 @@ function normalizePickupLocationsOrThrow(value) {
     }
     ids.add(id);
 
-    if (!loc.name || typeof loc.name !== "object" || Array.isArray(loc.name)) {
-      throw createControlledError(400, "INVALID", `Pickup location ${id} must have a name object with 'ar' and 'en' fields`);
-    }
-    const nameAr = String(loc.name.ar || "").trim();
-    const nameEn = String(loc.name.en || "").trim();
+    const rawName = loc.name || loc.title || loc.label || loc.branchName || "";
+    const nameAr = String(
+      rawName && typeof rawName === "object" && !Array.isArray(rawName)
+        ? rawName.ar || rawName.en || rawName.value || ""
+        : rawName
+    ).trim();
+    const nameEn = String(
+      rawName && typeof rawName === "object" && !Array.isArray(rawName)
+        ? rawName.en || rawName.ar || rawName.value || ""
+        : rawName
+    ).trim();
     if (!nameAr || !nameEn) {
-      throw createControlledError(400, "INVALID", `Pickup location ${id} must have non-empty name.ar and name.en`);
+      throw createControlledError(400, "INVALID", `Pickup location ${id} must have a non-empty name`);
     }
 
     if (arNames.has(nameAr)) {
@@ -3332,26 +3339,41 @@ function normalizePickupLocationsOrThrow(value) {
     arNames.add(nameAr);
     enNames.add(nameEn);
 
-    if (!loc.address || typeof loc.address !== "object" || Array.isArray(loc.address)) {
-      throw createControlledError(400, "INVALID", `Pickup location ${id} must have an address object with 'ar' and 'en' fields`);
+    const rawAddress = loc.address || loc.location || loc.formattedAddress || loc.addressLine || loc.addressLine1 || loc.street || "";
+    const addressFromObject = rawAddress && typeof rawAddress === "object" && !Array.isArray(rawAddress)
+      ? rawAddress.ar
+        || rawAddress.en
+        || rawAddress.line1
+        || rawAddress.street
+        || [rawAddress.district, rawAddress.city].filter(Boolean).join(", ")
+        || rawAddress.value
+        || ""
+      : rawAddress;
+    const addressAr = String(addressFromObject).trim();
+    const addressEn = String(
+      rawAddress && typeof rawAddress === "object" && !Array.isArray(rawAddress)
+        ? rawAddress.en || rawAddress.ar || rawAddress.line1 || rawAddress.street || [rawAddress.district, rawAddress.city].filter(Boolean).join(", ") || rawAddress.value || ""
+        : rawAddress
+    ).trim();
+    if (requireAddress && (!addressAr || !addressEn)) {
+      throw createControlledError(400, "INVALID", `Pickup location ${id} must have a non-empty address`);
     }
-    const addressAr = String(loc.address.ar || "").trim();
-    const addressEn = String(loc.address.en || "").trim();
-    if (!addressAr || !addressEn) {
-      throw createControlledError(400, "INVALID", `Pickup location ${id} must have non-empty address.ar and address.en`);
-    }
+    const canonicalAddressAr = addressAr || "";
+    const canonicalAddressEn = addressEn || canonicalAddressAr;
 
     let latitude = null;
     let longitude = null;
-    if (loc.latitude !== undefined && loc.latitude !== null) {
-      const lat = Number(loc.latitude);
+    const rawLatitude = loc.latitude !== undefined ? loc.latitude : loc.lat !== undefined ? loc.lat : loc.address && loc.address.lat;
+    const rawLongitude = loc.longitude !== undefined ? loc.longitude : loc.lng !== undefined ? loc.lng : loc.address && loc.address.lng;
+    if (rawLatitude !== undefined && rawLatitude !== null) {
+      const lat = Number(rawLatitude);
       if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
         throw createControlledError(400, "INVALID", `Pickup location ${id} has invalid latitude`);
       }
       latitude = lat;
     }
-    if (loc.longitude !== undefined && loc.longitude !== null) {
-      const lng = Number(loc.longitude);
+    if (rawLongitude !== undefined && rawLongitude !== null) {
+      const lng = Number(rawLongitude);
       if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
         throw createControlledError(400, "INVALID", `Pickup location ${id} has invalid longitude`);
       }
@@ -3376,11 +3398,11 @@ function normalizePickupLocationsOrThrow(value) {
         en: nameEn,
       },
       address: {
-        ar: addressAr,
-        en: addressEn,
+        ar: canonicalAddressAr,
+        en: canonicalAddressEn,
         line1: {
-          ar: addressAr,
-          en: addressEn,
+          ar: canonicalAddressAr,
+          en: canonicalAddressEn,
         },
         lat: latitude,
         lng: longitude,
@@ -3400,11 +3422,12 @@ function normalizePickupLocationsOrThrow(value) {
       longitude,
     };
 
-    if (loc.workingHours) {
-      normalizedLoc.workingHours = String(loc.workingHours).trim();
+    const rawWorkingHours = loc.workingHours || loc.hours || null;
+    if (rawWorkingHours && typeof rawWorkingHours === "object" && !Array.isArray(rawWorkingHours)) {
+      normalizedLoc.workingHours = [rawWorkingHours.open, rawWorkingHours.close].filter(Boolean).join("-");
       normalizedLoc.hours = normalizedLoc.workingHours;
-    } else if (loc.hours) {
-      normalizedLoc.workingHours = String(loc.hours).trim();
+    } else if (rawWorkingHours) {
+      normalizedLoc.workingHours = String(rawWorkingHours).trim();
       normalizedLoc.hours = normalizedLoc.workingHours;
     }
 
@@ -3801,7 +3824,10 @@ async function getDashboardSettings(req, res) {
   data.restaurant_open_time = data.restaurant_open_time ?? "00:00";
   data.restaurant_close_time = data.restaurant_close_time ?? "23:59";
   data.delivery_windows = data.delivery_windows ?? ["08:00-11:00", "12:00-15:00"];
-  data.pickup_locations = data.pickup_locations ?? [];
+  data.pickup_locations = normalizePickupLocationsOrThrow(
+    Array.isArray(data.pickup_locations) ? data.pickup_locations : [],
+    { requireAddress: false }
+  );
   data.skip_allowance = data.skip_allowance ?? data.skipAllowance;
   data.skip_allowance = data.skip_allowance ?? 3;
   data.premium_price = data.premium_price ?? 20;
