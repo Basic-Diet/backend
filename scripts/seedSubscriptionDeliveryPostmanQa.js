@@ -97,9 +97,12 @@ async function cleanup() {
     $or: [{ userId: { $in: userIds } }, { planId: { $in: planIds } }, { "deliveryAddress.notes": TAG }],
   }).select("_id").lean();
   const subIds = taggedSubs.map((sub) => sub._id);
+  const taggedOrders = await Order.find({ orderNumber: { $regex: `^${TAG}` } }).select("_id").lean();
+  const orderIds = taggedOrders.map((order) => order._id);
 
   await Promise.all([
     Delivery.deleteMany({ subscriptionId: { $in: subIds } }),
+    Delivery.deleteMany({ orderId: { $in: orderIds } }),
     SubscriptionPickupRequest.deleteMany({ $or: [{ userId: { $in: userIds } }, { subscriptionId: { $in: subIds } }] }),
     SubscriptionDay.deleteMany({ subscriptionId: { $in: subIds } }),
     CheckoutDraft.deleteMany({ $or: [{ userId: { $in: userIds } }, { planId: { $in: planIds } }] }),
@@ -307,9 +310,9 @@ async function seedSupplementalDashboardQaData({ user, plan, zone, meals, addon,
     sourceSnapshot: { key: meals[2].key, name: meals[2].name, context: { tag: TAG } },
   });
 
-  const usedPromo = await PromoCode.create({
-    code: "PMQAUSED10",
-    title: "Postman QA Used 10%",
+  const archiveConflictPromo = await PromoCode.create({
+    code: "PMQAARCHIVECONFLICT",
+    title: "Postman QA Archive Conflict",
     description: TAG,
     appliesTo: "subscription",
     discountType: "percentage",
@@ -317,26 +320,28 @@ async function seedSupplementalDashboardQaData({ user, plan, zone, meals, addon,
     usageLimitTotal: 10,
     currentUsageCount: 1,
     isActive: true,
+    metadata: { tag: TAG, qaIssue: 21, expectedArchiveResult: "PROMO_IN_USE" },
   });
   await PromoUsage.create({
-    promoCodeId: usedPromo._id,
+    promoCodeId: archiveConflictPromo._id,
     userId: user._id,
     subscriptionId: subscriptionIds[0],
-    code: usedPromo.code,
+    code: archiveConflictPromo.code,
     discountAmountHalala: 5000,
     status: "consumed",
     consumedAt: new Date(),
-    metadata: { tag: TAG },
+    metadata: { tag: TAG, qaIssue: 21 },
   });
-  await PromoCode.create({
-    code: "PMQAUNUSED25",
-    title: "Postman QA Unused Fixed",
+  const archiveSafePromo = await PromoCode.create({
+    code: "PMQAARCHIVESAFE",
+    title: "Postman QA Archive Safe",
     description: TAG,
     appliesTo: "subscription",
     discountType: "fixed",
     discountValue: 2500,
     currentUsageCount: 0,
     isActive: true,
+    metadata: { tag: TAG, qaIssue: 21, expectedArchiveResult: "archived" },
   });
 
   const statuses = ["pending_payment", "confirmed", "in_preparation", "out_for_delivery", "fulfilled", "cancelled"];
@@ -401,6 +406,58 @@ async function seedSupplementalDashboardQaData({ user, plan, zone, meals, addon,
       canceledAt: deliveryStatus === "canceled" ? new Date() : undefined,
     });
   }
+
+  const actionableCourierOrder = await Order.create({
+    orderNumber: `${TAG}-courier-actionable-order`,
+    userId: user._id,
+    status: "out_for_delivery",
+    paymentStatus: "paid",
+    fulfillmentMethod: "delivery",
+    fulfillmentDate: today,
+    deliveryMode: "delivery",
+    deliveryDate: today,
+    items: [{
+      itemType: "product",
+      productId: meals[0]._id,
+      name: meals[0].name,
+      qty: 1,
+      unitPriceHalala: 2500,
+      lineTotalHalala: 2500,
+    }],
+    pricing: {
+      subtotalHalala: 2500,
+      deliveryFeeHalala: 1000,
+      totalHalala: 3500,
+      currency: "SAR",
+    },
+    delivery: {
+      zoneId: zone._id,
+      zoneName: zone.name,
+      deliveryFeeHalala: 1000,
+      address: { line1: "Postman QA Actionable Courier St", city: "Riyadh", notes: TAG },
+    },
+    deliveryAddress: { line1: "Postman QA Actionable Courier St", city: "Riyadh", notes: TAG },
+    deliveryWindow: DELIVERY_WINDOW,
+    idempotencyKey: `${TAG}-courier-actionable-order`,
+    confirmedAt: new Date(),
+    preparationStartedAt: new Date(),
+    dispatchedAt: new Date(),
+    metadata: { tag: TAG, qaIssue: 22 },
+  });
+  const actionableCourierDelivery = await Delivery.create({
+    orderId: actionableCourierOrder._id,
+    date: today,
+    status: "out_for_delivery",
+    address: { line1: "Postman QA Actionable Courier St", city: "Riyadh", notes: TAG },
+    window: DELIVERY_WINDOW,
+  });
+
+  return {
+    archiveSafePromo,
+    archiveConflictPromo,
+    actionableCourierOrder,
+    actionableCourierDelivery,
+  };
 }
 
 function checkoutPayload({ plan, zone, startDate, override = false, mealsPerDay = 2, idempotencyKey }) {
@@ -606,6 +663,15 @@ function printPack(data) {
     cutoffNoneDayId: data.ids.cutoffNoneDay,
     cutoffPartialDayId: data.ids.cutoffPartialDay,
     cutoffFullDayId: data.ids.cutoffFullDay,
+    promoId_archiveSafe: data.ids.archiveSafePromo,
+    promoCode_archiveSafe: "PMQAARCHIVESAFE",
+    promoId_archiveConflict: data.ids.archiveConflictPromo,
+    promoCode_archiveConflict: "PMQAARCHIVECONFLICT",
+    actionableCourierOrderId: data.ids.actionableCourierOrder,
+    actionableCourierDeliveryId: data.ids.actionableCourierDelivery,
+    actionableCourierSubscriptionId: data.ids.actionableCourierSubscription,
+    actionableCourierSubscriptionDayId: data.ids.actionableCourierSubscriptionDay,
+    actionableCourierSubscriptionDeliveryId: data.ids.actionableCourierSubscriptionDelivery,
     addonId: stringify(data.addon._id),
   };
 
@@ -626,6 +692,10 @@ function printPack(data) {
   lines.push(`| Pickup branch | ${BRANCH_ID} / Postman QA Main Branch / active true / Olaya QA Street, Riyadh / 08:00-22:00 |`);
   data.meals.forEach((meal, index) => lines.push(`| Meal ${index + 1} | ${meal._id} / key ${meal.key} / ${meal.name.en} |`));
   lines.push(`| Add-on | ${data.addon._id} / Postman QA Juice Add-on / does not participate in delivery/pickup mode logic |`);
+  lines.push(`| Issue #21 archive-safe promo | ${data.ids.archiveSafePromo} / PMQAARCHIVESAFE / currentUsageCount 0 / DELETE should soft archive |`);
+  lines.push(`| Issue #21 in-use promo | ${data.ids.archiveConflictPromo} / PMQAARCHIVECONFLICT / currentUsageCount 1 / DELETE should return 409 PROMO_IN_USE |`);
+  lines.push(`| Issue #22 actionable courier subscription delivery | subscription ${data.ids.actionableCourierSubscription} / day ${data.ids.actionableCourierSubscriptionDay} / delivery ${data.ids.actionableCourierSubscriptionDelivery} / out_for_delivery / allowedActions arriving_soon, delivered, cancel |`);
+  lines.push(`| Issue #22 actionable courier order | order ${data.ids.actionableCourierOrder} / delivery ${data.ids.actionableCourierDelivery} / out_for_delivery / allowedActions arriving_soon, delivered, cancel |`);
   lines.push("");
   lines.push("3. Postman environment variables");
   lines.push("```txt");
@@ -709,6 +779,18 @@ function printPack(data) {
   lines.push("```json\n{ \"entityType\": \"subscription_day\", \"entityId\": \"{{operationalDayId}}\" }\n```");
   lines.push("After every transition call:");
   lines.push("```http\nGET {{baseUrl}}/subscriptions/{{subscriptionId_operational}}/timeline\nAuthorization: Bearer {{clientToken}}\n```");
+  lines.push("");
+  lines.push("Issue #21: promo archive fixtures");
+  lines.push("```http\nDELETE {{baseUrl}}/admin/promo-codes/{{promoId_archiveSafe}}\nAuthorization: Bearer {{adminToken}}\n```");
+  lines.push("Expected: 200 with `deletedAt` and `isActive: false`.");
+  lines.push("```http\nDELETE {{baseUrl}}/admin/promo-codes/{{promoId_archiveConflict}}\nAuthorization: Bearer {{adminToken}}\n```");
+  lines.push("Expected: 409 with error code `PROMO_IN_USE`.");
+  lines.push("");
+  lines.push("Issue #22: actionable courier order fixture");
+  lines.push("```http\nGET {{baseUrl}}/courier/orders/today?date={{today}}\nAuthorization: Bearer {{adminToken}}\n```");
+  lines.push("Find `{{actionableCourierOrderId}}`; it should expose executable `allowedActions` with PUT endpoints for arriving soon, delivered, and cancel when one-time delivery is enabled.");
+  lines.push("```http\nGET {{baseUrl}}/courier/deliveries/today?date={{today}}\nAuthorization: Bearer {{adminToken}}\n```");
+  lines.push("Find `{{actionableCourierSubscriptionDeliveryId}}`; it should expose executable `allowedActions` with PUT endpoints for arriving soon, delivered, and cancel in the currently deployed QA config.");
   lines.push("");
   lines.push("5. Tests tab scripts");
   lines.push("Customer login:");
@@ -837,10 +919,28 @@ async function main() {
   const operationalSub = await createOperationalSubscription({ user, plan, zone, today });
   const operationalDay = await ensureDayFixture({ subscriptionId: operationalSub._id, date: today, requiredMeals: 2, selectedProducts: [meals[0], meals[1]], status: "open", label: "operational" });
 
+  const actionableCourierSub = await createOperationalSubscription({ user, plan, zone, today });
+  const actionableCourierDay = await ensureDayFixture({
+    subscriptionId: actionableCourierSub._id,
+    date: today,
+    requiredMeals: 2,
+    selectedProducts: [meals[0], meals[1]],
+    status: "out_for_delivery",
+    label: "courier-actionable-subscription-delivery",
+  });
+  const actionableCourierSubscriptionDelivery = await Delivery.create({
+    subscriptionId: actionableCourierSub._id,
+    dayId: actionableCourierDay._id,
+    date: today,
+    status: "out_for_delivery",
+    address: { line1: "Postman QA Actionable Subscription Delivery St", city: "Riyadh", notes: TAG },
+    window: DELIVERY_WINDOW,
+  });
+
   const [pickupDays] = await Promise.all([firstDay(pickupOverride.subscriptionId)]);
   if (!pickupDays || pickupDays.length < 2) throw new Error("Pickup override subscription did not create two days");
 
-  await seedSupplementalDashboardQaData({
+  const supplementalQa = await seedSupplementalDashboardQaData({
     user,
     plan,
     zone,
@@ -857,6 +957,7 @@ async function main() {
       String(cutoffPartialSub._id),
       String(cutoffFullSub._id),
       String(operationalSub._id),
+      String(actionableCourierSub._id),
     ],
   });
 
@@ -886,6 +987,13 @@ async function main() {
       cutoffFullDay: String(cutoffFullDay._id),
       operational: String(operationalSub._id),
       operationalDay: String(operationalDay._id),
+      actionableCourierSubscription: String(actionableCourierSub._id),
+      actionableCourierSubscriptionDay: String(actionableCourierDay._id),
+      actionableCourierSubscriptionDelivery: String(actionableCourierSubscriptionDelivery._id),
+      archiveSafePromo: String(supplementalQa.archiveSafePromo._id),
+      archiveConflictPromo: String(supplementalQa.archiveConflictPromo._id),
+      actionableCourierOrder: String(supplementalQa.actionableCourierOrder._id),
+      actionableCourierDelivery: String(supplementalQa.actionableCourierDelivery._id),
     },
   });
 }
