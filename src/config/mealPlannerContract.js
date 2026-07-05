@@ -7,6 +7,7 @@ const MEAL_SELECTION_TYPES = Object.freeze({
   PREMIUM_MEAL: "premium_meal",
   PREMIUM_LARGE_SALAD: "premium_large_salad",
   SANDWICH: "sandwich",
+  FULL_MEAL_PRODUCT: "full_meal_product",
 });
 
 const CUSTOM_PREMIUM_SALAD_KEY = "custom_premium_salad";

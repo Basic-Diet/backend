@@ -14,7 +14,7 @@ const INDEX_DEFINITIONS = [
     key: { operationIdempotencyKey: 1 },
     options: {
       unique: true,
-      partialFilterExpression: { operationIdempotencyKey: { $type: "string", $ne: "" } },
+      partialFilterExpression: { operationIdempotencyKey: { $type: "string", $gt: "" } },
     },
   },
   {
@@ -23,8 +23,7 @@ const INDEX_DEFINITIONS = [
     key: { email: 1 },
     options: {
       unique: true,
-      sparse: true,
-      partialFilterExpression: { email: { $type: "string", $ne: "" } },
+      partialFilterExpression: { email: { $type: "string", $gt: "" } },
     },
   },
   {
@@ -87,7 +86,7 @@ async function ensureProductionIndexes() {
       }
 
       console.log(`[${modelName}] Creating index '${def.name}'...`);
-      await collection.createIndex(def.key, def.options);
+      await collection.createIndex(def.key, { ...def.options, name: def.name });
       console.log(`[${modelName}] Created index '${def.name}' successfully`);
     } catch (err) {
       if (err.code === 85 || err.code === 86) {

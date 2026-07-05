@@ -3020,7 +3020,7 @@ function buildOptionItem({ option, relation, group, product, selectionType, lang
 
 function buildProductItem({ product, selectionType, docs, lang, membership, premiumLargeSaladPricing, includeUnavailable, rules, premiumConfigState = null }) {
   const isPremiumSalad = selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD;
-  const isSandwich = selectionType === MEAL_SELECTION_TYPES.SANDWICH;
+  const isStandaloneMeal = selectionType === MEAL_SELECTION_TYPES.SANDWICH || selectionType === MEAL_SELECTION_TYPES.FULL_MEAL_PRODUCT;
   const optionGroups = buildProductOptionGroups({ product, selectionType, docs, lang, membership, includeUnavailable, rules, premiumConfigState });
   let priceHalala = isPremiumSalad
     ? Number(premiumLargeSaladPricing.priceHalala ?? product.priceHalala ?? 0)
@@ -3044,9 +3044,9 @@ function buildProductItem({ product, selectionType, docs, lang, membership, prem
     premiumPriceHalala: isPremiumSalad ? premiumFee : 0,
     requiresPremiumBalance: isPremiumSalad,
     action: {
-      type: isSandwich ? "direct_add" : "open_builder",
-      requiresBuilder: !isSandwich,
-      treatAsFullMeal: isSandwich || undefined,
+      type: isStandaloneMeal ? "direct_add" : "open_builder",
+      requiresBuilder: !isStandaloneMeal,
+      treatAsFullMeal: isStandaloneMeal || undefined,
     },
     available: true,
     optionGroups,

@@ -579,6 +579,28 @@ function projectMaterializedAndLegacyFromSlots({ processedSlots, now }) {
       continue;
     }
 
+    if (selectionType === NEW_TYPES.FULL_MEAL_PRODUCT && (slot.productId || slot.sandwichId)) {
+      const mealId = slot.productId || slot.sandwichId;
+      const materialized = {
+        slotKey: slot.slotKey,
+        productId: mealId,
+        selectionType: NEW_TYPES.FULL_MEAL_PRODUCT,
+        isPremium: false,
+        premiumSource: "none",
+        premiumExtraFeeHalala: 0,
+        operationalSku: `full_meal:${mealId}`,
+        generatedAt: now,
+      };
+      materializedMeals.push(materialized);
+      baseMealSlots.push({
+        slotKey: slot.slotKey,
+        mealId: mealId,
+        assignmentSource: slot.assignmentSource || "client",
+        assignedAt: slot.assignedAt || now,
+      });
+      continue;
+    }
+
     if (selectionType === NEW_TYPES.PREMIUM_LARGE_SALAD) {
        const saladProteinId = resolveSaladProteinId(slot);
        const materialized = {
@@ -697,7 +719,7 @@ function isBaseBeefSlot(slot) {
 }
 
 function isSandwichSlot(slot) {
-  return Boolean(slot && slot.selectionType === NEW_TYPES.SANDWICH);
+  return Boolean(slot && (slot.selectionType === NEW_TYPES.SANDWICH || slot.selectionType === NEW_TYPES.FULL_MEAL_PRODUCT));
 }
 
 function recomputePlannerMetaFromSlots({ mealSlots, requiredSlotCount = 0, maxSlotCount = null }) {
@@ -1037,6 +1059,12 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
       validation = validatePremiumLargeSalad(processedSlot, proteinMap, saladIngredientMap, saladOptionMap);
     } else if (processedSlot.selectionType === NEW_TYPES.SANDWICH) {
       validation = validateSandwichMeal(processedSlot, sandwichMap);
+    } else if (processedSlot.selectionType === NEW_TYPES.FULL_MEAL_PRODUCT) {
+      if (!processedSlot.productId && !processedSlot.sandwichId) {
+        validation = { valid: false, code: "FULL_MEAL_PRODUCT_REQUIRED", message: "Full meal product selection is required" };
+      } else {
+        validation = { valid: true };
+      }
     }
 
     if (validation.valid) {

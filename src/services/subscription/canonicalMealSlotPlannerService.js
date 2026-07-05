@@ -59,6 +59,10 @@ const SELECTION_TYPE_PRODUCT_RULES = Object.freeze({
     itemTypes: new Set(["cold_sandwich"]),
     keys: null,
   },
+  [MEAL_SELECTION_TYPES.FULL_MEAL_PRODUCT]: {
+    itemTypes: null,
+    keys: null,
+  },
 });
 
 function localizedPair(value) {
@@ -214,7 +218,7 @@ function validateProductSelectionType({ product, selectionType, slotIndex }) {
   }
   const itemType = String(product?.itemType || "").trim();
   const key = String(product?.key || "").trim();
-  const validItemType = rule.itemTypes.has(itemType);
+  const validItemType = !rule.itemTypes || rule.itemTypes.has(itemType);
   const validKey = !rule.keys || rule.keys.has(key);
   if (!validItemType && !validKey) {
     return buildSlotError({
