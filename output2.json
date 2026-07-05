@@ -1,0 +1,73 @@
+Product: {
+  "_id": "6a4a3384f2c4fb19d41b7eec",
+  "categoryId": "6a495753991f8d73bc7a1fda",
+  "catalogItemId": null,
+  "key": "potatoes_with_meat",
+  "name": {
+    "ar": "بطاطس باللحمة",
+    "en": "Potatoes with meat"
+  },
+  "description": {
+    "ar": "لحم بقرى 150 جرام -بصل مفروم، فص ثوم،  عصير طماطم فريش -ارز -زيت زيتون-بهارت صحيحة -بطاطس بالفرن",
+    "en": "150g beef - chopped onion, garlic clove, fresh tomato juice - rice - olive oil - whole spices - oven-baked potatoes"
+  },
+  "imageUrl": "",
+  "itemType": "product",
+  "pricingModel": "fixed",
+  "priceHalala": 3500,
+  "baseUnitGrams": 100,
+  "defaultWeightGrams": 0,
+  "minWeightGrams": 0,
+  "maxWeightGrams": 0,
+  "weightStepGrams": 50,
+  "currency": "SAR",
+  "availableFor": [
+    "one_time",
+    "subscription"
+  ],
+  "isCustomizable": false,
+  "isActive": true,
+  "isVisible": true,
+  "isAvailable": true,
+  "sortOrder": 0,
+  "ui": {
+    "cardVariant": "standard",
+    "cardSize": "medium",
+    "badge": "",
+    "ctaLabel": "",
+    "imageRatio": "square"
+  },
+  "branchAvailability": [],
+  "versionId": null,
+  "publishedAt": null,
+  "createdAt": "2026-07-05T10:35:48.996Z",
+  "updatedAt": "2026-07-05T10:35:48.996Z",
+  "__v": 0
+}
+Category: {
+  "_id": "6a4a2596f2c4fb19d41b7c38",
+  "key": "breakfast",
+  "name": {
+    "ar": "الفطور",
+    "en": "breakfast"
+  },
+  "description": {
+    "ar": "الفطور",
+    "en": "breakfast"
+  },
+  "imageUrl": "",
+  "isActive": true,
+  "isVisible": true,
+  "isAvailable": true,
+  "sortOrder": 3,
+  "ui": {
+    "cardVariant": "addon_collection"
+  },
+  "availability": {
+    "branchIds": []
+  },
+  "publishedAt": null,
+  "createdAt": "2026-07-05T09:36:22.114Z",
+  "updatedAt": "2026-07-05T09:36:22.114Z",
+  "__v": 0
+}

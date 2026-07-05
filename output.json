@@ -1,0 +1,79 @@
+Recent Products: [
+  {
+    "key": "potatoes_with_meat",
+    "name": "Potatoes with meat",
+    "published": false
+  },
+  {
+    "key": "dawood_pasha_meatballs",
+    "name": "Dawood Pasha Meatballs",
+    "published": false
+  },
+  {
+    "key": "chicken_kabsa",
+    "name": "Chicken Kabsa",
+    "published": false
+  },
+  {
+    "key": "meat_kabsa",
+    "name": "Meat Kabsa",
+    "published": false
+  },
+  {
+    "key": "indian_kebab",
+    "name": "Indian kebab",
+    "published": false
+  },
+  {
+    "key": "saliq",
+    "name": "Saliq",
+    "published": false
+  },
+  {
+    "key": "healthy_beef_burger",
+    "name": "Healthy beef burger",
+    "published": false
+  },
+  {
+    "key": "pasta_with_pink_sauce_and_chicken",
+    "name": "Pasta with pink sauce and chicken",
+    "published": false
+  },
+  {
+    "key": "pasta_with_red_sauce_chicken",
+    "name": "Pasta with red sauce chicken",
+    "published": false
+  },
+  {
+    "key": "white_sauce_pasta_with_chicken",
+    "name": "White sauce pasta with chicken",
+    "published": false
+  }
+]
+Recent Categories: [
+  {
+    "key": "breakfast",
+    "name": "breakfast",
+    "published": false
+  },
+  {
+    "key": "ice_cream",
+    "name": "Ice Cream",
+    "published": true
+  },
+  {
+    "key": "drinks",
+    "name": "Drinks",
+    "published": true
+  },
+  {
+    "key": "juices",
+    "name": "Juices",
+    "published": true
+  },
+  {
+    "key": "desserts",
+    "name": "Desserts",
+    "published": true
+  }
+]
