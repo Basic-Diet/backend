@@ -3267,7 +3267,7 @@ function filterPlannerSectionByPremiumConfig(section, premiumConfigState) {
       }),
     })).filter((group) => (group.options || []).length);
     return { ...product, optionGroups };
-  }).filter((product) => product && (product.selectionType === MEAL_SELECTION_TYPES.SANDWICH || (product.optionGroups || []).length || product.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD));
+  }).filter((product) => product && (product.selectionType === MEAL_SELECTION_TYPES.SANDWICH || (product.optionGroups || []).length || product.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD || product.action?.treatAsFullMeal === true));
   return { ...section, products };
 }
 
