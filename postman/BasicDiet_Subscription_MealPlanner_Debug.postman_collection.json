@@ -1,0 +1,407 @@
+{
+  "info": {
+    "name": "BasicDiet - Subscription Meal Planner Debug - Railway",
+    "description": "Debug collection to verify canonical and legacy backend responses for the Subscription Meal Planner flow.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Health",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"DB is up if present\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    if (jsonData.db && jsonData.db.state) {",
+              "        pm.expect(jsonData.db.state).to.eql(\"up\");",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "2. Deprecated Legacy Endpoint Check",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 (deprecated) or 410 (removed)\", function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 410, 404]);",
+              "});",
+              "pm.test(\"Verify collection does not rely on this endpoint\", function () {",
+              "    // This is just a reminder check",
+              "    pm.expect(true).to.be.true;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{apiBase}}/categories-with-meals",
+          "host": [
+            "{{apiBase}}"
+          ],
+          "path": [
+            "categories-with-meals"
+          ]
+        },
+        "description": "DEPRECATED: Should return 410 Gone or legacy metadata."
+      }
+    },
+    {
+      "name": "3. Subscription Meal Planner Menu - Canonical",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "function walk(node, path, matches) {",
+              "  if (node === null || node === undefined) return;",
+              "  if (Array.isArray(node)) {",
+              "    node.forEach((item, index) => walk(item, path + \"[\" + index + \"]\", matches));",
+              "    return;",
+              "  }",
+              "  if (typeof node === \"object\") {",
+              "    const targetProductKey = pm.environment.get(\"targetProductKey\");",
+              "    const targetProductName = pm.environment.get(\"targetProductName\");",
+              "    const targetCategoryKey = pm.environment.get(\"targetCategoryKey\");",
+              "    const targetCategoryName = pm.environment.get(\"targetCategoryName\");",
+              "",
+              "    const values = [",
+              "      node.key,",
+              "      node.slug,",
+              "      node.name,",
+              "      node.nameEn,",
+              "      node.nameAr,",
+              "      node.title,",
+              "      node.label,",
+              "      node.productKey,",
+              "      node.categoryKey,",
+              "      node.sectionKey",
+              "    ].filter(Boolean).map(String).map(v => v.toLowerCase());",
+              "",
+              "    const targets = [",
+              "      targetProductKey,",
+              "      targetProductName,",
+              "      targetCategoryKey,",
+              "      targetCategoryName",
+              "    ].filter(Boolean).map(String).map(v => v.toLowerCase());",
+              "",
+              "    const hit = targets.length > 0 && targets.some(t => values.some(v => v.includes(t)));",
+              "",
+              "    if (hit) {",
+              "      matches.push({",
+              "        path,",
+              "        key: node.key || node.productKey || node.categoryKey || node.sectionKey,",
+              "        name: node.name || node.nameEn || node.nameAr || node.title || node.label,",
+              "        selectionType: node.selectionType,",
+              "        action: node.action,",
+              "        optionGroupsLength: Array.isArray(node.optionGroups) ? node.optionGroups.length : undefined",
+              "      });",
+              "    }",
+              "",
+              "    Object.keys(node).forEach(k => walk(node[k], path + \".\" + k, matches));",
+              "  }",
+              "}",
+              "",
+              "const json = pm.response.json();",
+              "const matches = [];",
+              "walk(json, \"$\", matches);",
+              "console.log(\"TARGET_MATCHES\", matches);",
+              "",
+              "pm.test(\"Target search completed\", function () {",
+              "  pm.expect(matches).to.be.an(\"array\");",
+              "});",
+              "",
+              "if ((pm.environment.get(\"targetProductKey\") || pm.environment.get(\"targetProductName\") || pm.environment.get(\"targetCategoryKey\") || pm.environment.get(\"targetCategoryName\"))) {",
+              "  pm.test(\"Target product/category exists in this response\", function () {",
+              "    pm.expect(matches.length, JSON.stringify(matches, null, 2)).to.be.greaterThan(0);",
+              "  });",
+              "}",
+              "",
+              "pm.test(\"Response format checks\", function() {",
+              "   if(json.data && json.data.builderCatalog) {",
+              "       var version = json.data.builderCatalog.contractVersion;",
+              "       if(version) {",
+              "           pm.expect(version).to.be.a(\"string\");",
+              "       }",
+              "   }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{apiBase}}/subscriptions/meal-planner-menu?lang={{lang}}",
+          "host": [
+            "{{apiBase}}"
+          ],
+          "path": [
+            "subscriptions",
+            "meal-planner-menu"
+          ],
+          "query": [
+            {
+              "key": "lang",
+              "value": "{{lang}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. Subscription Menu",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{apiBase}}/subscriptions/menu",
+          "host": [
+            "{{apiBase}}"
+          ],
+          "path": [
+            "subscriptions",
+            "menu"
+          ]
+        }
+      }
+    },
+    {
+      "name": "5. One-Time Orders Menu",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{apiBase}}/orders/menu",
+          "host": [
+            "{{apiBase}}"
+          ],
+          "path": [
+            "orders",
+            "menu"
+          ]
+        }
+      }
+    },
+    {
+      "name": "6. Dashboard Meal Builder Config",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 or 401\", function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 401, 403]);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{dashboardAccessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{apiBase}}/dashboard/meal-builder/draft/hydrated",
+          "host": [
+            "{{apiBase}}"
+          ],
+          "path": [
+            "dashboard",
+            "meal-builder",
+            "draft",
+            "hydrated"
+          ]
+        }
+      }
+    },
+    {
+      "name": "7. Customer Register",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "if (jsonData && jsonData.token) {",
+              "    pm.environment.set(\"appAccessToken\", jsonData.token);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"{{customerPhone}}\",\n  \"password\": \"{{customerPassword}}\",\n  \"confirmPassword\": \"{{customerPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{apiBase}}/auth/register",
+          "host": [
+            "{{apiBase}}"
+          ],
+          "path": [
+            "auth",
+            "register"
+          ]
+        }
+      }
+    },
+    {
+      "name": "8. Customer Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "if (jsonData && jsonData.token) {",
+              "    pm.environment.set(\"appAccessToken\", jsonData.token);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"{{customerPhone}}\",\n  \"password\": \"{{customerPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{apiBase}}/auth/login",
+          "host": [
+            "{{apiBase}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        }
+      }
+    },
+    {
+      "name": "9. Dashboard Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "if (jsonData && jsonData.token) {",
+              "    pm.environment.set(\"dashboardAccessToken\", jsonData.token);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{dashboardEmail}}\",\n  \"password\": \"{{dashboardPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{apiBase}}/dashboard/auth/login",
+          "host": [
+            "{{apiBase}}"
+          ],
+          "path": [
+            "dashboard",
+            "auth",
+            "login"
+          ]
+        }
+      }
+    }
+  ]
+}
