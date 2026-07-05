@@ -73,3 +73,10 @@ graph.dot
 graph.png
 graph.svg
 .DS_Store
+
+# Local debug / query outputs
+mealbuilder.json
+output.json
+output2.json
+query.js
+query2.js
