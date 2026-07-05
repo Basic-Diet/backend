@@ -234,11 +234,10 @@ async function normalizeSectionsForWrite(sections = []) {
   });
   if (!needsResolution) return promoteCanonicalFamilySelections(normalizeSections(sections));
 
-  const [basicMeal, proteinsGroup, carbsGroup, sandwichCategory] = await Promise.all([
+  const [basicMeal, proteinsGroup, carbsGroup] = await Promise.all([
     MenuProduct.findOne({ key: "basic_meal" }).lean(),
     MenuOptionGroup.findOne({ key: "proteins" }).lean(),
     MenuOptionGroup.findOne({ key: "carbs" }).lean(),
-    MenuCategory.findOne({ key: "cold_sandwiches" }).lean(),
   ]);
 
   return promoteCanonicalFamilySelections(normalizeSections(sections.map((section) => {
@@ -258,8 +257,8 @@ async function normalizeSectionsForWrite(sections = []) {
     if ((key === "carbs" || source.groupKey === "carbs") && !next.sourceGroupId && carbsGroup) {
       next.sourceGroupId = carbsGroup._id;
     }
-    if (key === "sandwich" && !next.sourceCategoryId && sandwichCategory) {
-      next.sourceCategoryId = sandwichCategory._id;
+    if (key === "sandwich" && !next.sourceCategoryId) {
+      // Standalone meals are dynamically resolved
     }
     return next;
   })));
@@ -433,7 +432,6 @@ function canonicalSectionSource(section = {}) {
     return {
       kind: "product_category",
       categoryKey: "sandwich",
-      legacyCategoryKey: "cold_sandwiches",
     };
   }
   if (VISUAL_PROTEIN_FAMILY_KEYS.has(key)) {
@@ -1008,13 +1006,10 @@ function serializeHydratedProduct({
   const categoryKey = String(category?.key || "").trim().toLowerCase();
 
   if (requireSandwich) {
-    if (categoryKey && categoryKey !== "cold_sandwiches") {
-      reasonCodes.push("SANDWICH_CATEGORY_MISMATCH");
-      errors.push(statusIssue("error", "SANDWICH_CATEGORY_MISMATCH", "Sandwich product must belong to the cold_sandwiches category"));
-    }
-    if (String(product.itemType || "") !== "cold_sandwich") {
+    const validItemTypes = ["cold_sandwich", "full_meal_product"];
+    if (!validItemTypes.includes(String(product.itemType || ""))) {
       reasonCodes.push("SANDWICH_ITEM_TYPE_MISMATCH");
-      errors.push(statusIssue("error", "SANDWICH_ITEM_TYPE_MISMATCH", "Sandwich product must use itemType=cold_sandwich"));
+      errors.push(statusIssue("error", "SANDWICH_ITEM_TYPE_MISMATCH", "Sandwich/standalone product must use itemType=cold_sandwich or full_meal_product"));
     }
   }
   if (requirePremiumLargeSalad && product.key !== "premium_large_salad") {
@@ -1341,7 +1336,7 @@ async function resolvePickerContext(sectionKey, section = null) {
     section?.productContextId ? MenuProduct.findById(section.productContextId).lean() : MenuProduct.findOne({ key: "basic_meal" }).lean(),
     section?.sourceGroupId && !needsCarbs && !isSandwich ? MenuOptionGroup.findById(section.sourceGroupId).lean() : MenuOptionGroup.findOne({ key: "proteins" }).lean(),
     section?.sourceGroupId && needsCarbs ? MenuOptionGroup.findById(section.sourceGroupId).lean() : MenuOptionGroup.findOne({ key: "carbs" }).lean(),
-    section?.sourceCategoryId && isSandwich ? MenuCategory.findById(section.sourceCategoryId).lean() : MenuCategory.findOne({ key: "cold_sandwiches" }).lean(),
+    section?.sourceCategoryId && isSandwich ? MenuCategory.findById(section.sourceCategoryId).lean() : null,
   ]);
 
   return {
@@ -1819,12 +1814,11 @@ function optionSort(left, right, relationByOptionId = new Map()) {
 async function buildDefaultVisualTemplateSections({ returnDetails = false } = {}) {
   const warnings = [];
   const errors = [];
-  const [basicMeal, saladProduct, proteinsGroup, carbsGroup, sandwichCategory] = await Promise.all([
+  const [basicMeal, saladProduct, proteinsGroup, carbsGroup] = await Promise.all([
     MenuProduct.findOne({ key: "basic_meal" }).lean(),
     MenuProduct.findOne({ key: "premium_large_salad" }).lean(),
     MenuOptionGroup.findOne({ key: "proteins" }).lean(),
     MenuOptionGroup.findOne({ key: "carbs" }).lean(),
-    MenuCategory.findOne({ key: "cold_sandwiches" }).lean(),
   ]);
 
   let proteinOptions = [];
@@ -1861,17 +1855,18 @@ async function buildDefaultVisualTemplateSections({ returnDetails = false } = {}
     }
   }
 
-  if (sandwichCategory) {
-    const sandwichProducts = await MenuProduct.find({
-      categoryId: sandwichCategory._id,
-      itemType: "cold_sandwich",
-      key: { $in: SUBSCRIPTION_COLD_SANDWICH_KEYS },
-    }).sort({ sortOrder: 1, createdAt: -1 }).lean();
-    const sandwichCatalogItemsById = await loadCatalogItemsByIdForDocs(sandwichProducts);
-    sandwichProductIds = sandwichProducts
-      .filter((product) => readyDocForSeed(product, sandwichCatalogItemsById))
-      .map((product) => product._id);
-  }
+  const sandwichProducts = await MenuProduct.find({
+    itemType: { $in: ["cold_sandwich", "full_meal_product"] },
+    $or: [
+      { availableFor: { $exists: false } },
+      { availableFor: [] },
+      { availableFor: "subscription" },
+    ],
+  }).sort({ sortOrder: 1, createdAt: -1 }).lean();
+  const sandwichCatalogItemsById = await loadCatalogItemsByIdForDocs(sandwichProducts);
+  sandwichProductIds = sandwichProducts
+    .filter((product) => readyDocForSeed(product, sandwichCatalogItemsById))
+    .map((product) => product._id);
 
   const premiumConfigState = await loadClientPremiumUpgradeConfigState();
   const premiumProteinOptions = proteinOptions
@@ -1980,12 +1975,11 @@ async function buildDefaultVisualTemplateSections({ returnDetails = false } = {}
     errors.push({ level: "error", code: "MEAL_BUILDER_DEFAULT_PREMIUM_SOURCE_MISSING", message: "Premium visual section requires basic_meal and proteins group" });
   }
 
-  if (sandwichCategory) {
+  if (sandwichProductIds.length > 0) {
     sections.push({
       key: "sandwich",
-      sectionType: "product_category",
+      sectionType: "product_list",
       sourceKind: "product_list",
-      sourceCategoryId: sandwichCategory._id,
       includeMode: "selected",
       selectedProductIds: sandwichProductIds,
       selectionType: MEAL_SELECTION_TYPES.SANDWICH,
@@ -2006,7 +2000,7 @@ async function buildDefaultVisualTemplateSections({ returnDetails = false } = {}
       sortOrder: CANONICAL_SECTION_SORT_ORDER.sandwich,
     });
   } else {
-    errors.push({ level: "error", code: "MEAL_BUILDER_DEFAULT_SANDWICH_SOURCE_MISSING", message: "Sandwich visual section requires cold_sandwiches category" });
+    errors.push({ level: "error", code: "MEAL_BUILDER_DEFAULT_SANDWICH_SOURCE_MISSING", message: "Sandwich visual section requires standalone products" });
   }
 
   for (const familyKey of ["chicken", "beef", "fish", "eggs"]) {
@@ -2092,12 +2086,11 @@ async function buildDefaultVisualTemplateSections({ returnDetails = false } = {}
 async function buildDefaultSeedSections({ returnDetails = false } = {}) {
   const warnings = [];
   const errors = [];
-  const [basicMeal, saladProduct, proteinsGroup, carbsGroup, sandwichCategory] = await Promise.all([
+  const [basicMeal, saladProduct, proteinsGroup, carbsGroup] = await Promise.all([
     MenuProduct.findOne({ key: "basic_meal" }).lean(),
     MenuProduct.findOne({ key: "premium_large_salad" }).lean(),
     MenuOptionGroup.findOne({ key: "proteins" }).lean(),
     MenuOptionGroup.findOne({ key: "carbs" }).lean(),
-    MenuCategory.findOne({ key: "cold_sandwiches" }).lean(),
   ]);
   let standardProteinOptionIds = [];
   let premiumProteinOptionIds = [];
@@ -2202,39 +2195,39 @@ async function buildDefaultSeedSections({ returnDetails = false } = {}) {
       sortOrder: 2,
     });
   }
-  if (sandwichCategory) {
-    const sandwichProducts = await MenuProduct.find({
-      categoryId: sandwichCategory._id,
-      itemType: "cold_sandwich",
-      key: { $in: SUBSCRIPTION_COLD_SANDWICH_KEYS },
-    }).sort({ sortOrder: 1, createdAt: -1 }).lean();
-    const sandwichCatalogItemsById = await loadCatalogItemsByIdForDocs(sandwichProducts);
-    const sandwichProductIds = sandwichProducts
-      .filter((product) => readyDocForSeed(product, sandwichCatalogItemsById))
-      .map((product) => product._id);
-    if (sandwichProductIds.length) {
-      sections.push({
-        sectionType: "product_category",
-        sourceCategoryId: sandwichCategory._id,
-        includeMode: "selected",
-        selectedProductIds: sandwichProductIds,
-        selectionType: MEAL_SELECTION_TYPES.SANDWICH,
-        titleOverride: { en: "Sandwiches", ar: "ساندويتشات" },
-        required: false,
-        minSelections: 0,
-        maxSelections: 1,
-        multiSelect: false,
-        visible: true,
-        availableFor: ["subscription"],
-        sortOrder: 4,
-      });
-    } else {
-      warnings.push({
-        level: "warning",
-        code: "MEAL_BUILDER_SANDWICHES_MISSING",
-        message: "No valid cold sandwich products were available for the initial Meal Builder seed",
-      });
-    }
+  const sandwichProducts = await MenuProduct.find({
+    itemType: { $in: ["cold_sandwich", "full_meal_product"] },
+    $or: [
+      { availableFor: { $exists: false } },
+      { availableFor: [] },
+      { availableFor: "subscription" },
+    ],
+  }).sort({ sortOrder: 1, createdAt: -1 }).lean();
+  const sandwichCatalogItemsById = await loadCatalogItemsByIdForDocs(sandwichProducts);
+  const sandwichProductIds = sandwichProducts
+    .filter((product) => readyDocForSeed(product, sandwichCatalogItemsById))
+    .map((product) => product._id);
+  if (sandwichProductIds.length) {
+    sections.push({
+      sectionType: "product_list",
+      includeMode: "selected",
+      selectedProductIds: sandwichProductIds,
+      selectionType: MEAL_SELECTION_TYPES.SANDWICH,
+      titleOverride: { en: "Sandwiches & Full Meals", ar: "ساندويتشات ووجبات جاهزة" },
+      required: false,
+      minSelections: 0,
+      maxSelections: 1,
+      multiSelect: false,
+      visible: true,
+      availableFor: ["subscription"],
+      sortOrder: 4,
+    });
+  } else {
+    warnings.push({
+      level: "warning",
+      code: "MEAL_BUILDER_SANDWICHES_MISSING",
+      message: "No valid standalone meal products were available for the initial Meal Builder seed",
+    });
   }
   if (saladProduct) {
     const [saladGroupRelations, saladOptionRelations, saladPricing] = await Promise.all([

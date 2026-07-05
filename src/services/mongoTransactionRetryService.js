@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const { logger } = require("../utils/logger");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_BASE_DELAY_MS = 40;
@@ -38,7 +39,7 @@ async function runMongoTransactionWithRetry(work, {
   let attempt = 0;
 
   while (attempt <= maxRetries) {
-    const session = await mongoose.startSession();
+    const session = await startSafeSession();
     try {
       let result;
       await session.withTransaction(async () => {

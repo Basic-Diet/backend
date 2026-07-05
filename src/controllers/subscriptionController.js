@@ -37,6 +37,7 @@ const {
   SUPPORTED_PHASE1_SHARED_PAYMENT_TYPES,
 } = require("../services/paymentApplicationService");
 const { logger } = require("../utils/logger");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 const { getRequestLang, pickLang } = require("../utils/i18n");
 const { resolveMealsPerDay, applyDayWalletSelections } = require("../utils/subscription/subscriptionDaySelectionSync");
 const {
@@ -759,7 +760,7 @@ async function autoFinalizePaidCheckoutDraft({ draft, payment, providerInvoice }
 
   const startSessionFn = runtimeOverrides && runtimeOverrides.startSession
     ? runtimeOverrides.startSession
-    : () => mongoose.startSession();
+    : () => startSafeSession();
   const applyPaymentSideEffectsFn = runtimeOverrides && runtimeOverrides.applyPaymentSideEffects
     ? runtimeOverrides.applyPaymentSideEffects
     : applyPaymentSideEffects;
@@ -1184,7 +1185,7 @@ async function verifyCheckoutDraftPayment(req, res, runtimeOverrides = null) {
     : getInvoice;
   const startSessionFn = runtimeOverrides && runtimeOverrides.startSession
     ? runtimeOverrides.startSession
-    : () => mongoose.startSession();
+    : () => startSafeSession();
   const applyPaymentSideEffectsFn = runtimeOverrides && runtimeOverrides.applyPaymentSideEffects
     ? runtimeOverrides.applyPaymentSideEffects
     : applyPaymentSideEffects;
@@ -1515,7 +1516,7 @@ async function activateSubscription(req, res) {
   }
 
   // Simulate the canonical webhook activation path
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
 
   try {
@@ -1981,7 +1982,7 @@ async function verifyUnifiedDayPayment(req, res, runtimeOverrides = null) {
     : getInvoice;
   const startSessionFn = runtimeOverrides && runtimeOverrides.startSession
     ? runtimeOverrides.startSession
-    : () => mongoose.startSession();
+    : () => startSafeSession();
   const applyPaymentSideEffectsFn = runtimeOverrides && runtimeOverrides.applyPaymentSideEffects
     ? runtimeOverrides.applyPaymentSideEffects
     : applyPaymentSideEffects;
@@ -2016,7 +2017,7 @@ async function verifyPremiumOverageDayPayment(req, res, runtimeOverrides = null)
     : getInvoice;
   const startSessionFn = runtimeOverrides && runtimeOverrides.startSession
     ? runtimeOverrides.startSession
-    : () => mongoose.startSession();
+    : () => startSafeSession();
   const applyPaymentSideEffectsFn = runtimeOverrides && runtimeOverrides.applyPaymentSideEffects
     ? runtimeOverrides.applyPaymentSideEffects
     : applyPaymentSideEffects;
@@ -2082,7 +2083,7 @@ async function verifyOneTimeAddonDayPlanningPayment(req, res, runtimeOverrides =
     : getInvoice;
   const startSessionFn = runtimeOverrides && runtimeOverrides.startSession
     ? runtimeOverrides.startSession
-    : () => mongoose.startSession();
+    : () => startSafeSession();
   const applyPaymentSideEffectsFn = runtimeOverrides && runtimeOverrides.applyPaymentSideEffects
     ? runtimeOverrides.applyPaymentSideEffects
     : applyPaymentSideEffects;
@@ -2827,7 +2828,7 @@ async function updateDeliveryDetailsForDate(req, res) {
 /** @unwired - NOT mounted on any route. Do not call without review. */
 async function transitionDay(req, res, toStatus) {
   const { id, date } = req.params;
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const day = await SubscriptionDay.findOne({ subscriptionId: id, date }).session(session);
@@ -2869,7 +2870,7 @@ async function transitionDay(req, res, toStatus) {
 /** @unwired - NOT mounted on any route. Do not call without review. */
 async function fulfillDay(req, res) {
   const { id, date } = req.params;
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const result = await fulfillSubscriptionDay({ subscriptionId: id, date, session });

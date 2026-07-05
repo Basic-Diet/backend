@@ -461,7 +461,7 @@ async function getSubscriptionMealPlannerMenu(req, res) {
       .lean(),
     MealCategory.find({}).sort({ sortOrder: 1, createdAt: -1 }).lean(),
     Addon.find({ isActive: true, kind: "item", billingMode: "flat_once" }).sort({ sortOrder: 1, createdAt: -1 }).lean(),
-    getMealPlannerCatalog({ lang, includeV3 }),
+    getMealPlannerCatalog({ lang, includeV3, includeV2: includeLegacy || requestedContractVersion === "v2" }),
   ]);
   const addons = filterAndDedupeCanonicalAddons(rawAddons);
   const legacyBuilderCatalog = mealPlannerCatalog?.builderCatalog || mealPlannerCatalog || {};

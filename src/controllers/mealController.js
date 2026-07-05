@@ -297,58 +297,13 @@ async function updateMeal(req, res) {
 }
 
 async function listCategoriesWithMeals(req, res) {
-  const lang = getRequestLang(req);
-
-  const categories = await MealCategory.aggregate([
-    { $match: { isActive: true } },
-    { $sort: { sortOrder: 1, createdAt: -1 } },
-    {
-      $lookup: {
-        from: "meals",
-        let: { catId: "$_id" },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ["$categoryId", "$$catId"] },
-                  { $eq: ["$isActive", true] },
-                ],
-              },
-            },
-          },
-          { $sort: { sortOrder: 1, createdAt: -1 } },
-        ],
-        as: "categoryMeals",
-      },
+  return res.status(410).json({
+    status: false,
+    error: {
+      code: "ENDPOINT_DEPRECATED",
+      message: "Use /api/subscriptions/meal-planner-menu or /api/orders/menu",
     },
-    { $match: { categoryMeals: { $ne: [] } } },
-  ]);
-
-  const data = categories.map((category) => ({
-    id: String(category._id),
-    name: pickLang(category.name, lang) || "",
-    slug: String(category.key || "").trim().toLowerCase(),
-    sortOrder: resolveSortValue(category.sortOrder),
-    meals: category.categoryMeals.map((meal) => ({
-      id: String(meal._id),
-      categoryId: String(meal.categoryId),
-      name: pickLang(meal.name, lang) || "",
-      description: pickLang(meal.description, lang) || "",
-      imageUrl: meal.imageUrl || "",
-      price: Number(meal.price) || 0,
-      calories: Number(meal.calories) || 0,
-      proteinGrams: Number(meal.proteinGrams) || 33,
-      carbGrams: Number(meal.carbGrams) || 37,
-      fatGrams: Number(meal.fatGrams) || 19,
-      availableForOrder: meal.availableForOrder !== false,
-      availableForSubscription: meal.availableForSubscription !== false,
-      type: meal.type || "regular",
-      sortOrder: resolveSortValue(meal.sortOrder),
-    })),
-  }));
-
-  return res.status(200).json({ status: true, data });
+  });
 }
 
 async function deleteMeal(req, res) {

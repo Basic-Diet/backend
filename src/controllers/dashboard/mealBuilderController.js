@@ -14,6 +14,7 @@ function send(res, data, statusCode = 200) {
 }
 
 function handleMealBuilderError(err, res) {
+  console.error("MealBuilderController error:", err);
   if (err && err.status && err.code) {
     return errorResponse(res, err.status, err.code, err.message, err.details);
   }

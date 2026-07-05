@@ -19,6 +19,7 @@ const { writeLog } = require("../utils/log");
 const { logger } = require("../utils/logger");
 const { toKSADateString } = require("../utils/date");
 const { isPhase1SharedPaymentDispatcherEnabled } = require("../utils/featureFlags");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 const errorResponse = require("../utils/errorResponse");
 
 function normalizePaymentStatus(payload, eventType) {
@@ -48,7 +49,7 @@ function redactId(value) {
 async function handleMoyasarWebhook(req, res, runtimeOverrides = null) {
   const startSessionFn = runtimeOverrides && runtimeOverrides.startSession
     ? runtimeOverrides.startSession
-    : () => mongoose.startSession();
+    : () => startSafeSession();
   const applyPaymentSideEffectsFn = runtimeOverrides && runtimeOverrides.applyPaymentSideEffects
     ? runtimeOverrides.applyPaymentSideEffects
     : applyPaymentSideEffects;

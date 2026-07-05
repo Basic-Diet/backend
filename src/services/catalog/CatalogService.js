@@ -1209,19 +1209,16 @@ async function buildSubscriptionBuilderCatalogV2({ builderCatalog, context = {},
 }
 
 async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = true, includeV3 = false, ignorePublishedMealBuilder = false } = {}) {
-  const coldSandwichCategory = await MenuCategory.findOne(activeCatalogQuery({ key: "cold_sandwiches" })).lean();
+
   const [proteinGroupData, carbGroupData, sandwichRows, basicMealProduct, premiumLargeSaladProductDoc, premiumLargeSaladUpgrade, premiumConfigState] = await Promise.all([
     getGroupOptionsWithGroup(MENU_PROTEIN_GROUP_KEY),
     getGroupOptionsWithGroup(MENU_CARB_GROUP_KEY),
-    coldSandwichCategory
-      ? MenuProduct.find(activeCatalogQuery({
-        categoryId: coldSandwichCategory._id,
-        itemType: "cold_sandwich",
-        key: { $in: SUBSCRIPTION_COLD_SANDWICH_KEYS },
-      }))
-      .sort({ sortOrder: 1, createdAt: -1 })
-      .lean()
-      : [],
+    MenuProduct.find(activeCatalogQuery({
+      itemType: { $in: ["cold_sandwich", "full_meal_product"] },
+      ...availableForChannelQuery("subscription"),
+    }))
+    .sort({ sortOrder: 1, createdAt: -1 })
+    .lean(),
     MenuProduct.findOne(activeCatalogQuery({
       key: "basic_meal",
       itemType: "basic_meal",
@@ -1420,8 +1417,8 @@ async function getSubscriptionBuilderCatalog({ lang = "en" } = {}) {
   return builderCatalog;
 }
 
-async function getSubscriptionBuilderCatalogWithV2({ lang = "en", includeV3 = false, ignorePublishedMealBuilder = false } = {}) {
-  return buildSubscriptionBuilderCatalogBundle({ lang, includeV3, ignorePublishedMealBuilder });
+async function getSubscriptionBuilderCatalogWithV2({ lang = "en", includeV3 = false, includeV2 = false, ignorePublishedMealBuilder = false } = {}) {
+  return buildSubscriptionBuilderCatalogBundle({ lang, includeV3, includeV2, ignorePublishedMealBuilder });
 }
 
 module.exports = {

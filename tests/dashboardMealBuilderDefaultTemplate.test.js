@@ -178,7 +178,9 @@ function assertBuilderCatalogV3Payload(data) {
   assert(Array.isArray(data.plannerCatalog.sections) && data.plannerCatalog.sections.length > 0, "plannerCatalog has sections");
   // builderCatalogV2 may be present (CatalogService always generates it when premium salad data exists).
   // The critical contract assertion is that the v3 builderCatalog is correct and plannerCatalog is populated.
-  assert.strictEqual(data.builderCatalogV2?.catalogVersion, "meal_planner_menu.v2", "if builderCatalogV2 is present, it must be v2");
+  if (data.builderCatalogV2) {
+    assert.strictEqual(data.builderCatalogV2.catalogVersion, "meal_planner_menu.v2", "if builderCatalogV2 is present, it must be v2");
+  }
   for (const key of ["categories", "proteins", "carbs", "premiumProteins", "premiumLargeSalad"]) {
     assert.strictEqual(data.builderCatalog[key], undefined, `v3 builderCatalog omits legacy ${key}`);
   }
