@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 const Delivery = require("../models/Delivery");
 const Subscription = require("../models/Subscription");
 const SubscriptionDay = require("../models/SubscriptionDay");
@@ -304,7 +305,7 @@ async function markDelivered(req, res) {
       return errorResponse(res, 409, "ALREADY_CANCELED", "Cannot deliver a canceled delivery");
     }
 
-    const session = await mongoose.startSession();
+    const session = await startSafeSession();
     let result;
     let deliveredAt = null;
     try {
@@ -450,7 +451,7 @@ async function markCancelled(req, res) {
       return errorResponse(res, err.status, err.code, err.message);
     }
 
-    const session = await mongoose.startSession();
+    const session = await startSafeSession();
     let sub;
     let day;
     let canceledAt = null;

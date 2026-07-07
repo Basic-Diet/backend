@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Meal = require("../models/Meal");
@@ -1353,7 +1354,7 @@ async function confirmOrder(req, res) {
     return errorResponse(res, 403, "FORBIDDEN", "Mock confirmation is disabled in production");
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const order = await Order.findOne({ _id: id, userId: req.userId }).session(session);
@@ -1583,7 +1584,7 @@ async function rejectAdjustedDeliveryDate(req, res) {
     return errorResponse(res, err.status, err.code, err.message);
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const order = await Order.findOne({ _id: id, userId: req.userId }).session(session);

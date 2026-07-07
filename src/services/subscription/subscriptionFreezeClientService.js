@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../../utils/mongoTransactionSupport");
 const Subscription = require("../../models/Subscription");
 const SubscriptionDay = require("../../models/SubscriptionDay");
 const dateUtils = require("../../utils/date");
@@ -144,7 +145,7 @@ async function freezeSubscriptionForClient({
     return buildErrorResult(status, err.code || "INVALID", err.message);
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const subInSession = await Subscription.findById(subscriptionId).populate("planId").session(session);
@@ -309,7 +310,7 @@ async function unfreezeSubscriptionForClient({
     return buildErrorResult(status, err.code || "INVALID", err.message);
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const subInSession = await Subscription.findById(subscriptionId).populate("planId").session(session);

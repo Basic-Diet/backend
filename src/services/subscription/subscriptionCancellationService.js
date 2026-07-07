@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../../utils/mongoTransactionSupport");
 const Subscription = require("../../models/Subscription");
 const SubscriptionDay = require("../../models/SubscriptionDay");
 const dateUtils = require("../../utils/date");
@@ -17,7 +18,7 @@ const REMOVABLE_DAY_STATUSES = ["open", "frozen"];
 
 const defaultRuntime = {
   startSession() {
-    return mongoose.startSession();
+    return startSafeSession();
   },
   findSubscriptionById({ subscriptionId, session }) {
     return Subscription.findById(subscriptionId).session(session);

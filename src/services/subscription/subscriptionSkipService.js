@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../../utils/mongoTransactionSupport");
 const Subscription = require("../../models/Subscription");
 const SubscriptionDay = require("../../models/SubscriptionDay");
 const dateUtils = require("../../utils/date");
@@ -91,7 +92,7 @@ async function performSkipRange({
   };
   const skippedForLog = [];
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const subInSession = await Subscription.findById(subscriptionId).populate("planId").session(session);
@@ -382,7 +383,7 @@ async function applyOperationalSkipForDate({ sub, date, session }) {
 }
 
   async function performSkipDay({ userId, subscriptionId, date }) {
-    const session = await mongoose.startSession();
+    const session = await startSafeSession();
     session.startTransaction();
 
     try {
@@ -428,7 +429,7 @@ async function applyOperationalSkipForDate({ sub, date, session }) {
   }
 
   async function performUnskipDay({ userId, subscriptionId, date }) {
-    const session = await mongoose.startSession();
+    const session = await startSafeSession();
     session.startTransaction();
 
     try {

@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 const mongoose = require("mongoose");
 const Setting = require("../models/Setting");
 const Subscription = require("../models/Subscription");
@@ -354,7 +355,7 @@ async function assignMeals(req, res) {
     return errorResponse(res, err.status, err.code, "Invalid meal id in selections");
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const sub = await Subscription.findById(id).populate("planId").session(session);
@@ -524,7 +525,7 @@ async function bulkLockDaysByDate(req, res) {
     return errorResponse(res, 400, "INVALID_DATE", "Invalid date");
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   let lockedDayIds = [];
   let summary;
   try {
@@ -631,7 +632,7 @@ async function transitionDay(req, res, toStatus) {
   } catch (err) {
     return errorResponse(res, err.status, err.code, err.message);
   }
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   let day;
   let sub;
   let fromStatus;
@@ -807,7 +808,7 @@ async function reopenLockedDay(req, res) {
     return errorResponse(res, 400, "INVALID_DATE", "Invalid date");
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   let day;
   try {
     session.startTransaction();
@@ -875,7 +876,7 @@ async function fulfillPickup(req, res) {
   } catch (err) {
     return errorResponse(res, err.status, err.code, err.message);
   }
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   let result;
   try {
     session.startTransaction();
@@ -975,7 +976,7 @@ async function verifyPickup(req, res) {
     return errorResponse(res, 400, "INVALID_PICKUP_CODE", "Pickup code must be a 6-digit value");
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   let result;
   try {
     session.startTransaction();
@@ -1088,7 +1089,7 @@ async function markPickupNoShow(req, res) {
     return errorResponse(res, err.status, err.code, err.message);
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   let day;
   let deductedCredits = 0;
   try {
@@ -1193,7 +1194,7 @@ async function cancelAtBranch(req, res) {
     return errorResponse(res, 400, "INVALID_DATE", "Invalid date");
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   let day;
   let restoredCredits = 0;
   try {

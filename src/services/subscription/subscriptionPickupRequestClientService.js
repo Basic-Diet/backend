@@ -1,6 +1,7 @@
 "use strict";
 
 const Subscription = require("../../models/Subscription");
+const { startSafeSession } = require("../../utils/mongoTransactionSupport");
 const SubscriptionDay = require("../../models/SubscriptionDay");
 const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const MenuProduct = require("../../models/MenuProduct");
@@ -464,7 +465,7 @@ async function createSubscriptionPickupRequestForClient({
   let localSession = null;
   if (!useSession) {
     const mongoose = require("mongoose");
-    localSession = await mongoose.startSession();
+    localSession = await startSafeSession();
     localSession.startTransaction();
     useSession = localSession;
   }

@@ -1,4 +1,5 @@
 const Addon = require("../models/Addon");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 const MenuProduct = require("../models/MenuProduct");
 const { getRequestLang } = require("../utils/i18n");
 const { resolveAddonCatalogEntry } = require("../utils/subscription/subscriptionCatalog");
@@ -770,7 +771,7 @@ async function getAddonAdmin(req, res, options = {}) {
 }
 
 async function createAddon(req, res, options = {}) {
-  const session = await Addon.startSession().catch(() => null);
+  const session = await startSafeSession().catch(() => null);
   if (session) session.startTransaction();
 
   try {
@@ -912,7 +913,7 @@ async function updateAddon(req, res, options = {}) {
     return errorResponse(res, err.status, err.code, err.message);
   }
 
-  const session = await Addon.startSession().catch(() => null);
+  const session = await startSafeSession().catch(() => null);
   if (session) session.startTransaction();
 
   try {

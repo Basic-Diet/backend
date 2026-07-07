@@ -65,6 +65,7 @@ async function _runLegacySettlement({
   businessDate = null,
 } = {}) {
   const mongoose = require("mongoose");
+const { startSafeSession } = require("../../utils/mongoTransactionSupport");
   const Subscription = require("../../models/Subscription");
   const SubscriptionDay = require("../../models/SubscriptionDay");
   const SubscriptionAuditLog = require("../../models/SubscriptionAuditLog");
@@ -94,7 +95,7 @@ async function _runLegacySettlement({
   if (normalizedDateFrom) query.date.$gte = normalizedDateFrom;
   if (subscriptionId) query.subscriptionId = subscriptionId;
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   const result = { dateBefore: resolvedDateBefore, scanned: 0, settled: 0, skipped: 0, failed: 0, failures: [], settledDays: [] };
 
   try {

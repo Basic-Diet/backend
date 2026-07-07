@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 const { addDays } = require("date-fns");
 const Plan = require("../models/Plan");
 const Setting = require("../models/Setting");
@@ -89,7 +90,7 @@ const sliceCAdminRuntime = {
     return User.findOne({ _id: userId, role: "client" }).lean();
   },
   startSession() {
-    return mongoose.startSession();
+    return startSafeSession();
   },
 };
 
@@ -1599,7 +1600,6 @@ async function createAppUserAdmin(req, res) {
       return errorResponse(res, 409, "CONFLICT", "App user already exists");
     }
 
-    const { startSafeSession } = require("../utils/mongoTransactionSupport");
   const session = await startSafeSession();
     let createdCoreUser;
     let createdAppUser;
@@ -1703,7 +1703,7 @@ async function createSubscriptionAdmin(req, res, nextOrRuntimeOverrides = null, 
     return errorResponse(res, mapped.status, mapped.code, mapped.message);
   }
 
-  const session = await runtime.startSession();
+  const session = await startSafeSession();
 
   try {
     if (typeof session.startTransaction === "function") session.startTransaction();
@@ -4670,7 +4670,6 @@ async function updateSubscriptionBalancesAdmin(req, res) {
     return errorResponse(res, 400, "INVALID", "At least one of premiumBalance or addonBalance is required");
   }
 
-  const { startSafeSession } = require("../utils/mongoTransactionSupport");
   const session = await startSafeSession();
   if (typeof session.startTransaction === "function") session.startTransaction();
 
@@ -4936,7 +4935,6 @@ async function extendSubscriptionAdmin(req, res) {
   }
 
   const lang = getRequestLang(req);
-  const { startSafeSession } = require("../utils/mongoTransactionSupport");
   const session = await startSafeSession();
   if (typeof session.startTransaction === "function") session.startTransaction();
 
@@ -5355,7 +5353,7 @@ async function verifyPaymentAdmin(req, res, runtimeOverrides = null) {
     : getInvoice;
   const startSessionFn = runtimeOverrides && runtimeOverrides.startSession
     ? runtimeOverrides.startSession
-    : () => mongoose.startSession();
+    : () => startSafeSession();
   const applyPaymentSideEffectsFn = runtimeOverrides && runtimeOverrides.applyPaymentSideEffects
     ? runtimeOverrides.applyPaymentSideEffects
     : applyPaymentSideEffects;

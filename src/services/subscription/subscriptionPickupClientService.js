@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../../utils/mongoTransactionSupport");
 const Subscription = require("../../models/Subscription");
 const SubscriptionDay = require("../../models/SubscriptionDay");
 const { logger } = require("../../utils/logger");
@@ -84,7 +85,7 @@ async function preparePickupForClient({
   lockDaySnapshotFn,
   writeLogSafelyFn,
 }) {
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
 
   try {

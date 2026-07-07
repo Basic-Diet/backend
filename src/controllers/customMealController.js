@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../utils/mongoTransactionSupport");
 const Subscription = require("../models/Subscription");
 const SubscriptionDay = require("../models/SubscriptionDay");
 const Order = require("../models/Order");
@@ -62,7 +63,7 @@ async function previewCustomMealPrice(req, res) {
 async function addCustomMealToOrder(req, res) {
   const { id } = req.params;
   const { ingredients } = req.body || {};
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   session.startTransaction();
   try {
     const order = await Order.findOne({ _id: id, userId: req.userId }).session(session);

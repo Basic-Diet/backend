@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../../utils/mongoTransactionSupport");
 const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const { consumeReservedPickupMeals } = require("./subscriptionPickupRequestBalanceService");
 
@@ -61,7 +62,7 @@ async function settlePickupRequest({ pickupRequestId, now, actor, reason, sessio
 }
 
 async function runWithOwnedTransaction(fn) {
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   try {
     let output;
     await session.withTransaction(async () => {

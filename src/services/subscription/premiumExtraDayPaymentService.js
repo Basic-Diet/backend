@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { startSafeSession } = require("../../utils/mongoTransactionSupport");
 const Subscription = require("../../models/Subscription");
 const SubscriptionDay = require("../../models/SubscriptionDay");
 const Payment = require("../../models/Payment");
@@ -709,7 +710,7 @@ async function verifyPremiumExtraDayPaymentFlow({
   }
 
   if (payment.status === "paid" && payment.applied === true) {
-    const session = await mongoose.startSession();
+    const session = await startSafeSession();
     let synchronized = false;
     try {
       session.startTransaction();
@@ -808,7 +809,7 @@ async function verifyPremiumExtraDayPaymentFlow({
     return buildErrorResult(409, "PAYMENT_PROVIDER_ERROR", "Unsupported provider payment status");
   }
 
-  const session = await mongoose.startSession();
+  const session = await startSafeSession();
   let synchronized = false;
   try {
     session.startTransaction();
