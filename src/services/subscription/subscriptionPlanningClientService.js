@@ -487,14 +487,16 @@ async function confirmDayPlanningForClient({
       runtime,
     });
 
-    await writeLogSafelyFn({
-      entityType: "subscription_day",
-      entityId: result.day._id,
-      action: "day_plan_confirm",
-      byUserId: userId,
-      byRole: "client",
-      meta: { date },
-    }, { subscriptionId, date });
+    if (!result.idempotent) {
+      await writeLogSafelyFn({
+        entityType: "subscription_day",
+        entityId: result.day._id,
+        action: "day_plan_confirm",
+        byUserId: userId,
+        byRole: "client",
+        meta: { date },
+      }, { subscriptionId, date });
+    }
 
     const serializedDay = serializeSubscriptionDayForClient(
       result.subscription,
@@ -519,6 +521,7 @@ async function confirmDayPlanningForClient({
     return buildSuccessResult(200, shapedDay, {
       success: true,
       plannerState: shapedDay && shapedDay.plannerState ? shapedDay.plannerState : null,
+      idempotent: Boolean(result.idempotent),
     });
   } catch (err) {
     if (err.status && err.code) {

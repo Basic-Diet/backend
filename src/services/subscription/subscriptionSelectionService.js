@@ -1249,7 +1249,9 @@ async function performDayPlanningConfirmation({ userId, subscriptionId, date, ru
     if (day.status !== "open") throw { status: 409, code: "LOCKED", message: "Day is locked" };
 
     if (day.plannerState === "confirmed" || day.planningState === "confirmed") {
-      throw { status: 409, code: "DAY_ALREADY_CONFIRMED", message: "Day is already confirmed" };
+      await session.abortTransaction();
+      session.endSession();
+      return { subscription: subInSession, day, idempotent: true };
     }
 
     const planningLimits = await resolveMealSlotPlanningLimits(subInSession);
@@ -1393,7 +1395,10 @@ async function performDayPlanningConfirmation({ userId, subscriptionId, date, ru
     );
 
     if (!confirmUpdateResult) {
-      throw { status: 409, code: "DAY_ALREADY_CONFIRMED", message: "Day was already confirmed by another request" };
+      const alreadyConfirmedDay = await SubscriptionDay.findById(day._id).session(session);
+      await session.abortTransaction();
+      session.endSession();
+      return { subscription: subInSession, day: alreadyConfirmedDay || day, idempotent: true };
     }
 
     await session.commitTransaction();

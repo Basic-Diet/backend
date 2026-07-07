@@ -2441,12 +2441,14 @@ async function confirmDayPlanning(req, res, runtimeOverrides = null) {
   if (!result.ok) {
     return errorResponse(res, result.status, result.code, result.message, result.details);
   }
-  return res.status(result.status).json({
+  const payload = {
     status: true,
     success: true,
     plannerState: result.plannerState,
     data: result.data,
-  });
+  };
+  if (result.idempotent) payload.idempotent = true;
+  return res.status(result.status).json(payload);
 }
 
 async function skipDay(req, res) {
