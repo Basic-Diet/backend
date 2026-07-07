@@ -111,6 +111,7 @@ function mapSubscriptionDayToDTO(day, delivery, subscription, user, role, lang, 
     status,
     statusLabel: day.status, // To be localized
     fulfillmentType: mode === "pickup" ? "branch_pickup" : "home_delivery",
+    mealCount: Array.isArray(day.mealSlots) ? day.mealSlots.length : 0,
     plan,
     kitchenDetails,
     paymentValidity,
@@ -212,6 +213,7 @@ function mapOrderToDTO(order, delivery, user, role, lang, catalogMaps = {}) {
       phone: user ? user.phone : "",
     },
     items: order.items || [],
+    mealCount: Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + Number(item.quantity || 1), 0) : 0,
     pricing: order.pricing || {},
     delivery: mode === "delivery" ? { ...(order.delivery || {}), ...deliveryPayload } : {},
     pickup: mode === "pickup" ? {
