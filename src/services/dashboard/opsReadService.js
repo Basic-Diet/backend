@@ -7,6 +7,7 @@ const Delivery = require("../../models/Delivery");
 const Subscription = require("../../models/Subscription");
 const User = require("../../models/User");
 const dashboardDtoService = require("./dashboardDtoService");
+const { buildKitchenCatalogMaps } = require("./kitchenCatalogService");
 const { shouldBlockOneTimeOrderDelivery } = require("../../utils/oneTimeOrderDeliveryGate");
 const ar = require("../../locales/ar");
 const en = require("../../locales/en");
@@ -73,6 +74,8 @@ async function listOperations({ date, role, lang = "ar" }) {
   const deliveryByDayMap = new Map(deliveries.filter(d => d.dayId).map(d => [String(d.dayId), d]));
   const deliveryByOrderMap = new Map(deliveries.filter(d => d.orderId).map(d => [String(d.orderId), d]));
 
+  const catalogMaps = await buildKitchenCatalogMaps([...days, ...orders, ...pickupRequests]);
+
   // 5. Map to DTOs
   const dayDTOs = days.filter((day) => {
     const sub = subMap.get(String(day.subscriptionId));
@@ -90,7 +93,8 @@ async function listOperations({ date, role, lang = "ar" }) {
       sub || {},
       user,
       role,
-      lang
+      lang,
+      catalogMaps
     );
     dto.ui.label = getLocalizedLabel(day.status, lang);
     return dto;
@@ -103,7 +107,8 @@ async function listOperations({ date, role, lang = "ar" }) {
       deliveryByOrderMap.get(String(order._id)),
       user,
       role,
-      lang
+      lang,
+      catalogMaps
     );
     dto.ui.label = getLocalizedLabel(order.status, lang);
     return dto;
@@ -116,7 +121,8 @@ async function listOperations({ date, role, lang = "ar" }) {
       sub || {},
       user,
       role,
-      lang
+      lang,
+      catalogMaps
     );
     dto.ui.label = getLocalizedLabel(pickupRequest.status, lang);
     return dto;
@@ -140,7 +146,8 @@ async function getEnrichedDTO({ entityId, entityType, role, lang = "ar" }) {
       Subscription.findById(pickupRequest.subscriptionId).populate("planId", "_id key name daysCount durationDays").lean(),
       User.findById(pickupRequest.userId).lean(),
     ]);
-    const dto = dashboardDtoService.mapSubscriptionPickupRequestToDTO(pickupRequest, sub || {}, user, role, lang);
+    const catalogMaps = await buildKitchenCatalogMaps([pickupRequest]);
+    const dto = dashboardDtoService.mapSubscriptionPickupRequestToDTO(pickupRequest, sub || {}, user, role, lang, catalogMaps);
     dto.ui.label = getLocalizedLabel(pickupRequest.status, lang);
     return dto;
   }
@@ -162,8 +169,9 @@ async function getEnrichedDTO({ entityId, entityType, role, lang = "ar" }) {
     ]);
 
     const user = sub ? await User.findById(sub.userId).lean() : null;
+    const catalogMaps = await buildKitchenCatalogMaps([day]);
 
-    const dto = dashboardDtoService.mapSubscriptionDayToDTO(day, delivery, sub || {}, user, role, lang, {}, pickupRequest);
+    const dto = dashboardDtoService.mapSubscriptionDayToDTO(day, delivery, sub || {}, user, role, lang, catalogMaps, pickupRequest);
     dto.ui.label = getLocalizedLabel(day.status, lang);
     return dto;
   } else {
@@ -174,8 +182,9 @@ async function getEnrichedDTO({ entityId, entityType, role, lang = "ar" }) {
       Delivery.findOne({ orderId: order._id }).lean(),
       User.findById(order.userId).lean()
     ]);
+    const catalogMaps = await buildKitchenCatalogMaps([order]);
 
-    const dto = dashboardDtoService.mapOrderToDTO(order, delivery, user, role, lang);
+    const dto = dashboardDtoService.mapOrderToDTO(order, delivery, user, role, lang, catalogMaps);
     dto.ui.label = getLocalizedLabel(order.status, lang);
     return dto;
   }

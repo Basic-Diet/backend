@@ -7,6 +7,7 @@ const Subscription = require("../../models/Subscription");
 const Order = require("../../models/Order");
 const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const dashboardDtoService = require("./dashboardDtoService");
+const { buildKitchenCatalogMaps } = require("./kitchenCatalogService");
 
 /**
  * Fast Operational Search Service.
@@ -99,6 +100,8 @@ async function search({ q, role, lang = "ar" }) {
   const userMap = new Map(users.map(u => [String(u._id), u]));
   const subMap = new Map(subscriptions.map(s => [String(s._id), s]));
 
+  const catalogMaps = await buildKitchenCatalogMaps([...days, ...allOrders]);
+
   // Deduping by ID to avoid duplicates if multiple match criteria hit
   const seenIds = new Set();
   const results = [];
@@ -108,14 +111,14 @@ async function search({ q, role, lang = "ar" }) {
     const sub = subMap.get(String(day.subscriptionId));
     const user = sub ? userMap.get(String(sub.userId)) : null;
     const pickupRequest = pickupRequestMap.get(`${String(day.subscriptionId)}:${day.date}`) || null;
-    results.push(dashboardDtoService.mapSubscriptionDayToDTO(day, null, sub || {}, user, role, lang, {}, pickupRequest));
+    results.push(dashboardDtoService.mapSubscriptionDayToDTO(day, null, sub || {}, user, role, lang, catalogMaps, pickupRequest));
     seenIds.add(String(day._id));
   }
 
   for (const order of allOrders) {
     if (seenIds.has(String(order._id))) continue;
     const user = userMap.get(String(order.userId));
-    results.push(dashboardDtoService.mapOrderToDTO(order, null, user, role, lang));
+    results.push(dashboardDtoService.mapOrderToDTO(order, null, user, role, lang, catalogMaps));
     seenIds.add(String(order._id));
   }
 
