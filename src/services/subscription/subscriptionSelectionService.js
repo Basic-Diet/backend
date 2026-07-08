@@ -107,13 +107,19 @@ async function reconcileAddonInclusions(
   // 1. Fetch unified category balances (this safely combines explicit buckets and audit fallback per category)
   const computedBalances = buildClientAddonBalance(subscription, null);
 
+  if (computedBalances && computedBalances.addonBalanceNeedsReview) {
+    throw { 
+      status: 409, 
+      code: "ADDON_BALANCE_MISSING_REVIEW_REQUIRED", 
+      message: "Subscription is missing addon balance tracking and requires administrative review to proceed." 
+    };
+  }
+
   // 2. Prepare the simulated remaining map per category/bucket
   if (hasAddonBalance) {
     for (const bucket of subscription.addonBalance) {
       if (!bucket || !bucket._id) continue;
-      // If the entire subscription is flagged or this specific bucket's category is flagged, we degrade gracefully (qty = 0)
-      const categoryFlagged = computedBalances && computedBalances.addonBalanceNeedsReview;
-      let qty = categoryFlagged ? 0 : Number(bucket.remainingQty || 0);
+      let qty = Number(bucket.remainingQty || 0);
 
       // Add back existing day selections that were already deducted
       if (day && Array.isArray(day.addonSelections)) {
@@ -132,24 +138,6 @@ async function reconcileAddonInclusions(
         }
       }
       simulatedRemaining.set(String(bucket._id), qty);
-    }
-  } else if (computedBalances) {
-    // Legacy dynamic balance fallback (Per-Category check instead of global hasAddonBalance bypass)
-    for (const category of Object.keys(computedBalances)) {
-      if (category === "addonBalanceNeedsReview") continue;
-      
-      // Graceful Degradation: If review is needed, set available free qty to 0 (items become pending_payment)
-      let qty = computedBalances.addonBalanceNeedsReview ? 0 : Number(computedBalances[category].remainingUnits || 0);
-      
-      // Add back existing day selections that were already deducted
-      if (day && Array.isArray(day.addonSelections)) {
-        for (const sel of day.addonSelections) {
-          if (sel.source === "subscription" && sel.category === category) {
-            qty += 1;
-          }
-        }
-      }
-      simulatedRemaining.set(category, qty);
     }
   }
 
@@ -198,26 +186,17 @@ async function reconcileAddonInclusions(
 
     if (entitlement && !isRestrictedByPlan) {
       let canCover = false;
-      if (hasAddonBalance) {
-        const bucket = findAddonBalanceBucket(subscription, {
-          addonId: doc._id,
-          addonPlanId: entitlement ? (entitlement.addonPlanId || entitlement.addonId) : null,
-          category,
-          unitPriceHalala
-        });
-        if (bucket && bucket._id) {
-          const rem = simulatedRemaining.get(String(bucket._id)) || 0;
-          if (rem > 0) {
-            canCover = true;
-            simulatedRemaining.set(String(bucket._id), rem - 1);
-          }
-        }
-      } else {
-        const key = entitlement.category;
-        const rem = simulatedRemaining.get(key) || 0;
+      const bucket = findAddonBalanceBucket(subscription, {
+        addonId: doc._id,
+        addonPlanId: entitlement ? (entitlement.addonPlanId || entitlement.addonId) : null,
+        category,
+        unitPriceHalala
+      });
+      if (bucket && bucket._id) {
+        const rem = simulatedRemaining.get(String(bucket._id)) || 0;
         if (rem > 0) {
           canCover = true;
-          simulatedRemaining.set(key, rem - 1);
+          simulatedRemaining.set(String(bucket._id), rem - 1);
         }
       }
 

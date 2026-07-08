@@ -62,31 +62,19 @@ function buildClientAddonBalance(subscription, businessDate, auditedConsumptionM
         unitPolicy: "TOTAL_BALANCE_WITHIN_VALIDITY",
       };
     } else {
-      // 2. Legacy fallback path: compute on the fly using addonSubscriptions maxPerDay
+      // 2. Missing Balance Path: An entitlement exists but NO cumulative balance bucket exists.
       const entitlement = entitlements.find(e => e.category === category);
       if (entitlement) {
-        const maxPerDay = Number(entitlement.maxPerDay || 1);
-        const totalDurationDays = Number(subscription.totalMeals || subscription.duration || 1); // Assuming 1 meal day = 1 plan day. If totalMeals is present, we use it.
-        const computedTotalUnits = maxPerDay * totalDurationDays;
+        // This subscription requires administrative review to backfill the missing addonBalance.
+        needsReviewFlag = true;
         
-        const historicallyConsumed = auditMap[category] || 0;
-        
-        // Audit check: did the old system let through more than maxPerDay?
-        // We know that total historically consumed should normally be <= computedTotalUnits
-        // If historicallyConsumed is wildly higher than what we expect based on actual days passed, or > totalUnits, it's corrupt.
-        if (historicallyConsumed > computedTotalUnits) {
-          needsReviewFlag = true;
-          logger.warn(`Subscription ${subscription._id} addon balance audit failed for ${category}. Consumed: ${historicallyConsumed}, Computed Total: ${computedTotalUnits}`);
-        }
-
-        const remainingUnits = Math.max(0, computedTotalUnits - historicallyConsumed);
-
         result[category] = {
-          totalUnits: computedTotalUnits,
-          remainingUnits,
-          consumedUnits: historicallyConsumed,
-          canConsumeNow: isSubscriptionActive && isInsideValidity && remainingUnits > 0 && !needsReviewFlag,
+          totalUnits: 0,
+          remainingUnits: 0,
+          consumedUnits: auditMap[category] || 0,
+          canConsumeNow: false,
           unitPolicy: "TOTAL_BALANCE_WITHIN_VALIDITY",
+          missingBalance: true
         };
       }
     }
