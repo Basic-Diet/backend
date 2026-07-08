@@ -2345,22 +2345,27 @@ async function validateDaySelection(req, res) {
   } catch (err) {
     return errorResponse(res, err.status, err.code, err.message);
   }
-  const result = await validateDaySelectionForClient({
-    subscriptionId: id,
-    date,
-    mealSlots: req.body && req.body.mealSlots,
-    contractVersion: req.body && (req.body.contractVersion || req.body.plannerContractVersion || req.body.version),
-    requestedOneTimeAddonIds:
-      req.body && req.body.addonsOneTime !== undefined
-        ? req.body.addonsOneTime
-        : (req.body && req.body.oneTimeAddonSelections),
-    userId: req.userId,
-    lang: getRequestLang(req),
-  });
-  if (!result.ok) {
-    return errorResponse(res, result.status, result.code, result.message, result.details);
+  try {
+    const result = await validateDaySelectionForClient({
+      subscriptionId: id,
+      date,
+      mealSlots: req.body && req.body.mealSlots,
+      contractVersion: req.body && (req.body.contractVersion || req.body.plannerContractVersion || req.body.version),
+      requestedOneTimeAddonIds:
+        req.body && req.body.addonsOneTime !== undefined
+          ? req.body.addonsOneTime
+          : (req.body && req.body.oneTimeAddonSelections),
+      userId: req.userId,
+      lang: getRequestLang(req),
+    });
+    if (!result.ok) {
+      return errorResponse(res, result.status, result.code, result.message, result.details);
+    }
+    return res.status(result.status).json({ status: true, data: result.data });
+  } catch (err) {
+    logger.error("Controller validate day selection failed", { subscriptionId: id, date, error: err.message, stack: err.stack });
+    return errorResponse(res, 500, "INTERNAL", "Day selection validation failed");
   }
-  return res.status(result.status).json({ status: true, data: result.data });
 }
 
 async function getSubscriptionAddonChoices(req, res) {

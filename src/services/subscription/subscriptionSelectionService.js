@@ -786,6 +786,17 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
     premiumExtraPayment: existingDay && existingDay.premiumExtraPayment ? existingDay.premiumExtraPayment : null,
   });
 
+  // Security/Quota Check: Strict rejection for PUT /selection if payment is required
+  if (!appendOnly && derivedDraftState.paymentRequirement.requiresPayment) {
+    const blockingReason = derivedDraftState.paymentRequirement.blockingReason || "PAYMENT_REQUIRED";
+    throw {
+      status: 402,
+      code: blockingReason,
+      message: "Selections exceed allowed quota or require payment.",
+      details: derivedDraftState.paymentRequirement
+    };
+  }
+
   // 4. Idempotency Short-circuit
   await assertPlanningBalanceAfterSave({
     subscription: subForDraft,

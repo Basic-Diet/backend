@@ -223,7 +223,7 @@ const SubscriptionDaySchema = new mongoose.Schema(
     premiumUpgradeSelections: [
       {
         baseSlotKey: { type: String, required: true },
-        proteinId: { type: mongoose.Schema.Types.ObjectId, ref: "BuilderProtein", required: true },
+        proteinId: { type: mongoose.Schema.Types.ObjectId, ref: "BuilderProtein", default: null },
         premiumKey: { type: String, default: null, trim: true },
         unitExtraFeeHalala: { type: Number, min: 0, default: 0 },
         currency: { type: String, default: "SAR" },

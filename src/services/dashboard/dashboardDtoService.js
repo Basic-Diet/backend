@@ -33,7 +33,7 @@ const STATUS_METADATA = {
   no_show: { badge: "danger", icon: "user-x" },
   canceled: { badge: "danger", icon: "x-circle" },
   skipped: { badge: "secondary", icon: "skip-forward" },
-  
+
   // Specific for Orders/Deliveries
   out_for_delivery: { badge: "info", icon: "truck" },
   on_the_way: { badge: "info", icon: "truck" }, // Alias for ui
@@ -44,12 +44,12 @@ const STATUS_METADATA = {
 function resolveUiMetadata(status, lang) {
   const meta = STATUS_METADATA[status] || { badge: "secondary", icon: "help-circle" };
   const labelKey = `read.dayStatuses.${status === 'out_for_delivery' ? 'on_the_way' : status}`;
-  
-  // Note: We'll assume the caller passes a loaded i18n helper or we'll need to 
+
+  // Note: We'll assume the caller passes a loaded i18n helper or we'll need to
   // use the locale files directly. For this implementation, we'll return the key
   // or a simple mapping if the full i18n is too heavy for the DTO.
   // Actually, let's just use the direct mapping for Phase 1.
-  
+
   return {
     label: status, // Fallback, normally localized by service
     badge: meta.badge,
@@ -67,9 +67,9 @@ function mapSubscriptionDayToDTO(day, delivery, subscription, user, role, lang, 
     day,
     today: day.date,
   });
-  
+
   const pickupPayload = mode === "pickup" ? buildPickupPayload({ pickupRequest, subscription, day }) : null;
-  
+
   let allowedActions = opsActionPolicy.getAllowedActions({
     entityType: "subscription",
     status,
@@ -83,7 +83,7 @@ function mapSubscriptionDayToDTO(day, delivery, subscription, user, role, lang, 
       (action) => !["prepare", "ready_for_pickup", "fulfill"].includes(action.id)
     );
   }
-  
+
   const plan = buildPlanPayload(subscription, lang);
   const kitchenDetails = buildKitchenDetailsPayload(day, subscription, lang, catalogMaps);
   const paymentValidity = buildPaymentValidityPayload(day);
@@ -304,32 +304,77 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
             ...buildKitchenDetailsPayload({ mealSlots: [slot] }, subscription || {}, lang, catalogMaps).mealSlots[0],
           }))
           : (Array.isArray(pickupRequest.selectedPickupItems) && pickupRequest.selectedPickupItems.length > 0
-            ? pickupRequest.selectedPickupItems.map((item, index) => ({
-                slotIndex: index + 1,
-                slotKey: `pickup_item_${index + 1}`,
-                selectionType: item.itemType || "standard_meal",
-                productId: item.itemId ? String(item.itemId) : null,
-                productKey: null,
-                productName: item.display && item.display.titleEn ? item.display.titleEn : "Unknown",
-                productNameI18n: { ar: item.display && item.display.titleAr ? item.display.titleAr : "غير معروف", en: item.display && item.display.titleEn ? item.display.titleEn : "Unknown" },
-                proteinId: null,
-                proteinKey: null,
-                proteinName: "",
-                proteinNameI18n: { ar: "", en: "" },
-                proteinGrams: null,
-                proteinFamilyKey: null,
-                carbSelections: [],
-                salad: null,
-                sauce: [],
-                selectedOptions: [],
-                sides: [],
-                sandwichId: null,
-                isPremium: false,
-                premiumKey: null,
-                premiumSource: "none",
-                quantity: 1,
-                notes: null,
-              }))
+            ? pickupRequest.selectedPickupItems.map((item, index) => {
+                const itemIdStr = item.itemId ? String(item.itemId) : null;
+                const isSandwich = item.itemType === "sandwich";
+                const catalogDoc = isSandwich
+                  ? (catalogMaps.sandwichById && catalogMaps.sandwichById.get(itemIdStr))
+                  : (catalogMaps.productById && catalogMaps.productById.get(itemIdStr));
+
+                let defaultNameEn = item.display && item.display.titleEn ? item.display.titleEn : "Unknown";
+                let defaultNameAr = item.display && item.display.titleAr ? item.display.titleAr : "غير معروف";
+
+                let resolvedNameEn = defaultNameEn;
+                let resolvedNameAr = defaultNameAr;
+
+                if (catalogDoc && catalogDoc.name) {
+                   if (typeof catalogDoc.name === 'object') {
+                       resolvedNameEn = catalogDoc.name.en || catalogDoc.name.ar || defaultNameEn;
+                       resolvedNameAr = catalogDoc.name.ar || catalogDoc.name.en || defaultNameAr;
+                   } else {
+                       resolvedNameEn = catalogDoc.name;
+                       resolvedNameAr = catalogDoc.name;
+                   }
+                }
+
+                const selectedOptions = (Array.isArray(item.components) ? item.components : []).map(comp => {
+                    const compIdStr = comp.id ? String(comp.id) : null;
+                    const optionDoc = catalogMaps.optionById && catalogMaps.optionById.get(compIdStr);
+                    return {
+                        optionId: compIdStr,
+                        optionKey: comp.key || (optionDoc ? optionDoc.key : null),
+                        nameI18n: {
+                            ar: (optionDoc && optionDoc.name && optionDoc.name.ar) ? optionDoc.name.ar : (comp.name && comp.name.ar ? comp.name.ar : null),
+                            en: (optionDoc && optionDoc.name && optionDoc.name.en) ? optionDoc.name.en : (comp.name && comp.name.en ? comp.name.en : null),
+                        },
+                        groupNameI18n: {
+                            ar: comp.groupName && comp.groupName.ar ? comp.groupName.ar : null,
+                            en: comp.groupName && comp.groupName.en ? comp.groupName.en : null,
+                        },
+                        quantity: comp.quantity || 1
+                    };
+                });
+
+                return {
+                  slotIndex: index + 1,
+                  slotKey: `pickup_item_${index + 1}`,
+                  selectionType: item.itemType || "standard_meal",
+                  productId: itemIdStr,
+                  productKey: catalogDoc ? catalogDoc.key : null,
+                  productName: resolvedNameEn,
+                  productNameI18n: { ar: resolvedNameAr, en: resolvedNameEn },
+                  sandwichId: isSandwich ? itemIdStr : null,
+                  sandwichKey: isSandwich && catalogDoc ? catalogDoc.key : null,
+                  sandwichName: isSandwich ? resolvedNameEn : "",
+                  sandwichNameI18n: isSandwich ? { ar: resolvedNameAr, en: resolvedNameEn } : undefined,
+                  proteinId: null,
+                  proteinKey: null,
+                  proteinName: "",
+                  proteinNameI18n: { ar: "", en: "" },
+                  proteinGrams: null,
+                  proteinFamilyKey: null,
+                  carbSelections: [],
+                  salad: null,
+                  sauce: [],
+                  selectedOptions,
+                  sides: [],
+                  isPremium: item.itemType === "premium_meal",
+                  premiumKey: null,
+                  premiumSource: "none",
+                  quantity: item.quantity || 1,
+                  notes: null,
+                };
+              })
             : Array.from({ length: Number(pickupRequest.mealCount || 0) }).map((_, index) => ({
                 slotIndex: index + 1,
                 slotKey: `chef_choice_${index + 1}`,

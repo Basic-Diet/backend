@@ -129,6 +129,25 @@ function collectCatalogRefsFromDays(days) {
         addRef(refs.carbKeys, carb && carb.key);
       }
     }
+    const selectedPickupItems = []
+      .concat(Array.isArray(day && day.selectedPickupItems) ? day.selectedPickupItems : [])
+      .concat(day && day.snapshot && Array.isArray(day.snapshot.selectedPickupItems) ? day.snapshot.selectedPickupItems : []);
+    for (const item of selectedPickupItems) {
+      if (!item) continue;
+      const itemId = item.itemId;
+      if (item.itemType === "sandwich") {
+        addRef(refs.sandwichIds, itemId);
+      } else if (item.itemType !== "addon") {
+        addRef(refs.productIds, itemId);
+      } else {
+        addRef(refs.addonIds, itemId);
+      }
+      for (const comp of Array.isArray(item.components) ? item.components : []) {
+        if (!comp) continue;
+        addRef(refs.optionIds, comp.id);
+        addRef(refs.optionKeys, comp.key);
+      }
+    }
   }
   return refs;
 }
