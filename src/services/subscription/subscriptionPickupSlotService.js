@@ -4,7 +4,7 @@ const crypto = require("crypto");
 
 const SubscriptionPickupRequest = require("../../models/SubscriptionPickupRequest");
 const { buildKitchenDetailsPayload } = require("../dashboard/opsPayloadService");
-const { buildDayCommercialState } = require("./subscriptionDayCommercialStateService");
+const { buildDayCommercialState, evaluateAddonChoicePayment } = require("./subscriptionDayCommercialStateService");
 
 const ACTIVE_OR_CONSUMING_PICKUP_STATUSES = ["locked", "in_preparation", "ready_for_pickup", "fulfilled", "no_show"];
 
@@ -715,16 +715,20 @@ function buildAddonChoicePickupItem(choice = {}, categoryAllowance = {}, index =
     category: categoryAllowance.category || choice.addonCategory || choice.category || null,
     currency: categoryAllowance.currency || choice.currency || "SAR",
   });
-  const priceHalala = Math.max(0, Math.floor(Number(choice.priceHalala || 0)));
-  const remainingIncludedQty = Number(allowance.remainingIncludedQty || 0);
-  const isEligibleForAllowance = choice.isEligibleForAllowance !== false;
-  const paymentRequired = (!isEligibleForAllowance || remainingIncludedQty <= 0) && priceHalala > 0;
-  const paymentStatus = paymentRequired ? "pending" : "not_required";
+  
+  const paymentEvaluation = evaluateAddonChoicePayment({ choice, categoryAllowance: allowance });
+  const paymentRequired = paymentEvaluation.required;
+  const paymentStatus = paymentEvaluation.status;
+  const remainingIncludedQty = allowance.remainingIncludedQty;
+  const priceHalala = paymentEvaluation.amountDueHalala; // if they want the total price, wait, amountDueHalala is 0 if not required.
+  // Actually, priceHalala is the product's base price, which we still need for `addon.price`.
+  const basePriceHalala = Math.max(0, Math.floor(Number(choice.priceHalala || 0)));
+
   const addon = {
     id: choice.id || choice._id || null,
     key: choice.key || null,
     name: bilingualPair(choice.nameI18n || { ar: choice.nameAr, en: choice.name }, { ar: "إضافة", en: "Add-on" }),
-    price: moneyFromHalala(priceHalala),
+    price: moneyFromHalala(basePriceHalala),
     paymentStatus,
     image: choice.imageUrl || choice.image || null,
   };
@@ -733,11 +737,11 @@ function buildAddonChoicePickupItem(choice = {}, categoryAllowance = {}, index =
   const payment = {
     required: paymentRequired,
     status: paymentStatus,
-    reason: paymentRequired ? "ADDON_PAYMENT_REQUIRED" : null,
+    reason: paymentEvaluation.reason,
     reasonLabel: paymentRequired ? bilingualPair(resolveReasonCopy("ADDON_PAYMENT_REQUIRED", "addon"), EMPTY_TEXT_PAIR) : { ...EMPTY_TEXT_PAIR },
-    amountDue: paymentRequired ? addon.price : 0,
-    amountDueHalala: paymentRequired ? priceHalala : 0,
-    currency: choice.currency || allowance.currency || "SAR",
+    amountDue: paymentRequired ? moneyFromHalala(paymentEvaluation.amountDueHalala) : 0,
+    amountDueHalala: paymentEvaluation.amountDueHalala,
+    currency: paymentEvaluation.currency,
     premiumRequired: false,
     addonRequired: paymentRequired,
   };

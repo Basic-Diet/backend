@@ -451,6 +451,25 @@ function buildDayCommercialState(day = {}, { subscription = null } = {}) {
   };
 }
 
+function evaluateAddonChoicePayment({ choice, categoryAllowance }) {
+  if (!choice) return { required: false, status: "not_required", reason: null, amountDueHalala: 0, currency: "SAR" };
+  
+  const allowance = categoryAllowance || {};
+  const priceHalala = Math.max(0, Math.floor(Number(choice.priceHalala || 0)));
+  const remainingIncludedQty = Math.max(0, Math.floor(Number(allowance.remainingIncludedQty || 0)));
+  const isEligibleForAllowance = choice.isEligibleForAllowance !== false;
+  
+  const required = (!isEligibleForAllowance || remainingIncludedQty <= 0) && priceHalala > 0;
+  
+  return {
+    required,
+    status: required ? "pending" : "not_required",
+    reason: required ? "ADDON_PAYMENT_REQUIRED" : null,
+    amountDueHalala: required ? priceHalala : 0,
+    currency: choice.currency || allowance.currency || "SAR"
+  };
+}
+
 function applyCommercialStateToDay(day = {}, options = {}) {
   const derived = buildDayCommercialState(day, options);
   return {
@@ -524,6 +543,7 @@ module.exports = {
   buildPaymentRequirement,
   buildPlannerRevisionHash,
   buildPremiumSummary,
+  evaluateAddonChoicePayment,
   finalizeDayCommercialStateForPersistence,
   isPlanningComplete,
   normalizePremiumExtraPayment,
