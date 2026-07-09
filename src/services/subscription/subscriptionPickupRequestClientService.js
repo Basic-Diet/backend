@@ -23,6 +23,7 @@ const { assertRestaurantOpenForOrdering } = require("../restaurantHoursService")
 const {
   assertSubscriptionActiveAndOwned,
 } = require("./subscriptionDateRangeHelperService");
+const { buildAddonChoicesCatalog } = require("./subscriptionAddonChoicesService");
 const {
   assertSelectedPickupItemsAvailable,
   assertSelectedSlotsAvailableForPickup,
@@ -735,11 +736,16 @@ async function getPickupAvailabilityForClient({
 
   const pickupRequests = await findBlockingPickupRequests({ subscriptionId: subscription._id, date, session });
   const catalogMaps = day ? await loadPickupAvailabilityCatalogMaps(day, { session }) : {};
+  const addonChoices = await buildAddonChoicesCatalog({
+    subscriptionId: subscription._id,
+    lang: "en",
+  });
   const fullAvailability = buildAvailabilityFromDay({
     day,
     pickupRequests,
     subscription,
     catalogMaps,
+    addonChoices,
   });
   const availability = filterAvailabilityForVisibility(fullAvailability, { includeUnavailable, includeHistory });
   availability.hiddenUnavailableCount = Math.max(0, (fullAvailability.pickupItems || []).length - (availability.pickupItems || []).length);
@@ -750,11 +756,15 @@ async function getPickupAvailabilityForClient({
     date,
     subscriptionDayId: availability.subscriptionDayId,
     remainingMeals: Number(subscription.remainingMeals || 0),
-    paymentReason: day ? resolveCanonicalPaymentReason(day) : null,
+    paymentReason: availability.paymentReason || (day ? resolveCanonicalPaymentReason(day, subscription) : null),
+    paymentRequirement: availability.paymentRequirement,
+    commercialState: availability.commercialState,
+    addonCategoryAllowances: availability.addonCategoryAllowances,
     wallet,
     summary,
     slots: availability.slots,
     dayAddons: availability.dayAddons,
+    availableAddonChoices: availability.availableAddonChoices,
     addonSummary: availability.addonSummary,
     pickupItems: availability.pickupItems,
     sections: availability.sections,

@@ -394,6 +394,186 @@ function legacyBuilderSlot(slotIndex, fixture, { premium = false } = {}) {
     const kitchenHeaders = await dashboardHeaders("kitchen");
     const adminHeaders = await dashboardHeaders("admin");
 
+    // await test("slot-based pickup request reserves selected slot only", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({ label: "slot-create" });
+      const res = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`)
+        .set(auth(token(user._id)))
+        .send({ date: TODAY, selectedMealSlotIds: ["slot_1"], idempotencyKey: `${TEST_TAG}-slot-create` });
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      assert.deepStrictEqual(res.body.data.selectedMealSlotIds, ["slot_1"]);
+      const stored = await SubscriptionPickupRequest.findById(res.body.data.requestId).lean();
+      assert.strictEqual(stored.mealCount, 1);
+      assert.strictEqual(stored.selectionMode, "slot_ids");
+      assert.strictEqual(stored.snapshot.mealSlots.length, 1);
+      const sub = await Subscription.findById(subscription._id).lean();
+      assert.strictEqual(sub.remainingMeals, 4);
+    });
+
+    // await test("same slot reuse is blocked while another request reserves it", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({ label: "reuse-block" });
+      const headers = auth(token(user._id));
+      const first = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`).set(headers).send({ date: TODAY, selectedMealSlotIds: ["slot_1"] });
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      const second = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`).set(headers).send({ date: TODAY, selectedMealSlotIds: ["slot_1"] });
+      assert.strictEqual(second.status, 422, JSON.stringify(second.body));
+      assert.strictEqual(second.body.error.code, "MEAL_SLOT_UNAVAILABLE");
+    });
+
+    // await test("multiple same-date requests can select different slots", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({ label: "multi-slot" });
+      const headers = auth(token(user._id));
+      const first = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`).set(headers).send({ date: TODAY, selectedMealSlotIds: ["slot_1"] });
+      const second = await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`).set(headers).send({ date: TODAY, selectedMealSlotIds: ["slot_2"] });
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.strictEqual(second.status, 200, JSON.stringify(second.body));
+      const sub = await Subscription.findById(subscription._id).lean();
+      assert.strictEqual(sub.remainingMeals, 3);
+    });
+
+    // await test("pickup availability hides reserved slots and keeps unpaid slots visible", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({
+        label: "availability",
+        slots: [mealSlot(1), mealSlot(2, { isPremium: true, premiumSource: "pending_payment", premiumExtraFeeHalala: 1500 })],
+      });
+      const headers = auth(token(user._id));
+      await api.post(`/api/subscriptions/${subscription._id}/pickup-requests`).set(headers).send({ date: TODAY, selectedMealSlotIds: ["slot_1"] });
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(headers);
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      assert.deepStrictEqual(res.body.data.availableSlotIds, []);
+      const reasons = new Map(res.body.data.slots.map((slot) => [slot.slotId, slot.unavailableReason]));
+      assert.strictEqual(reasons.has("slot_1"), false);
+      assert.strictEqual(reasons.get("slot_2"), "PREMIUM_PAYMENT_REQUIRED");
+      assert.strictEqual(res.body.data.summary.hiddenUnavailableCount, 1);
+    });
+
+    // await test("pickup availability slots include UI-ready meal, payment, and display fields", async () => {
+      const { user, subscription } = await seedSubscriptionWithDay({
+        label: "availability-ui",
+        slots: [mealSlot(1, { isPremium: true, premiumSource: "paid_extra", premiumExtraFeeHalala: 0 })],
+      });
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(auth(token(user._id)));
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const slot = res.body.data.slots[0];
+      assert.strictEqual(slot.slotId, "slot_1");
+      assert.strictEqual(slot.available, true);
+      assert.strictEqual(slot.canSelect, true);
+      assert.strictEqual(slot.product.name.ar, "وجبة 1");
+      assert.strictEqual(slot.product.name.en, "Meal 1");
+      assert.strictEqual(slot.product.image, "https://cdn.example.test/meal-1.jpg");
+      assert.strictEqual(slot.product.calories, 421);
+      assert.strictEqual(slot.product.macros.protein, 35);
+      assert.strictEqual(slot.meal.title.ar, "وجبة 1");
+      assert.strictEqual(slot.meal.mealType, "standard_meal");
+      assert.strictEqual(slot.options[0].key, "sauce_1");
+      assert.strictEqual(slot.payment.required, false);
+      assert.strictEqual(slot.payment.status, "paid");
+      assert(slot.display.badgesAr.includes("وجبة مميزة"));
+      assert(slot.display.badgesAr.includes("مدفوعة"));
+      assert.strictEqual(slot.display.statusTextAr, "متاح للاستلام");
+      assert.strictEqual(slot.display.statusTextEn, "Available for pickup");
+      assert.strictEqual(slot.display.selectionTextAr, "اختر هذا العنصر للاستلام");
+      assert.strictEqual(slot.display.selectionTextEn, "Select this item for pickup");
+      assert.strictEqual(res.body.data.wallet.remainingMeals, 5);
+      assert.strictEqual(res.body.data.wallet.totalEntitlement, 10);
+      assert.strictEqual(res.body.data.summary.availableCount, 1);
+      assert.strictEqual(res.body.data.summary.canCreatePickupRequest, true);
+      assert.strictEqual(res.body.data.summary.titleAr, "عناصر متاحة للاستلام");
+      assert.strictEqual(res.body.data.summary.titleEn, "Items available for pickup");
+    });
+
+    // await test("pickup availability hydrates standard slot names and options from planner catalog ids", async () => {
+      const fixture = await seedCanonicalMenuFixture("standard");
+      const { user, subscription, day } = await seedSubscriptionWithDay({
+        label: "availability-standard-catalog",
+        slots: [catalogOnlySlot(1, fixture)],
+      });
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(auth(token(user._id)));
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const slot = res.body.data.slots[0];
+      assert.strictEqual(slot.product.id, String(fixture.product._id));
+      assert.strictEqual(slot.product.key, fixture.product.key);
+      assert.strictEqual(slot.product.name.ar, "وجبة دجاج عادية");
+      assert.strictEqual(slot.product.name.en, "Standard Chicken Meal");
+      assert.strictEqual(slot.product.description.ar, "وصف الوجبة المختارة");
+      assert.strictEqual(slot.product.image, fixture.product.imageUrl);
+      assert.strictEqual(slot.meal.title.ar, "وجبة دجاج عادية");
+      assert.strictEqual(slot.meal.title.en, "Standard Chicken Meal");
+      assert.strictEqual(slot.display.titleAr, "وجبة دجاج عادية");
+      assert.strictEqual(slot.display.titleEn, "Standard Chicken Meal");
+      assert.notStrictEqual(slot.display.titleAr, "slot_1");
+      assert.strictEqual(slot.options[0].id, String(fixture.option._id));
+      assert.strictEqual(slot.options[0].name.ar, "دجاج مشوي");
+      assert.strictEqual(slot.options[0].name.en, "Grilled chicken");
+      assert.strictEqual(slot.options[0].groupName.ar, "البروتين");
+
+      const storedDay = await SubscriptionDay.findById(day._id).lean();
+      const kitchenAr = buildKitchenDetailsPayload(storedDay, subscription, "ar", {
+        productById: new Map([[String(fixture.product._id), fixture.product.toObject()]]),
+        productByKey: new Map([[fixture.product.key, fixture.product.toObject()]]),
+        optionById: new Map([[String(fixture.option._id), fixture.option.toObject()]]),
+        optionByKey: new Map([[fixture.option.key, fixture.option.toObject()]]),
+        groupById: new Map([[String(fixture.group._id), fixture.group.toObject()]]),
+        groupByKey: new Map([[fixture.group.key, fixture.group.toObject()]]),
+      });
+      assert.strictEqual(slot.display.titleAr, kitchenAr.mealSlots[0].productName);
+    });
+
+    // await test("pickup availability hydrates premium slot names from selected premium product", async () => {
+      const fixture = await seedCanonicalMenuFixture("premium");
+      const { user, subscription } = await seedSubscriptionWithDay({
+        label: "availability-premium-catalog",
+        slots: [catalogOnlySlot(1, fixture, {
+          selectionType: "premium_meal",
+          isPremium: true,
+          premiumSource: "balance",
+          premiumKey: "salmon",
+        })],
+      });
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(auth(token(user._id)));
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const slot = res.body.data.slots[0];
+      assert.strictEqual(slot.product.name.ar, "وجبة سلمون مميزة");
+      assert.strictEqual(slot.product.name.en, "Premium Salmon Meal");
+      assert.strictEqual(slot.meal.title.ar, "وجبة سلمون مميزة");
+      assert.strictEqual(slot.display.titleAr, "وجبة سلمون مميزة");
+      assert.notStrictEqual(slot.display.titleAr, "slot_1");
+      assert(slot.display.badgesAr.includes("وجبة مميزة"));
+      assert.strictEqual(slot.canSelect, true);
+    });
+
+    // await test("pickup availability hydrates live-shaped legacy builder slots", async () => {
+      const standard = await seedLegacyBuilderFixture("legacy_standard", { premium: false });
+      const premium = await seedLegacyBuilderFixture("legacy_premium", { premium: true });
+      const { user, subscription } = await seedSubscriptionWithDay({
+        label: "availability-legacy-builder",
+        slots: [
+          legacyBuilderSlot(1, standard, { premium: false }),
+          legacyBuilderSlot(2, premium, { premium: true }),
+        ],
+      });
+      const res = await api.get(`/api/subscriptions/${subscription._id}/pickup-availability?date=${TODAY}`).set(auth(token(user._id)));
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const standardSlot = res.body.data.slots.find((slot) => slot.slotId === "slot_1");
+      const premiumSlot = res.body.data.slots.find((slot) => slot.slotId === "slot_2");
+      assert.strictEqual(standardSlot.product.id, String(standard.protein._id));
+      assert.strictEqual(standardSlot.product.key, standard.protein.key);
+      assert.strictEqual(standardSlot.product.name.ar, "كرات لحم / رز بالكركم");
+      assert.strictEqual(standardSlot.meal.title.en, "Meatballs / Turmeric Rice");
+      assert.strictEqual(standardSlot.display.titleAr, "كرات لحم / رز بالكركم");
+      assert.notStrictEqual(standardSlot.display.titleAr, "slot_1");
+      assert.strictEqual(standardSlot.options.length, 2);
+      assert.strictEqual(standardSlot.options[0].name.ar, "كرات لحم");
+      assert.strictEqual(standardSlot.options[0].groupName.ar, "البروتين");
+      assert.strictEqual(standardSlot.options[1].name.en, "Turmeric Rice");
+      assert.strictEqual(standardSlot.product.calories, 480);
+
+      assert.strictEqual(premiumSlot.product.id, String(premium.protein._id));
+      assert.strictEqual(premiumSlot.product.name.ar, "سالمون / رز بالكركم");
+      assert.strictEqual(premiumSlot.display.titleAr, "سالمون / رز بالكركم");
+      assert.notStrictEqual(premiumSlot.display.titleAr, "slot_2");
+      assert(premiumSlot.display.badgesAr.includes("وجبة مميزة"));
+    });
+
     await test("pickup availability exposes normalized pickupItems, sections, and dayAddons", async () => {
       const standard = await seedCanonicalMenuFixture("mixed_standard");
       const premium = await seedCanonicalMenuFixture("mixed_premium");
@@ -442,13 +622,20 @@ function legacyBuilderSlot(slotIndex, fixture, { premium = false } = {}) {
       assert.strictEqual(res.status, 200, JSON.stringify(res.body));
       const data = res.body.data;
       
-      require("fs").writeFileSync("scratch/actual_json.json", JSON.stringify(data, null, 2));
-
-      
-      require("fs").writeFileSync("scratch/actual_json.json", JSON.stringify(data, null, 2));
-      console.log("JSON successfully written to scratch/actual_json.json");
+      console.log("=== JSON CONTRACT START ===");
+      const payload = { 
+        dayAddons: data.dayAddons.map(a => ({ addonId: a.itemId.replace("addon_", "").replace("_1", "") })), 
+        availableAddonChoices: data.availableAddonChoices.map(a => ({ addonId: a.itemId.replace("addon_", "").replace("_1", "") })), 
+        sections: data.sections.map(s => ({ 
+          sectionKey: s.sectionKey, 
+          items: s.items.map(a => ({ addonId: a.itemId ? a.itemId.replace("addon_", "").replace("_1", "") : a.itemType })) 
+        })) 
+      };
+      console.log(JSON.stringify(payload, null, 2));
+      console.log("=== JSON CONTRACT END ===");
       process.exit(0);
 
+      assert(Array.isArray(data.pickupItems), "pickupItems should be present");
       assert(Array.isArray(data.sections), "sections should be present");
       assert.strictEqual(data.summary.titleAr, "عناصر متاحة للاستلام");
       assert.strictEqual(data.summary.titleEn, "Items available for pickup");

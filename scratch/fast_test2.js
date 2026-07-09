@@ -442,13 +442,20 @@ function legacyBuilderSlot(slotIndex, fixture, { premium = false } = {}) {
       assert.strictEqual(res.status, 200, JSON.stringify(res.body));
       const data = res.body.data;
       
-      require("fs").writeFileSync("scratch/actual_json.json", JSON.stringify(data, null, 2));
-
-      
-      require("fs").writeFileSync("scratch/actual_json.json", JSON.stringify(data, null, 2));
-      console.log("JSON successfully written to scratch/actual_json.json");
+      console.log("=== JSON CONTRACT START ===");
+      const payload = { 
+        dayAddons: data.dayAddons.map(a => ({ addonId: a.itemId.replace("addon_", "").replace("_1", "") })), 
+        availableAddonChoices: data.availableAddonChoices.map(a => ({ addonId: a.itemId.replace("addon_", "").replace("_1", "") })), 
+        sections: data.sections.map(s => ({ 
+          sectionKey: s.sectionKey, 
+          items: s.items.map(a => ({ addonId: a.itemId ? a.itemId.replace("addon_", "").replace("_1", "") : a.itemType })) 
+        })) 
+      };
+      console.log(JSON.stringify(payload, null, 2));
+      console.log("=== JSON CONTRACT END ===");
       process.exit(0);
 
+      assert(Array.isArray(data.pickupItems), "pickupItems should be present");
       assert(Array.isArray(data.sections), "sections should be present");
       assert.strictEqual(data.summary.titleAr, "عناصر متاحة للاستلام");
       assert.strictEqual(data.summary.titleEn, "Items available for pickup");

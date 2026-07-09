@@ -181,7 +181,9 @@ async function buildAddonChoicesCatalog({
     if (hasSubscriptionFilter) {
       const allowedIds = allowedProductIdsByCat.get(addonCategory);
       if (allowedIds) {
-        choices = choices.filter((choice) => allowedIds.includes(String(choice.id)));
+        choices.forEach((choice) => {
+          choice.isEligibleForAllowance = allowedIds.includes(String(choice.id));
+        });
       }
     }
 
