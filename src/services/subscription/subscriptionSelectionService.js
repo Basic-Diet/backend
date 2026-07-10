@@ -764,6 +764,7 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
       message: draft.errorMessage || "Meal planner validation failed",
       valid: false,
       slotErrors: draft.slotErrors,
+      debug: draft.debug,
       rules: getMealPlannerRules()
     };
   }
@@ -1098,7 +1099,7 @@ async function performDaySelectionValidation({
       subscription: planningDraftSubscription,
     });
   if (!draft.valid) {
-    throw { status: 422, code: draft.errorCode || "INVALID_MEAL_PLAN", message: draft.errorMessage || "Meal planner validation failed", slotErrors: draft.slotErrors, rules: getMealPlannerRules(), valid: false };
+    throw { status: 422, code: draft.errorCode || "INVALID_MEAL_PLAN", message: draft.errorMessage || "Meal planner validation failed", slotErrors: draft.slotErrors, debug: draft.debug, rules: getMealPlannerRules(), valid: false };
   }
 
   const pricingState = await evaluateDaySelectionPricingState({
@@ -1208,6 +1209,7 @@ async function performBulkDaySelectionPlanningBalanceValidation({
         message: draft.errorMessage || "Meal planner validation failed",
         valid: false,
         slotErrors: draft.slotErrors,
+        debug: draft.debug,
         rules: getMealPlannerRules(),
         details: { date },
       };
@@ -1284,6 +1286,7 @@ async function performDayPlanningConfirmation({ userId, subscriptionId, date, ru
         message: validatedDraft.errorMessage || "Meal planner validation failed",
         valid: false,
         slotErrors: validatedDraft.slotErrors,
+        debug: validatedDraft.debug,
       };
     }
 
@@ -1422,4 +1425,6 @@ module.exports = {
   performDayPlanningConfirmation,
   consumeAddonBalanceAtomically,
   releaseAddonBalanceAtomically,
+  resolveMealSlotPlanningLimits,
+  buildPlanningDraftSubscriptionView,
 };

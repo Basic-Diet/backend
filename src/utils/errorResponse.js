@@ -45,6 +45,8 @@ module.exports = (res, status, code, message, details) => {
     });
   }
 
+  const debug = resolvedDetails && resolvedDetails.debug ? resolvedDetails.debug : undefined;
+
   return res.status(status).json({
     ok: false,
     error: {
@@ -52,5 +54,6 @@ module.exports = (res, status, code, message, details) => {
       message: localizedMsg,
       ...(resolvedDetails && { details: resolvedDetails }),
     },
+    ...(debug && { debug }),
   });
 };

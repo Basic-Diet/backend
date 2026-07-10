@@ -234,6 +234,7 @@ function buildControllerErrorDetails(err, lang = "ar") {
     return {
       ...(details || {}),
       slotErrors: err.slotErrors,
+      ...(err.debug && { debug: err.debug }),
     };
   }
   return details;

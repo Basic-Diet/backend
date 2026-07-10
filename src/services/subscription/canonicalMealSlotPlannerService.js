@@ -129,7 +129,7 @@ function buildBuilderMembershipError({ slotIndex, field, code, message, productI
   });
 }
 
-function buildCanonicalValidationFailure(slotErrors) {
+function buildCanonicalValidationFailure(slotErrors, debug = undefined) {
   const first = Array.isArray(slotErrors) && slotErrors.length ? slotErrors[0] : null;
   return {
     valid: false,
@@ -137,6 +137,7 @@ function buildCanonicalValidationFailure(slotErrors) {
     errorMessage: first?.message || "Meal planner validation failed",
     slotErrors: slotErrors || [],
     rules: getMealPlannerRules(),
+    debug,
   };
 }
 
@@ -417,11 +418,40 @@ async function validateCanonicalMealSlots({
     })]);
   }
 
+  const debugSlots = [];
+
   for (let slotArrayIndex = 0; slotArrayIndex < slots.length; slotArrayIndex += 1) {
     const slot = slots[slotArrayIndex] || {};
     const slotIndex = Number(slot.slotIndex || slotArrayIndex + 1);
     const productId = normalizeId(slot.productId);
     const selectionType = String(slot.selectionType || "").trim();
+
+    const debugSlot = {
+      slotIndex,
+      selectionType,
+      productId: productId ? String(productId) : "",
+      productName: "",
+      rawSelectedOptions: JSON.parse(JSON.stringify(slot.selectedOptions || [])),
+      productConfiguration: {
+        productId: productId ? String(productId) : "",
+        productName: "",
+        selectionType,
+        groups: [],
+      },
+      expectedGroups: [],
+      receivedGroups: [],
+      missingGroups: [],
+      receivedOptions: [],
+      receivedOptionsDetailed: [],
+      matchedGroups: [],
+      unknownGroups: [],
+      invalidOptions: [],
+      groupValidation: [],
+      selectedOptionsAnalysis: [],
+      validationTimeline: ["✓ Slot initialization started"],
+      humanReadableSummary: "",
+    };
+    debugSlots.push(debugSlot);
 
     if (
       !forConfirmation
@@ -430,6 +460,7 @@ async function validateCanonicalMealSlots({
       || (Array.isArray(slot.carbs) && slot.carbs.length > 0)
       )
     ) {
+      debugSlot.validationTimeline.push("✗ Slot includes legacy fields along with canonical ones");
       slotErrors.push(buildSlotError({
         slotIndex,
         field: `mealSlots[${slotArrayIndex}]`,
@@ -441,6 +472,7 @@ async function validateCanonicalMealSlots({
     }
 
     if (!isValidObjectId(productId)) {
+      debugSlot.validationTimeline.push("✗ Product ID is invalid or missing");
       slotErrors.push(buildSlotError({
         slotIndex,
         field: `mealSlots[${slotArrayIndex}].productId`,
@@ -454,12 +486,22 @@ async function validateCanonicalMealSlots({
 
     const productQuery = MenuProduct.findById(productId);
     const product = await (session ? productQuery.session(session) : productQuery).lean();
+    if (product) {
+      debugSlot.productName = (product.name && (product.name.en || product.name.ar)) || product.name || "";
+      debugSlot.productConfiguration.productName = debugSlot.productName;
+      debugSlot.validationTimeline.push(`✓ Product found: "${debugSlot.productName}"`);
+    } else {
+      debugSlot.validationTimeline.push("✗ Product not found in database");
+    }
     let error = validateCatalogDocState({ doc: product, slotIndex, field: `mealSlots[${slotArrayIndex}].productId`, entity: "PRODUCT", id: productId });
     if (error) {
+      debugSlot.validationTimeline.push("✗ Product validation state is invalid (inactive or deleted)");
       slotErrors.push(error);
       continue;
     }
+    debugSlot.validationTimeline.push("✓ Product active");
     if (!isSubscriptionEnabled(product)) {
+      debugSlot.validationTimeline.push("✗ Product is not subscription-enabled");
       slotErrors.push(buildSlotError({
         slotIndex,
         field: `mealSlots[${slotArrayIndex}].productId`,
@@ -472,6 +514,7 @@ async function validateCanonicalMealSlots({
     }
     const catalogItemsById = await loadCatalogItemsByIdForDocs([product]);
     if (!isLinkedDocGloballyAvailable(product, catalogItemsById)) {
+      debugSlot.validationTimeline.push("✗ Product catalog item is unavailable");
       slotErrors.push(buildSlotError({
         slotIndex,
         field: `mealSlots[${slotArrayIndex}].productId`,
@@ -484,13 +527,16 @@ async function validateCanonicalMealSlots({
     }
     error = validateProductSelectionType({ product, selectionType, slotIndex });
     if (error) {
+      debugSlot.validationTimeline.push(`✗ Selection type mismatch: product is of type ${product.selectionType || "default"} but slot received ${selectionType}`);
       slotErrors.push(error);
       continue;
     }
+    debugSlot.validationTimeline.push(`✓ SelectionType valid (${selectionType})`);
     if (
       builderMembership.hasPublishedConfig
       && !mealBuilderConfigService.isProductIncluded(builderMembership.membership, selectionType, productId)
     ) {
+      debugSlot.validationTimeline.push("✗ Product not included in published Meal Builder");
       slotErrors.push(buildBuilderMembershipError({
         slotIndex,
         field: `mealSlots[${slotArrayIndex}].productId`,
@@ -500,6 +546,7 @@ async function validateCanonicalMealSlots({
       }));
       continue;
     }
+    debugSlot.validationTimeline.push("✓ Product verified in Meal Builder config");
 
     const selectedOptionsInput = Array.isArray(slot.selectedOptions) ? slot.selectedOptions : [];
     const groupRelationRows = await (session
@@ -519,6 +566,18 @@ async function validateCanonicalMealSlots({
       : MenuOptionGroup.find({ _id: { $in: groupIds } })).lean();
     const groupRowsById = new Map(groupRows.map((group) => [String(group._id), group]));
     const groupRelationsById = new Map(groupRelationRows.map((relation) => [String(relation.groupId), relation]));
+
+    for (const relation of groupRelationRows) {
+      const group = groupRowsById.get(String(relation.groupId));
+      if (!group) continue;
+      if (relation.isActive === false || relation.isVisible === false || relation.isAvailable === false) continue;
+      debugSlot.expectedGroups.push({
+        groupId: String(relation.groupId),
+        groupKey: String(group.key || ""),
+        min: Number(relation.minSelections || 0),
+        max: relation.maxSelections === null || relation.maxSelections === undefined ? null : Number(relation.maxSelections),
+      });
+    }
 
     const optionIds = selectedOptionsInput.map((selection) => selection?.optionId).filter(Boolean);
     const optionRows = await (session
@@ -548,7 +607,54 @@ async function validateCanonicalMealSlots({
       const optionId = normalizeId(selected.optionId);
       const quantity = selected.quantity === undefined || selected.quantity === null ? 1 : Number(selected.quantity);
 
+      const debugGroup = groupRowsById.get(groupId ? String(groupId) : "");
+      const debugOption = optionRowsById.get(optionId ? String(optionId) : "");
+
+      const analysis = {
+        optionId: optionId ? String(optionId) : "",
+        optionKey: selected.optionKey || "",
+        groupId: groupId ? String(groupId) : "",
+        groupKey: selected.groupKey || "",
+        matched: false,
+        reason: "",
+        countedInGroup: "",
+      };
+      debugSlot.selectedOptionsAnalysis.push(analysis);
+
+      if (!debugGroup) {
+        debugSlot.unknownGroups.push({
+          groupId: groupId ? String(groupId) : "",
+          groupKey: selected.groupKey || "",
+        });
+        analysis.reason = "GROUP_NOT_FOUND_IN_CATALOG";
+      }
+      if (!debugOption) {
+        const rawOption = rawOptionRowsById.get(optionId);
+        const reason = rawOption ? "OPTION_INACTIVE" : "OPTION_NOT_FOUND";
+        debugSlot.invalidOptions.push({
+          optionId: optionId ? String(optionId) : "",
+          optionKey: selected.optionKey || "",
+          reason,
+        });
+        analysis.reason = reason;
+      }
+
+      if (debugGroup && debugOption) {
+        debugSlot.receivedOptions.push({
+          groupKey: debugGroup.key || selected.groupKey || "",
+          optionKey: debugOption.key || selected.optionKey || "",
+        });
+      }
+
+      debugSlot.receivedOptionsDetailed.push({
+        groupId: groupId ? String(groupId) : "",
+        groupKey: debugGroup ? (debugGroup.key || selected.groupKey || "") : (selected.groupKey || ""),
+        optionId: optionId ? String(optionId) : "",
+        optionKey: debugOption ? (debugOption.key || selected.optionKey || "") : (selected.optionKey || ""),
+      });
+
       if (!Number.isInteger(quantity) || quantity < 1) {
+        analysis.reason = "QUANTITY_INVALID: must be a positive integer";
         slotErrors.push(buildSlotError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "quantity"),
@@ -561,6 +667,7 @@ async function validateCanonicalMealSlots({
         continue;
       }
       if (!isValidObjectId(groupId)) {
+        analysis.reason = "GROUP_ID_INVALID: missing or not a valid ObjectId";
         slotErrors.push(buildSlotError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "groupId"),
@@ -574,6 +681,7 @@ async function validateCanonicalMealSlots({
         continue;
       }
       if (!isValidObjectId(optionId)) {
+        analysis.reason = "OPTION_ID_INVALID: missing or not a valid ObjectId";
         slotErrors.push(buildSlotError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"),
@@ -590,12 +698,14 @@ async function validateCanonicalMealSlots({
       const group = groupRowsById.get(groupId);
       error = validateCatalogDocState({ doc: group, slotIndex, field: selectedOptionField(slotArrayIndex, optionIndex, "groupId"), entity: "GROUP", id: groupId });
       if (error) {
+        analysis.reason = "GROUP_STATE_INVALID: group is inactive or deleted";
         slotErrors.push(error);
         continue;
       }
       const groupRelation = groupRelationsById.get(groupId);
       error = validateRelationState({ relation: groupRelation, slotIndex, field: selectedOptionField(slotArrayIndex, optionIndex, "groupId"), productId, groupId, entity: "GROUP" });
       if (error) {
+        analysis.reason = "GROUP_RELATION_INVALID: group is not linked or not active for this product";
         slotErrors.push(error);
         continue;
       }
@@ -603,6 +713,7 @@ async function validateCanonicalMealSlots({
         builderMembership.hasPublishedConfig
         && !mealBuilderConfigService.isGroupIncluded(builderMembership.membership, selectionType, productId, groupId)
       ) {
+        analysis.reason = "GROUP_NOT_INCLUDED_IN_BUILDER: group is not part of the published builder config";
         slotErrors.push(buildBuilderMembershipError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "groupId"),
@@ -618,11 +729,13 @@ async function validateCanonicalMealSlots({
       const rawOption = rawOptionRowsById.get(optionId);
       error = validateCatalogDocState({ doc: rawOption, slotIndex, field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"), entity: "OPTION", id: optionId });
       if (error) {
+        analysis.reason = "OPTION_STATE_INVALID: option is inactive or deleted in catalog";
         slotErrors.push(error);
         continue;
       }
       const option = optionRowsById.get(optionId);
       if (!option) {
+        analysis.reason = "OPTION_UNAVAILABLE: option is unavailable globally";
         slotErrors.push(buildSlotError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"),
@@ -636,6 +749,7 @@ async function validateCanonicalMealSlots({
         continue;
       }
       if (!isSubscriptionEnabled(option)) {
+        analysis.reason = "OPTION_NOT_SUBSCRIPTION_ENABLED: option does not support subscriptions";
         slotErrors.push(buildSlotError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"),
@@ -649,6 +763,16 @@ async function validateCanonicalMealSlots({
         continue;
       }
       if (String(option.groupId) !== groupId) {
+        const expectedGroup = groupRowsById.get(String(option.groupId))?.key || String(option.groupId);
+        const receivedGroup = group?.key || groupId;
+        debugSlot.invalidOptions.push({
+          optionId: optionId ? String(optionId) : "",
+          optionKey: option.key || selected.optionKey || "",
+          reason: "GROUP_MISMATCH",
+          expectedGroup,
+          receivedGroup,
+        });
+        analysis.reason = `GROUP_MISMATCH: option belongs to ${expectedGroup} but selected under ${receivedGroup}`;
         slotErrors.push(buildSlotError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"),
@@ -665,6 +789,7 @@ async function validateCanonicalMealSlots({
       const optionRelation = optionRelationByComposite.get(`${groupId}:${optionId}`);
       error = validateRelationState({ relation: optionRelation, slotIndex, field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"), productId, groupId, optionId, entity: "OPTION" });
       if (error) {
+        analysis.reason = "OPTION_RELATION_INVALID: option is not active or linked to this product group";
         slotErrors.push(error);
         continue;
       }
@@ -672,6 +797,7 @@ async function validateCanonicalMealSlots({
         builderMembership.hasPublishedConfig
         && !mealBuilderConfigService.isOptionIncluded(builderMembership.membership, selectionType, productId, groupId, optionId)
       ) {
+        analysis.reason = "OPTION_NOT_INCLUDED_IN_BUILDER: option is not part of the published builder config for this group";
         slotErrors.push(buildBuilderMembershipError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"),
@@ -693,6 +819,7 @@ async function validateCanonicalMealSlots({
         selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD
         && (PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEY_SET.has(canonicalGroupKey) || groupKey === MENU_SALAD_EXTRA_PROTEIN_GROUP_KEY)
       ) {
+        analysis.reason = "SALAD_EXTRA_PROTEIN_EXCLUDED: extra protein options are excluded for salad selection type";
         slotErrors.push(buildSlotError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "groupId"),
@@ -711,6 +838,7 @@ async function validateCanonicalMealSlots({
         && canonicalGroupKey === "protein"
         && !isSubscriptionPremiumLargeSaladProtein(option)
       ) {
+        analysis.reason = "SALAD_PROTEIN_NOT_ALLOWED: protein option is not in the salad allowlist";
         slotErrors.push(buildSlotError({
           slotIndex,
           field: selectedOptionField(slotArrayIndex, optionIndex, "optionId"),
@@ -743,6 +871,9 @@ async function validateCanonicalMealSlots({
       selectedOptions.push(normalizedSelection);
       selectedByGroup.set(groupId, (selectedByGroup.get(groupId) || 0) + quantity);
 
+      analysis.matched = true;
+      analysis.countedInGroup = groupKey;
+
       if (groupKey === MENU_PROTEIN_GROUP_KEY) {
         proteinSelection = { option, selected: normalizedSelection };
       }
@@ -755,6 +886,11 @@ async function validateCanonicalMealSlots({
         saladGroups[saladKey].push(optionId);
       }
     }
+    const uniqueReceivedGroups = new Set();
+    for (const opt of debugSlot.receivedOptions) {
+      if (opt.groupKey) uniqueReceivedGroups.add(opt.groupKey);
+    }
+    debugSlot.receivedGroups = Array.from(uniqueReceivedGroups);
 
     for (const relation of groupRelationRows) {
       const group = groupRowsById.get(String(relation.groupId));
@@ -763,6 +899,36 @@ async function validateCanonicalMealSlots({
       const selectedCount = selectedByGroup.get(String(relation.groupId)) || 0;
       const min = Number(relation.minSelections || 0);
       const max = relation.maxSelections === null || relation.maxSelections === undefined ? null : Number(relation.maxSelections);
+
+      const satisfied = (selectedCount >= min) && (max === null || selectedCount <= max);
+      debugSlot.matchedGroups.push({
+        groupKey: group.key || "",
+        satisfied,
+      });
+
+      debugSlot.groupValidation.push({
+        groupId: String(relation.groupId),
+        groupKey: group.key || "",
+        requiredMin: min,
+        requiredMax: max,
+        received: selectedCount,
+        status: satisfied ? "PASS" : "FAIL",
+      });
+
+      if (satisfied) {
+        debugSlot.validationTimeline.push(`✓ Group "${group.key || relation.groupId}" validation passed (${selectedCount} selected, range: ${min}-${max !== null ? max : "unlimited"})`);
+      } else {
+        if (selectedCount < min) {
+          debugSlot.validationTimeline.push(`✗ Group "${group.key || relation.groupId}" validation failed: received ${selectedCount}, requires at least ${min}`);
+        } else {
+          debugSlot.validationTimeline.push(`✗ Group "${group.key || relation.groupId}" validation failed: received ${selectedCount}, allows at most ${max}`);
+        }
+      }
+
+      if (selectedCount < min) {
+        debugSlot.missingGroups.push(group.key || "");
+      }
+
       if (selectedCount < min) {
         slotErrors.push(buildSlotError({
           slotIndex,
@@ -927,7 +1093,29 @@ async function validateCanonicalMealSlots({
     processedSlots.push(processedSlot);
   }
 
-  if (slotErrors.length) return buildCanonicalValidationFailure(slotErrors);
+  for (const ds of debugSlots) {
+    const errors = slotErrors.filter((err) => Number(err.slotIndex) === Number(ds.slotIndex));
+    if (errors.length === 0) {
+      ds.validationTimeline.push("✓ All validation checks passed");
+    } else {
+      ds.validationTimeline.push(`✗ Validation failed: ${errors[0].message}`);
+    }
+    ds.humanReadableSummary = buildHumanReadableSummary(ds, slotErrors);
+  }
+
+  if (slotErrors.length) {
+    const debug = {
+      slots: debugSlots,
+      normalizedPayload: { mealSlots: slots },
+    };
+    if (process.env.NODE_ENV !== "production") {
+      console.log("\n=== CANONICAL PLANNER VALIDATION DIAGNOSTICS ===");
+      for (const ds of debugSlots) {
+        console.log(formatSlotDiagnosticReport(ds));
+      }
+    }
+    return buildCanonicalValidationFailure(slotErrors, debug);
+  }
 
   const plannerMeta = {
     requiredSlotCount: Number(mealsPerDayLimit || 0),
@@ -963,7 +1151,166 @@ async function validateCanonicalMealSlots({
     selections: materializedProjection.selections,
     premiumUpgradeSelections: materializedProjection.premiumSelections,
     baseMealSlots: materializedProjection.baseMealSlots,
+    debug: {
+      slots: debugSlots,
+      normalizedPayload: { mealSlots: slots },
+    },
   };
+}
+
+function buildHumanReadableSummary(debugSlot, slotErrors) {
+  const errors = slotErrors.filter((err) => Number(err.slotIndex) === Number(debugSlot.slotIndex));
+  const isValid = errors.length === 0;
+
+  const lines = [];
+  lines.push(`Slot ${debugSlot.slotIndex} (${debugSlot.selectionType || "unknown"})`);
+  lines.push(``);
+  lines.push(`Product:`);
+  lines.push(`  ${debugSlot.productName || debugSlot.productId || "Unknown Product"}`);
+  lines.push(``);
+
+  lines.push(`Expected:`);
+  if (debugSlot.expectedGroups && debugSlot.expectedGroups.length > 0) {
+    for (const group of debugSlot.expectedGroups) {
+      const min = group.min || 0;
+      const max = group.max ? `max ${group.max}` : "unlimited";
+      const minReq = min > 0 ? `${min} required` : "optional";
+      const val = (debugSlot.groupValidation || []).find((v) => v.groupId === group.groupId);
+      const statusIcon = val && val.status === "FAIL" ? "✗" : "✓";
+      lines.push(`  ${statusIcon} ${group.groupKey} (${minReq}, ${max})`);
+    }
+  } else {
+    lines.push(`  ✓ (none)`);
+  }
+  lines.push(``);
+
+  lines.push(`Received:`);
+  if (debugSlot.rawSelectedOptions && debugSlot.rawSelectedOptions.length > 0) {
+    const matchedAnalysis = (debugSlot.selectedOptionsAnalysis || []).filter((a) => a.matched);
+    if (matchedAnalysis.length > 0) {
+      const grouped = {};
+      for (const opt of matchedAnalysis) {
+        const groupKey = opt.countedInGroup || "other";
+        if (!grouped[groupKey]) grouped[groupKey] = [];
+        grouped[groupKey].push(`${opt.optionKey || opt.optionId} (x1)`);
+      }
+      for (const groupKey of Object.keys(grouped)) {
+        lines.push(`  ✓ ${groupKey}: ${grouped[groupKey].join(", ")}`);
+      }
+    } else {
+      lines.push(`  No options matched catalog expectations.`);
+    }
+
+    const unmatched = (debugSlot.selectedOptionsAnalysis || []).filter((a) => !a.matched);
+    if (unmatched.length > 0) {
+      lines.push(``);
+      lines.push(`  Unmatched/Invalid Options Received:`);
+      for (const opt of unmatched) {
+        lines.push(`  ✗ Option: ${opt.optionKey || opt.optionId} (Group: ${opt.groupKey || opt.groupId})`);
+        lines.push(`    ↳ Reason: ${opt.reason}`);
+      }
+    }
+  } else {
+    lines.push(`  ✗ none`);
+  }
+  lines.push(``);
+
+  lines.push(`Result:`);
+  lines.push(`  ${isValid ? "Validation Passed" : "Validation Failed"}`);
+  lines.push(``);
+
+  if (!isValid) {
+    lines.push(`Reason:`);
+    for (const err of errors) {
+      lines.push(`  ${err.message}`);
+    }
+    lines.push(``);
+
+    lines.push(`Suggested Fix:`);
+    const codes = new Set(errors.map((e) => e.code));
+    if (codes.has("PLANNER_MIN_SELECTION_NOT_MET")) {
+      const failedGroups = errors.filter((e) => e.code === "PLANNER_MIN_SELECTION_NOT_MET").map((e) => e.groupId);
+      const failedKeys = debugSlot.expectedGroups.filter((g) => failedGroups.includes(g.groupId)).map((g) => `"${g.groupKey}"`);
+      lines.push(`  Send selectedOptions entries that belong to the missing required group(s): ${failedKeys.join(", ")}.`);
+    } else if (codes.has("PLANNER_MAX_SELECTION_EXCEEDED")) {
+      lines.push(`  Reduce the quantity or number of selected options for the failing group.`);
+    } else if (codes.has("PLANNER_OPTION_GROUP_MISMATCH")) {
+      lines.push(`  Ensure optionId matches the correct groupId as configured in the catalog.`);
+    } else if (codes.has("PLANNER_PRODUCT_NOT_FOUND")) {
+      lines.push(`  Verify that the productId exists and is active/subscription-enabled in the catalog.`);
+    } else if (codes.has("PLANNER_PRODUCT_UNAVAILABLE")) {
+      lines.push(`  Verify product catalog pricing is available for the user's location/market.`);
+    } else {
+      lines.push(`  Verify the payload keys and IDs match the product catalog option groups.`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function formatSlotDiagnosticReport(debugSlot) {
+  const lines = [];
+  lines.push(`=================================================`);
+  lines.push(`SLOT #${debugSlot.slotIndex}`);
+  lines.push(`=================================================`);
+  lines.push(`PRODUCT: ${debugSlot.productName || "Unknown"} (${debugSlot.productId})`);
+  lines.push(`SELECTION TYPE: ${debugSlot.selectionType}`);
+  lines.push(``);
+
+  lines.push(`RAW SELECTED OPTIONS RECEIVED:`);
+  if (!debugSlot.rawSelectedOptions || debugSlot.rawSelectedOptions.length === 0) {
+    lines.push(`  (none)`);
+  } else {
+    for (const opt of debugSlot.rawSelectedOptions) {
+      lines.push(`  - optionId: ${opt.optionId}, groupId: ${opt.groupId}, optionKey: ${opt.optionKey || "(none)"}, groupKey: ${opt.groupKey || "(none)"}`);
+    }
+  }
+  lines.push(``);
+
+  lines.push(`PRODUCT CONFIGURATION:`);
+  lines.push(`  Selection Type: ${debugSlot.productConfiguration.selectionType}`);
+  lines.push(`  Configured Groups:`);
+  if (!debugSlot.productConfiguration.groups || debugSlot.productConfiguration.groups.length === 0) {
+    lines.push(`    (none)`);
+  } else {
+    for (const g of debugSlot.productConfiguration.groups) {
+      lines.push(`    - groupKey: ${g.groupKey} (groupId: ${g.groupId}) [min: ${g.min}, max: ${g.max !== null ? g.max : "unlimited"}]`);
+    }
+  }
+  lines.push(``);
+
+  lines.push(`GROUP VALIDATION STATS:`);
+  if (!debugSlot.groupValidation || debugSlot.groupValidation.length === 0) {
+    lines.push(`  (none)`);
+  } else {
+    for (const g of debugSlot.groupValidation) {
+      lines.push(`  - [${g.status}] ${g.groupKey}: received ${g.received} (required: ${g.requiredMin} to ${g.requiredMax !== null ? g.requiredMax : "unlimited"})`);
+    }
+  }
+  lines.push(``);
+
+  lines.push(`SELECTED OPTIONS ANALYSIS:`);
+  if (!debugSlot.selectedOptionsAnalysis || debugSlot.selectedOptionsAnalysis.length === 0) {
+    lines.push(`  (none)`);
+  } else {
+    for (const opt of debugSlot.selectedOptionsAnalysis) {
+      const matchStatus = opt.matched ? `MATCHED to "${opt.countedInGroup}"` : `REJECTED (Reason: ${opt.reason})`;
+      lines.push(`  - Option: ${opt.optionKey || "unknown"} (${opt.optionId}) | Group: ${opt.groupKey || "unknown"} (${opt.groupId})`);
+      lines.push(`    Status: ${matchStatus}`);
+    }
+  }
+  lines.push(``);
+
+  lines.push(`VALIDATION TIMELINE:`);
+  for (const step of debugSlot.validationTimeline) {
+    lines.push(`  ${step}`);
+  }
+  lines.push(``);
+
+  lines.push(`HUMAN-READABLE ERROR SUMMARY:`);
+  lines.push(debugSlot.humanReadableSummary || "  (none)");
+
+  return lines.join("\n");
 }
 
 module.exports = {
@@ -971,4 +1318,5 @@ module.exports = {
   hasCanonicalSlotShape,
   isCanonicalPlannerRequest,
   validateCanonicalMealSlots,
+  formatSlotDiagnosticReport,
 };
