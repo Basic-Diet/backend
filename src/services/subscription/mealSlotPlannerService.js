@@ -3,6 +3,7 @@ const BuilderProtein = require("../../models/BuilderProtein");
 const BuilderCarb = require("../../models/BuilderCarb");
 const MenuOption = require("../../models/MenuOption");
 const MenuOptionGroup = require("../../models/MenuOptionGroup");
+const MenuProduct = require("../../models/MenuProduct");
 const {
   filterGloballyAvailable,
   loadCatalogItemsByIdForDocs,
@@ -828,7 +829,7 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
   ]);
 
 
-  const [menuProteinRows, menuCarbRows, menuSaladOptionRows, legacyProteins, legacyCarbs, sandwichCategory, saladIngredients, catalogSandwiches] = await Promise.all([
+  const [menuProteinRows, menuCarbRows, menuSaladOptionRows, legacyProteins, legacyCarbs, sandwichCategory, saladIngredients, catalogSandwiches, menuProductSandwiches] = await Promise.all([
     menuProteinGroupId
       ? MenuOption.find({
         _id: { $in: validProteinIds },
@@ -892,6 +893,14 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
     SaladIngredient.find({ isActive: true }).session(session).lean(),
     shouldLoadSandwiches
       ? Sandwich.find({ _id: { $in: validSandwichIds }, isActive: true }).session(session).lean()
+      : Promise.resolve([]),
+    // Also query MenuProduct for cold_sandwich itemType — the canonical catalog source for sandwiches
+    shouldLoadSandwiches
+      ? MenuProduct.find({
+          _id: { $in: validSandwichIds },
+          itemType: "cold_sandwich",
+          isActive: true,
+        }).session(session).lean()
       : Promise.resolve([]),
   ]);
   const menuCatalogItemsById = await loadCatalogItemsByIdForDocs(menuProteinRows, menuCarbRows, menuSaladOptionRows);
@@ -966,7 +975,10 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
       .concat(menuCarbs.map((c) => [String(c._id), mapMenuCarbOption(c)]))
   );
   const sandwichMap = new Map(
-    catalogSandwiches.concat(sandwichMeals).map((m) => [String(m._id), m])
+    catalogSandwiches
+      .concat(sandwichMeals)
+      .concat(menuProductSandwiches || [])
+      .map((m) => [String(m._id), m])
   );
   const saladIngredientMap = new Map(
     saladIngredients.map((ingredient) => [
