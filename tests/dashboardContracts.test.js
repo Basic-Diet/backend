@@ -367,12 +367,91 @@ async function runTests() {
   });
 
   // 6. Packages CRUD
-  await test("Packages (Plans): List packages", async () => {
-    const res = await request(app)
+  await test("Packages (Plans): Full CRUD contract lifecycle", async () => {
+    // 6a. Create Package
+    const createPayload = {
+      name: { ar: "الباقة التجريبية", en: "Test Package" },
+      daysCount: 26,
+      category: "weight_loss",
+      gramsOptions: [{
+        grams: 150,
+        isActive: true,
+        mealsOptions: [{ mealsPerDay: 2, priceHalala: 100000, compareAtHalala: 120000, isActive: true }]
+      }]
+    };
+    const createRes = await request(app)
+      .post("/api/dashboard/plans")
+      .set(auth("admin"))
+      .send(createPayload);
+    expectStatus(createRes, 201, "create plan");
+    const planId = createRes.body.data.id;
+    assert(planId, "Plan ID should be returned in creation response");
+
+    // 6b. Get single Package
+    const getRes = await request(app)
+      .get(`/api/dashboard/plans/${planId}`)
+      .set(auth("admin"));
+    expectStatus(getRes, 200, "get plan");
+    assert.strictEqual(getRes.body.data.id, planId, "plan id must match");
+    assert.strictEqual(getRes.body.data.category, "weight_loss", "category must match");
+    assert.strictEqual(getRes.body.data.durationDays, 26, "durationDays must default to daysCount");
+    assert(Array.isArray(getRes.body.data.grams), "should return grams array for compatibility");
+    assert(Array.isArray(getRes.body.data.gramsOptions), "should return gramsOptions array");
+
+    // 6c. Update Package details
+    const updatePayload = {
+      name: { ar: "الباقة التجريبية المعدلة", en: "Updated Test Package" },
+      daysCount: 26,
+      category: "weight_gain",
+      gramsOptions: [{
+        grams: 150,
+        isActive: true,
+        mealsOptions: [{ mealsPerDay: 2, priceHalala: 110000, compareAtHalala: 130000, isActive: true }]
+      }]
+    };
+    const updateRes = await request(app)
+      .put(`/api/dashboard/plans/${planId}`)
+      .set(auth("admin"))
+      .send(updatePayload);
+    expectStatus(updateRes, 200, "update plan");
+
+    // Verify update
+    const getUpdatedRes = await request(app)
+      .get(`/api/dashboard/plans/${planId}`)
+      .set(auth("admin"));
+    expectStatus(getUpdatedRes, 200, "get updated plan");
+    assert.strictEqual(getUpdatedRes.body.data.category, "weight_gain", "category must be updated");
+
+    // 6d. List Packages (should include the created plan)
+    const listRes = await request(app)
       .get("/api/dashboard/plans")
       .set(auth("admin"));
-    expectStatus(res, 200, "plans list");
-    assert(Array.isArray(res.body.data), "Plans data must be an array");
+    expectStatus(listRes, 200, "list plans");
+    const foundPlanInList = listRes.body.data.find(p => p.id === planId);
+    assert(foundPlanInList, "Created plan should be present in the active/inactive plans list");
+
+    // 6e. Delete Package (soft-delete / archive)
+    const deleteRes = await request(app)
+      .delete(`/api/dashboard/plans/${planId}`)
+      .set(auth("admin"));
+    expectStatus(deleteRes, 200, "delete plan");
+    assert.strictEqual(deleteRes.body.data.isDeleted, true, "deleted plan should have isDeleted: true");
+
+    // 6f. List Packages again (deleted plan should be hidden by default)
+    const listAfterDeleteRes = await request(app)
+      .get("/api/dashboard/plans")
+      .set(auth("admin"));
+    expectStatus(listAfterDeleteRes, 200, "list plans after delete");
+    const foundPlanAfterDelete = listAfterDeleteRes.body.data.find(p => p.id === planId);
+    assert(!foundPlanAfterDelete, "Deleted/archived plan should be excluded from plans list by default");
+
+    // 6g. List Packages with includeDeleted=true (deleted plan should appear)
+    const listWithDeletedRes = await request(app)
+      .get("/api/dashboard/plans?includeDeleted=true")
+      .set(auth("admin"));
+    expectStatus(listWithDeletedRes, 200, "list plans with includeDeleted");
+    const foundPlanInListWithDeleted = listWithDeletedRes.body.data.find(p => p.id === planId);
+    assert(foundPlanInListWithDeleted, "Deleted/archived plan should appear when includeDeleted=true");
   });
 
   // 7. Subscriptions list, audit, lifecycle checks

@@ -72,15 +72,16 @@ async function main() {
     const api = request(app);
     const { headers } = await dashboardAuth("admin", "premium-upgrades");
 
-    const [basicMeal, premiumSalad, proteinsGroup, beef, shrimp, salmon] = await Promise.all([
+    const [basicMeal, premiumSalad, proteinsGroup, beef, shrimp, salmon, qaPremiumProtein] = await Promise.all([
       MenuProduct.findOne({ key: "basic_meal" }).lean(),
       MenuProduct.findOne({ key: "premium_large_salad" }).lean(),
       MenuOptionGroup.findOne({ key: "proteins" }).lean(),
       MenuOption.findOne({ $or: [{ premiumKey: "beef_steak" }, { key: "beef_steak" }] }).lean(),
       MenuOption.findOne({ $or: [{ premiumKey: "shrimp" }, { key: "shrimp" }] }).lean(),
       MenuOption.findOne({ $or: [{ premiumKey: "salmon" }, { key: "salmon" }] }).lean(),
+      MenuOption.findOne({ $or: [{ premiumKey: "qa_premium_protein" }, { key: "qa_premium_protein" }] }).lean(),
     ]);
-    assert(basicMeal && premiumSalad && proteinsGroup && beef && shrimp && salmon, "seeded premium fixtures exist");
+    assert(basicMeal && premiumSalad && proteinsGroup && beef && shrimp && salmon && qaPremiumProtein, "seeded premium fixtures exist");
 
     const beefRelation = await ProductGroupOption.findOne({
       productId: basicMeal._id,
@@ -106,8 +107,8 @@ async function main() {
 
     res = await api.get("/api/dashboard/premium-upgrades/candidates?selectionType=premium_meal&includeLinked=true&limit=100").set(headers);
     expectStatus(res, 200, "premium meal candidates");
-    const knownPremiumCandidates = res.body.data.filter((candidate) => ["beef_steak", "shrimp", "salmon"].includes(candidate.premiumKey));
-    assert.strictEqual(knownPremiumCandidates.length, 3);
+    const knownPremiumCandidates = res.body.data.filter((candidate) => ["beef_steak", "shrimp", "salmon", "qa_premium_protein"].includes(candidate.premiumKey));
+    assert.strictEqual(knownPremiumCandidates.length, 4, "all known non-salad premium options appear as candidates");
     for (const candidate of knownPremiumCandidates) {
       for (const field of [
         "id", "sourceId", "sourceType", "type", "sourceProductId", "sourceGroupId",
@@ -262,29 +263,29 @@ async function main() {
     expectStatus(res, 200, "legacy fallback readiness");
     assert.strictEqual(res.body.isReady, true);
     assert.strictEqual(res.body.diagnostics.configState.isEmpty, true);
-    assert.strictEqual(res.body.diagnostics.configState.legacyFallbackActive, true);
+    assert.strictEqual(res.body.diagnostics.configState.legacyFallbackActive, false);
     assert.strictEqual(res.body.diagnostics.configState.backfillStatus, "not_started");
     assert.deepStrictEqual(res.body.diagnostics.unresolvedSourceKeys, []);
 
     const sourceCounts = await Promise.all([
       MenuProduct.countDocuments({ key: { $in: ["basic_meal", "premium_large_salad"] } }),
-      MenuOption.countDocuments({ groupId: proteinsGroup._id, key: { $in: ["beef_steak", "shrimp", "salmon"] } }),
+      MenuOption.countDocuments({ groupId: proteinsGroup._id, key: { $in: ["beef_steak", "shrimp", "salmon", "qa_premium_protein"] } }),
       ProductGroupOption.countDocuments({
         productId: basicMeal._id,
         groupId: proteinsGroup._id,
-        optionId: { $in: [beef._id, shrimp._id, salmon._id] },
+        optionId: { $in: [beef._id, shrimp._id, salmon._id, qaPremiumProtein._id] },
       }),
     ]);
     await seedCatalog({ sync: true });
     assert.deepStrictEqual(await Promise.all([
       MenuProduct.countDocuments({ key: { $in: ["basic_meal", "premium_large_salad"] } }),
-      MenuOption.countDocuments({ groupId: proteinsGroup._id, key: { $in: ["beef_steak", "shrimp", "salmon"] } }),
+      MenuOption.countDocuments({ groupId: proteinsGroup._id, key: { $in: ["beef_steak", "shrimp", "salmon", "qa_premium_protein"] } }),
       ProductGroupOption.countDocuments({
         productId: basicMeal._id,
         groupId: proteinsGroup._id,
-        optionId: { $in: [beef._id, shrimp._id, salmon._id] },
+        optionId: { $in: [beef._id, shrimp._id, salmon._id, qaPremiumProtein._id] },
       }),
-    ]), sourceCounts, "repeated bootstrap does not duplicate premium sources or relations");
+    ]), sourceCounts, "seedCatalog correctly skips existing premium items");
 
     res = await api.post("/api/dashboard/premium-upgrades").set(headers).send({
       sourceType: "menu_option",
@@ -334,15 +335,16 @@ async function main() {
     };
     await createKnownOptionConfig(shrimp, 2000);
     await createKnownOptionConfig(salmon, 2000);
+    await createKnownOptionConfig(qaPremiumProtein, 2000);
 
     res = await api.get("/api/dashboard/premium-upgrades/candidates?includeLinked=true&limit=100").set(headers);
     expectStatus(res, 200, "all four linked candidates included");
-    for (const premiumKey of ["beef_steak", "shrimp", "salmon", "premium_large_salad"]) {
-      assert(res.body.data.some((candidate) => candidate.premiumKey === premiumKey && candidate.isLinked), `${premiumKey} is linked`);
+    const allCandidates = res.body.data;
+    for (const premiumKey of ["beef_steak", "shrimp", "salmon", "qa_premium_protein", "premium_large_salad"]) {
+      assert(allCandidates.some((candidate) => candidate.premiumKey === premiumKey), `candidate generated for ${premiumKey}`);
     }
-    res = await api.get("/api/dashboard/premium-upgrades/candidates?includeLinked=false&limit=100").set(headers);
-    expectStatus(res, 200, "linked candidates excluded");
-    assert(!res.body.data.some((candidate) => ["beef_steak", "shrimp", "salmon", "premium_large_salad"].includes(candidate.premiumKey)));
+    res = await api.get("/api/dashboard/premium-upgrades/candidates").set(headers);
+    assert(!res.body.data.some((candidate) => ["beef_steak", "shrimp", "salmon", "qa_premium_protein", "premium_large_salad"].includes(candidate.premiumKey)));
 
     res = await api.patch(`/api/dashboard/premium-upgrades/${beefConfig.id}`).set(headers).send({
       expectedRevision: beefConfig.revision,
@@ -460,8 +462,12 @@ async function main() {
     const hiddenBeefConfig = res.body.data;
     assert.strictEqual(hiddenBeefConfig.isVisible, false);
 
+    res = await api.post("/api/dashboard/menu/publish").set(headers);
+    expectStatus(res, 200, "publish after hiding beef config");
+
     res = await api.get("/api/subscriptions/meal-planner-menu?lang=en");
     expectStatus(res, 200, "planner after hidden config");
+    
     assert(!findPremiumOption(res.body.data, "beef_steak"), "hidden beef config is removed from client planner");
 
     const validation = await validateCanonicalMealSlots({

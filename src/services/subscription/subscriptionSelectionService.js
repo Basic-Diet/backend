@@ -155,20 +155,18 @@ async function reconcileAddonInclusions(
       continue;
     }
 
-    // Determine whether this item is covered by the entitlement's explicit allowlist.
-    // menuProductIds acts as a coverage-eligibility gate, NOT a rejection gate:
-    //   - item IN menuProductIds   → eligible for subscription balance coverage
-    //   - item NOT IN menuProductIds → falls through to pending_payment (no balance consumed)
-    //   - menuProductIds empty/absent → all items of matching category are balance-eligible
-    let isRestrictedByPlan = false;
-    if (entitlement && Array.isArray(entitlement.menuProductIds) && entitlement.menuProductIds.length > 0) {
-      const allowedIds = entitlement.menuProductIds.map((id) => String(id));
-      if (!allowedIds.includes(String(doc._id))) {
-        isRestrictedByPlan = true;
-      }
-    }
-
-    if (entitlement && !isRestrictedByPlan) {
+    // Balance deduction gate: any item whose addonCategory matches an entitlement
+    // category consumes subscription balance if simulatedRemaining > 0.
+    //
+    // menuProductIds on the entitlement is a CATALOG DISPLAY HINT only
+    // (used by buildAddonChoicesCatalog for isEligibleForAllowance).
+    // It must NEVER block balance deduction — a subscriber who purchased a
+    // juice plan is entitled to consume N juices of any juice product, not
+    // only those listed in menuProductIds.
+    //
+    // Items that exhaust the balance (rem == 0) fall through to
+    // pending_payment at the product's own priceHalala.
+    if (entitlement) {
       let canCover = false;
       const rem = simulatedRemaining.get(category) || 0;
       if (rem > 0) {

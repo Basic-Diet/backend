@@ -245,6 +245,16 @@ function validatePlanPayloadOrThrow(payload, { requireGramsOptions = true } = {}
     throw createControlledError(400, "INVALID", "daysCount must be a positive integer");
   }
 
+  const durationDays = payload.durationDays === undefined ? daysCount : Number(payload.durationDays);
+  if (!isPositiveInteger(durationDays)) {
+    throw createControlledError(400, "INVALID", "durationDays must be a positive integer");
+  }
+
+  const category = payload.category === undefined ? "standard" : String(payload.category).trim();
+  if (!category) {
+    throw createControlledError(400, "INVALID", "category must be a non-empty string");
+  }
+
   const currency = payload.currency === undefined ? "SAR" : String(payload.currency).trim();
   if (!currency) {
     throw createControlledError(400, "INVALID", "currency must be a non-empty string");
@@ -254,16 +264,9 @@ function validatePlanPayloadOrThrow(payload, { requireGramsOptions = true } = {}
   if (!rawSkipPolicy || typeof rawSkipPolicy !== "object" || Array.isArray(rawSkipPolicy)) {
     throw createControlledError(400, "INVALID", "skipPolicy must be an object");
   }
-
   const skipPolicy = {
-    enabled:
-      rawSkipPolicy.enabled === undefined
-        ? true
-        : Boolean(rawSkipPolicy.enabled),
-    maxDays:
-      rawSkipPolicy.maxDays === undefined
-        ? 0
-        : Number(rawSkipPolicy.maxDays),
+    enabled: rawSkipPolicy.enabled === undefined ? true : Boolean(rawSkipPolicy.enabled),
+    maxDays: rawSkipPolicy.maxDays === undefined ? 0 : Number(rawSkipPolicy.maxDays),
   };
   if (!isNonNegativeInteger(skipPolicy.maxDays)) {
     throw createControlledError(400, "INVALID", "skipPolicy.maxDays must be an integer >= 0");
@@ -273,24 +276,13 @@ function validatePlanPayloadOrThrow(payload, { requireGramsOptions = true } = {}
   if (!rawFreezePolicy || typeof rawFreezePolicy !== "object" || Array.isArray(rawFreezePolicy)) {
     throw createControlledError(400, "INVALID", "freezePolicy must be an object");
   }
-
   const freezePolicy = {
-    enabled:
-      rawFreezePolicy.enabled === undefined
-        ? true
-        : Boolean(rawFreezePolicy.enabled),
-    maxDays:
-      rawFreezePolicy.maxDays === undefined
-        ? 31
-        : Number(rawFreezePolicy.maxDays),
-    maxTimes:
-      rawFreezePolicy.maxTimes === undefined
-        ? 1
-        : Number(rawFreezePolicy.maxTimes),
+    enabled: rawFreezePolicy.enabled === undefined ? true : Boolean(rawFreezePolicy.enabled),
+    maxDays: rawFreezePolicy.maxDays === undefined ? 31 : Number(rawFreezePolicy.maxDays),
+    maxTimes: rawFreezePolicy.maxTimes === undefined ? 1 : Number(rawFreezePolicy.maxTimes),
   };
-
-  if (!isPositiveInteger(freezePolicy.maxDays)) {
-    throw createControlledError(400, "INVALID", "freezePolicy.maxDays must be an integer >= 1");
+  if (!isNonNegativeInteger(freezePolicy.maxDays)) {
+    throw createControlledError(400, "INVALID", "freezePolicy.maxDays must be an integer >= 0");
   }
   if (!isNonNegativeInteger(freezePolicy.maxTimes)) {
     throw createControlledError(400, "INVALID", "freezePolicy.maxTimes must be an integer >= 0");
@@ -299,21 +291,28 @@ function validatePlanPayloadOrThrow(payload, { requireGramsOptions = true } = {}
   const isActive = payload.isActive === undefined ? true : Boolean(payload.isActive);
   const sortOrder = payload.sortOrder === undefined ? 0 : normalizeSortOrder(payload.sortOrder, "sortOrder");
 
-  if (!Array.isArray(payload.gramsOptions)) {
+  const rawGramsOptions = payload.gramsOptions !== undefined ? payload.gramsOptions : payload.grams;
+  if (!Array.isArray(rawGramsOptions)) {
     throw createControlledError(400, "INVALID", "gramsOptions must be an array");
   }
 
-  if (requireGramsOptions && payload.gramsOptions.length < 1) {
+  if (requireGramsOptions && rawGramsOptions.length < 1) {
     throw createControlledError(400, "INVALID", "gramsOptions must contain at least one item");
   }
 
   const gramsValues = new Set();
-  const gramsOptions = payload.gramsOptions.map((rawGramsOption, gramsIndex) => {
+  const gramsOptions = rawGramsOptions.map((rawGramsOption, gramsIndex) => {
     if (!rawGramsOption || typeof rawGramsOption !== "object" || Array.isArray(rawGramsOption)) {
       throw createControlledError(400, "INVALID", `gramsOptions[${gramsIndex}] must be an object`);
     }
 
-    const grams = Number(rawGramsOption.grams);
+    let gramsVal = rawGramsOption.grams;
+    if (typeof gramsVal === "string") {
+      if (gramsVal.includes("_")) {
+        gramsVal = gramsVal.split("_")[0];
+      }
+    }
+    const grams = Number(gramsVal);
     if (!isPositiveInteger(grams)) {
       throw createControlledError(400, "INVALID", `gramsOptions[${gramsIndex}].grams must be a positive integer`);
     }
@@ -322,7 +321,8 @@ function validatePlanPayloadOrThrow(payload, { requireGramsOptions = true } = {}
     }
     gramsValues.add(grams);
 
-    if (!Array.isArray(rawGramsOption.mealsOptions) || rawGramsOption.mealsOptions.length < 1) {
+    const rawMealsOptions = rawGramsOption.mealsOptions !== undefined ? rawGramsOption.mealsOptions : rawGramsOption.meals;
+    if (!Array.isArray(rawMealsOptions) || rawMealsOptions.length < 1) {
       throw createControlledError(
         400,
         "INVALID",
@@ -331,7 +331,7 @@ function validatePlanPayloadOrThrow(payload, { requireGramsOptions = true } = {}
     }
 
     const mealsValues = new Set();
-    const mealsOptions = rawGramsOption.mealsOptions.map((rawMealOption, mealIndex) => {
+    const mealsOptions = rawMealsOptions.map((rawMealOption, mealIndex) => {
       if (!rawMealOption || typeof rawMealOption !== "object" || Array.isArray(rawMealOption)) {
         throw createControlledError(
           400,
@@ -400,6 +400,8 @@ function validatePlanPayloadOrThrow(payload, { requireGramsOptions = true } = {}
   const result = {
     name,
     daysCount,
+    durationDays,
+    category,
     currency,
     gramsOptions,
     skipPolicy,
@@ -539,10 +541,12 @@ function resolveAdminPlanFiltersOrThrow(query = {}) {
   const normalizedStatus = normalizeAdminPlanStatusOrThrow(
     query.status === undefined ? query.isActive : query.status
   );
+  const includeDeleted = query.includeDeleted === "true" || query.includeDeleted === true;
 
   return {
     q,
     normalizedStatus,
+    includeDeleted,
   };
 }
 
@@ -604,44 +608,75 @@ function serializeAdminPlan(plan) {
     return plan;
   }
 
-  const currency = normalizeCurrencyValue(plan.currency);
+  const planObj = typeof plan.toObject === "function" ? plan.toObject() : plan;
+  const currency = normalizeCurrencyValue(planObj.currency);
   const {
     skipAllowanceCompensatedDays: _legacySkipAllowanceCompensatedDays,
     ...rest
-  } = plan;
+  } = planObj;
+
+  const id = String(planObj._id || planObj.id);
+
+  const gramsOptionsFormatted = Array.isArray(planObj.gramsOptions)
+    ? planObj.gramsOptions.map((gramsOption) => ({
+      ...gramsOption,
+      mealsOptions: Array.isArray(gramsOption && gramsOption.mealsOptions)
+        ? gramsOption.mealsOptions.map((mealOption) => {
+          const priceHalala = Number(mealOption && mealOption.priceHalala) || 0;
+          const compareAtHalala = Number(mealOption && mealOption.compareAtHalala) || 0;
+          return {
+            ...mealOption,
+            priceHalala,
+            priceSar: minorUnitsToMajor(priceHalala),
+            price: minorUnitsToMajor(priceHalala),
+            compareAtHalala,
+            compareAtSar: minorUnitsToMajor(compareAtHalala),
+            compareAt: minorUnitsToMajor(compareAtHalala),
+          };
+        })
+        : [],
+    }))
+    : [];
+
+  const gramsFormatted = Array.isArray(planObj.gramsOptions)
+    ? planObj.gramsOptions.map((gramsOption) => ({
+      grams: String(gramsOption.grams),
+      isActive: gramsOption.isActive === undefined ? true : Boolean(gramsOption.isActive),
+      sortOrder: Number(gramsOption.sortOrder) || 0,
+      mealsOptions: Array.isArray(gramsOption && gramsOption.mealsOptions)
+        ? gramsOption.mealsOptions.map((mealOption) => {
+          const priceHalala = Number(mealOption && mealOption.priceHalala) || 0;
+          const compareAtHalala = Number(mealOption && mealOption.compareAtHalala) || 0;
+          return {
+            ...mealOption,
+            priceHalala,
+            priceSar: minorUnitsToMajor(priceHalala),
+            price: minorUnitsToMajor(priceHalala),
+            compareAtHalala,
+            compareAtSar: minorUnitsToMajor(compareAtHalala),
+            compareAt: minorUnitsToMajor(compareAtHalala),
+          };
+        })
+        : [],
+    }))
+    : [];
+
   return {
+    id,
     ...rest,
     currency,
     skipPolicy: {
-      enabled: plan.skipPolicy && plan.skipPolicy.enabled !== undefined
-        ? Boolean(plan.skipPolicy.enabled)
+      enabled: planObj.skipPolicy && planObj.skipPolicy.enabled !== undefined
+        ? Boolean(planObj.skipPolicy.enabled)
         : true,
       maxDays:
-        plan.skipPolicy && Number.isInteger(plan.skipPolicy.maxDays) && plan.skipPolicy.maxDays >= 0
-          ? plan.skipPolicy.maxDays
+        planObj.skipPolicy && Number.isInteger(planObj.skipPolicy.maxDays) && planObj.skipPolicy.maxDays >= 0
+          ? planObj.skipPolicy.maxDays
           : 0,
     },
-    gramsOptions: Array.isArray(plan.gramsOptions)
-      ? plan.gramsOptions.map((gramsOption) => ({
-        ...gramsOption,
-        mealsOptions: Array.isArray(gramsOption && gramsOption.mealsOptions)
-          ? gramsOption.mealsOptions.map((mealOption) => {
-            const priceHalala = Number(mealOption && mealOption.priceHalala) || 0;
-            const compareAtHalala = Number(mealOption && mealOption.compareAtHalala) || 0;
-            return {
-              ...mealOption,
-              priceHalala,
-              priceSar: minorUnitsToMajor(priceHalala),
-              price: minorUnitsToMajor(priceHalala),
-              compareAtHalala,
-              compareAtSar: minorUnitsToMajor(compareAtHalala),
-              compareAt: minorUnitsToMajor(compareAtHalala),
-            };
-          })
-          : [],
-      }))
-      : [],
-    pricing: buildAdminPlanPricing(plan),
+    gramsOptions: gramsOptionsFormatted,
+    grams: gramsFormatted,
+    pricing: buildAdminPlanPricing(planObj),
   };
 }
 
@@ -680,9 +715,12 @@ function planMatchesAdminSearch(plan, q) {
 }
 
 function filterAdminPlans(plans = [], filters = {}) {
-  const { q = "", normalizedStatus = null } = filters;
+  const { q = "", normalizedStatus = null, includeDeleted = false } = filters;
 
   return plans.filter((plan) => {
+    if (!includeDeleted && plan.isDeleted === true) {
+      return false;
+    }
     if (normalizedStatus === "active" && plan.isActive === false) {
       return false;
     }
@@ -2377,7 +2415,11 @@ async function deletePlan(req, res) {
     return undefined;
   }
 
-  const plan = await Plan.findByIdAndUpdate(id, { $set: { isActive: false } }, { new: true });
+  const plan = await Plan.findByIdAndUpdate(
+    id,
+    { $set: { isActive: false, isDeleted: true, deletedAt: new Date() } },
+    { new: true }
+  );
   if (!plan) {
     return errorResponse(res, 404, "NOT_FOUND", "Plan not found");
   }
@@ -2388,9 +2430,9 @@ async function deletePlan(req, res) {
     action: "plan_soft_deleted_by_admin",
     byUserId: req.dashboardUserId,
     byRole: req.dashboardUserRole,
-    meta: { isActive: false },
+    meta: { isActive: false, isDeleted: true },
   }, { planId: id });
-  return res.status(200).json({ status: true, data: { id: plan.id, isActive: plan.isActive } });
+  return res.status(200).json({ status: true, data: { id: plan.id, isActive: plan.isActive, isDeleted: plan.isDeleted } });
 }
 
 async function togglePlanActive(req, res) {

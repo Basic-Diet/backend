@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 const request = require("supertest");
 
 const { createApp } = require("../src/app");
+const dateUtils = require("../src/utils/date");
 const User = require("../src/models/User");
 const Plan = require("../src/models/Plan");
 const Subscription = require("../src/models/Subscription");
@@ -114,13 +115,17 @@ function auth(req, token = adminToken) {
   return req.set("Authorization", `Bearer ${token}`).set("Accept-Language", "en");
 }
 
+function authAr(req, token = adminToken) {
+  return req.set("Authorization", `Bearer ${token}`).set("Accept-Language", "ar");
+}
+
 function orderPayload(overrides = {}) {
   return {
     userId: customer._id,
     status: "confirmed",
     deliveryMode: "pickup",
-    requestedDeliveryDate: "2026-05-15",
-    deliveryDate: "2026-05-15",
+    requestedDeliveryDate: dateUtils.getTodayKSADate(),
+    deliveryDate: dateUtils.getTodayKSADate(),
     items: [{ mealId: new mongoose.Types.ObjectId(), name: "Chicken", quantity: 1, unitPrice: 1000 }],
     pricing: { unitPrice: 1000, quantity: 1, subtotal: 1000, total: 1000, totalPrice: 1000, currency: "SAR" },
     paymentStatus: "paid",
@@ -133,9 +138,9 @@ async function createSubscription({ user = customer, deliveryMode = "pickup", st
     userId: user._id,
     planId: plan._id,
     status,
-    startDate: new Date("2026-05-01T00:00:00.000Z"),
-    endDate: new Date("2026-06-01T00:00:00.000Z"),
-    validityEndDate: new Date("2026-06-01T00:00:00.000Z"),
+    startDate: new Date(Date.now() - 5 * 86400000),
+    endDate: new Date(Date.now() + 30 * 86400000),
+    validityEndDate: new Date(Date.now() + 30 * 86400000),
     totalMeals: 10,
     remainingMeals,
     selectedMealsPerDay: 2,
@@ -211,13 +216,13 @@ async function testManualSubscriptionSearchAndPickupDeductions() {
   res = await auth(request(app).post(`/api/dashboard/subscriptions/${sub._id}/manual-deduction`))
     .send({ regularMeals: 1, premiumMeals: 2, reason: "Manual branch pickup deduction", notes: "No phone" });
   assert.strictEqual(res.status, 200, "pickup deduction status");
-  assert.deepStrictEqual(res.body.data.deducted, { regularMeals: 1, premiumMeals: 2, total: 3 });
-  assert.deepStrictEqual(res.body.data.remaining, { regularMeals: 4, premiumMeals: 0, totalMeals: 4 });
+  assert.deepStrictEqual(res.body.data.deducted, { regularMeals: 1, premiumMeals: 2, total: 3, addons: [] });
+  assert.deepStrictEqual(res.body.data.remaining, { regularMeals: 4, premiumMeals: 0, totalMeals: 4, addons: [] });
 
   res = await auth(request(app).post(`/api/dashboard/subscriptions/${sub._id}/manual-deduction`))
     .send({ regularMeals: 1, premiumMeals: 0, reason: "Second pickup", notes: "" });
   assert.strictEqual(res.status, 200, "second same-day pickup deduction status");
-  assert.deepStrictEqual(res.body.data.remaining, { regularMeals: 3, premiumMeals: 0, totalMeals: 3 });
+  assert.deepStrictEqual(res.body.data.remaining, { regularMeals: 3, premiumMeals: 0, totalMeals: 3, addons: [] });
 
   const log = await ActivityLog.findOne({
     entityType: "subscription",
@@ -250,6 +255,12 @@ async function testDeliveryOncePerBusinessDay() {
   assert.strictEqual(res.status, 409, "second delivery deduction blocked");
   await assertError(res, "DELIVERY_ALREADY_DEDUCTED_TODAY");
 
+  res = await authAr(request(app).post(`/api/dashboard/subscriptions/${sub._id}/manual-deduction`))
+    .send({ regularMeals: 1, premiumMeals: 0, reason: "Delivery duplicate" });
+  assert.strictEqual(res.status, 409, "second delivery deduction blocked (Arabic)");
+  await assertError(res, "DELIVERY_ALREADY_DEDUCTED_TODAY");
+  assert.strictEqual(res.body.error.message, "تم خصم اشتراك التوصيل لهذا اليوم بالفعل");
+
   res = await auth(request(app).get(`/api/dashboard/subscriptions/search?phone=${encodeURIComponent(deliveryUser.phone)}`));
   assert.strictEqual(res.status, 200, "delivery search status");
   assert.strictEqual(res.body.data.today.hasDeliveryDeductionToday, true);
@@ -273,22 +284,39 @@ async function testValidationFailures() {
     await assertError(res, code);
   }
 
+  const arabicCases = [
+    [{ regularMeals: 0, premiumMeals: 0 }, "INVALID_MEAL_COUNT", "كمية الوجبات أو الإضافات غير صالحة"],
+    [{ regularMeals: 3, premiumMeals: 1 }, "INSUFFICIENT_REMAINING_MEALS", "رصيد الوجبات المتبقية غير كاف"],
+    [{ regularMeals: 3, premiumMeals: 0 }, "INSUFFICIENT_REGULAR_MEALS", "رصيد الوجبات العادية غير كاف"],
+    [{ regularMeals: 0, premiumMeals: 2 }, "INSUFFICIENT_PREMIUM_MEALS", "رصيد الوجبات المميزة غير كاف"],
+  ];
+
+  for (const [body, code, expectedMsg] of arabicCases) {
+    const res = await authAr(request(app).post(`/api/dashboard/subscriptions/${sub._id}/manual-deduction`)).send(body);
+    assert.strictEqual(res.status, code === "INVALID_MEAL_COUNT" ? 400 : 409);
+    await assertError(res, code);
+    assert.strictEqual(res.body.error.message, expectedMsg);
+  }
+
   const inactiveUser = await User.create({ phone: TEST_PHONES[3], name: "Inactive Customer", role: "client", isActive: true });
   const inactiveSub = await createSubscription({ user: inactiveUser, status: "canceled", remainingMeals: 5, premiumRemaining: [1] });
-  const inactiveRes = await auth(request(app).post(`/api/dashboard/subscriptions/${inactiveSub._id}/manual-deduction`))
+  const inactiveRes = await authAr(request(app).post(`/api/dashboard/subscriptions/${inactiveSub._id}/manual-deduction`))
     .send({ regularMeals: 1, premiumMeals: 0 });
   assert.strictEqual(inactiveRes.status, 409, "inactive subscription status");
   await assertError(inactiveRes, "SUBSCRIPTION_NOT_ACTIVE");
+  assert.strictEqual(inactiveRes.body.error.message, "الاشتراك غير نشط");
 
-  const missingSearch = await auth(request(app).get("/api/dashboard/subscriptions/search?phone=%2B966599999999"));
+  const missingSearch = await authAr(request(app).get("/api/dashboard/subscriptions/search?phone=%2B966599999999"));
   assert.strictEqual(missingSearch.status, 404, "missing customer status");
   await assertError(missingSearch, "CUSTOMER_NOT_FOUND");
+  assert.strictEqual(missingSearch.body.error.message, "لم يتم العثور على العميل");
 
   const oneTimeOrder = await Order.create(orderPayload());
-  const orderEndpointRes = await auth(request(app).post(`/api/dashboard/subscriptions/${oneTimeOrder._id}/manual-deduction`))
+  const orderEndpointRes = await authAr(request(app).post(`/api/dashboard/subscriptions/${oneTimeOrder._id}/manual-deduction`))
     .send({ regularMeals: 1, premiumMeals: 0 });
   assert.strictEqual(orderEndpointRes.status, 404, "one-time order is not a subscription");
   await assertError(orderEndpointRes, "SUBSCRIPTION_NOT_FOUND");
+  assert.strictEqual(orderEndpointRes.body.error.message, "لم يتم العثور على الاشتراك");
 }
 
 async function testConcurrentDeductionCannotOverspend() {

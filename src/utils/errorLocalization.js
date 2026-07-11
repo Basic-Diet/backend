@@ -6,6 +6,15 @@ const ERROR_MESSAGE_KEY_BY_LITERAL = {
   "Invalid state transition": "errors.common.invalidStateTransition",
   "Subscription not found": "errors.subscription.notFound",
   "Subscription not active": "errors.subscription.inactive",
+  "Subscription is not active": "errors.subscription.inactive",
+  "Customer not found": "errors.customer.notFound",
+  "Active subscription not found": "errors.subscription.activeNotFound",
+  "Delivery subscription already deducted today": "errors.subscription.deliveryAlreadyDeductedToday",
+  "Invalid addon count or missing addonId": "errors.validation.invalidAddonCount",
+  "Invalid meal or addon count": "errors.validation.invalidMealOrAddonCount",
+  "Not enough remaining meals": "errors.subscription.insufficientRemainingMeals",
+  "Not enough regular meals": "errors.subscription.insufficientRegularMeals",
+  "Not enough premium meals": "errors.subscription.insufficientPremiumMeals",
   "Subscription expired": "errors.subscription.expired",
   "Subscription has no base end date": "errors.subscription.baseEndDateMissing",
   "Day not found": "errors.subscription.dayNotFound",
@@ -197,6 +206,14 @@ const ERROR_MESSAGE_PATTERNS = [
   {
     regex: /^Cannot shrink validity to (?<validityDate>\d{4}-\d{2}-\d{2}) because day (?<dayDate>\d{4}-\d{2}-\d{2}) has active data$/,
     key: "errors.subscription.validityShrinkConflict",
+  },
+  {
+    regex: /^Unknown addon: (?<addonId>.+)$/,
+    key: "errors.addon.unknownAddon",
+  },
+  {
+    regex: /^Not enough balance for addon: (?<addonId>.+)$/,
+    key: "errors.addon.insufficientAddonBalance",
   },
 ];
 

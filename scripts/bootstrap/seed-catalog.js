@@ -68,6 +68,7 @@ const canonicalCatalogItems = [
   { key: "beef_steak", itemKind: "protein", nutrition: { calories: 270 } },
   { key: "shrimp", itemKind: "protein", nutrition: { calories: 380 } },
   { key: "salmon", itemKind: "protein", nutrition: { calories: 210 } },
+  { key: "qa_premium_protein", itemKind: "protein", nutrition: { calories: 250 } },
 ];
 
 const menuOptionCatalogItemKeyByOptionKey = {
@@ -98,6 +99,7 @@ const menuOptionCatalogItemKeyByOptionKey = {
   beef_steak: "beef_steak",
   shrimp: "shrimp",
   salmon: "salmon",
+  qa_premium_protein: "qa_premium_protein",
 };
 
 const menuProductCatalogItemKeyByProductKey = {
@@ -194,7 +196,7 @@ async function verifySeedReadContracts({ strict = true } = {}) {
     .find((product) => product.key === "water");
   check(directAddProduct?.action?.type === "direct_add", "publicMenuV2 water direct-add action missing");
 
-  const { builderCatalogV2, plannerCatalog } = await getSubscriptionBuilderCatalogWithV2({ lang: "en", includeV3: true, ignorePublishedMealBuilder: true });
+  const { builderCatalogV2, plannerCatalog } = await getSubscriptionBuilderCatalogWithV2({ lang: "en", includeV3: true, includeV2: true, ignorePublishedMealBuilder: true });
   check(builderCatalogV2, "Seeded subscription catalog did not produce builderCatalogV2");
   if (!builderCatalogV2) return false;
   check(builderCatalogV2.catalogVersion === "meal_planner_menu.v2", "builderCatalogV2 catalogVersion mismatch");
@@ -358,6 +360,7 @@ const proteinRows = [
   { key: "beef_steak", name: name("ستيك لحم", "Beef Steak"), calories: 270, proteinFamilyKey: "beef" },
   { key: "shrimp", name: name("جمبري", "Shrimp"), calories: 380, proteinFamilyKey: "fish" },
   { key: "salmon", name: name("سالمون", "Salmon"), calories: 210, proteinFamilyKey: "fish" },
+  { key: "qa_premium_protein", name: name("بروتين فحص الجودة آمن للتعديل", "QA Premium Protein (Safe to Mutate)"), calories: 250, proteinFamilyKey: "beef" },
   { key: "boiled_eggs", name: name("بيض مسلوق", "Boiled Eggs"), calories: 155, proteinFamilyKey: "eggs" },
   { key: "tuna", name: name("تونا", "Tuna"), calories: 116, proteinFamilyKey: "fish" },
   { key: "chicken_fajita", name: name("فاهيتا", "Chicken Fajita"), calories: 200, proteinFamilyKey: "chicken" },

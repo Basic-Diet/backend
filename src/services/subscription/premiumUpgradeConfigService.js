@@ -53,6 +53,12 @@ async function loadClientPremiumUpgradeConfigState({ session = null } = {}) {
   for (const config of activeVisibleConfigs) {
     activeByKey.set(normalizePremiumKey(config.premiumKey), config);
   }
+  const configByKey = new Map();
+  for (const config of configs || []) {
+    if (config && config.premiumKey) {
+      configByKey.set(normalizePremiumKey(config.premiumKey), config);
+    }
+  }
   return {
     hasConfigs: configs.length > 0,
     configs,
@@ -64,6 +70,7 @@ async function loadClientPremiumUpgradeConfigState({ session = null } = {}) {
     isAllowed(premiumKey) {
       const norm = normalizePremiumKey(premiumKey);
       if (activeByKey.has(norm)) return true;
+      if (configByKey.has(norm)) return false;
       if (KNOWN_PREMIUM_KEYS.includes(norm) || norm === "custom_premium_salad") return true;
       return false;
     },

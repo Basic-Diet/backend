@@ -284,6 +284,8 @@ module.exports = {
       invalidPremiumCount: "عدد الوجبات المميزة غير صالح",
       premiumCountMismatch: "يجب أن يطابق premiumCount إجمالي الكمية في premiumItems عند إرسال القيمتين معًا",
       missingAddonIdOrDate: "addonId أو التاريخ مفقود",
+      invalidAddonCount: "كمية الإضافة غير صالحة أو معرف الإضافة مفقود",
+      invalidMealOrAddonCount: "كمية الوجبات أو الإضافات غير صالحة",
     },
     subscription: {
       notFound: "لم يتم العثور على الاشتراك",
@@ -314,6 +316,11 @@ module.exports = {
       skipRangeFailed: "فشل تخطي النطاق",
       selectionFailed: "فشل حفظ الاختيارات",
       selectionsExceedMealsPerDay: "الاختيارات تتجاوز عدد الوجبات اليومي",
+      activeNotFound: "لم يتم العثور على اشتراك نشط",
+      deliveryAlreadyDeductedToday: "تم خصم اشتراك التوصيل لهذا اليوم بالفعل",
+      insufficientRemainingMeals: "رصيد الوجبات المتبقية غير كافٍ",
+      insufficientRegularMeals: "رصيد الوجبات العادية غير كافٍ",
+      insufficientPremiumMeals: "رصيد الوجبات المميزة غير كافٍ",
     },
     planning: {
       disabled: "تخطيط اليوم المعياري غير مفعّل لهذا الاشتراك",
@@ -381,6 +388,8 @@ module.exports = {
       oneTimeCategoryConflict: "يمكن أن تتضمن الإضافات لمرة واحدة عنصرًا واحدًا كحد أقصى لكل فئة",
       oneTimeNotFoundOrInactive: "الإضافة لمرة واحدة {{addonId}} غير موجودة أو غير نشطة",
       recurringCategoryConflict: "يمكن أن تتضمن الإضافات المتكررة عنصرًا واحدًا كحد أقصى لكل فئة",
+      unknownAddon: "إضافة غير معروفة: {{addonId}}",
+      insufficientAddonBalance: "رصيد الإضافة غير كافٍ: {{addonId}}",
     },
     premiumMeal: {
       notFound: "لم يتم العثور على الوجبة المميزة",
@@ -424,6 +433,9 @@ module.exports = {
       missingPaymentIdentifiers: "معرفات الدفع مفقودة",
       processingFailed: "فشلت معالجة الـ webhook",
       ignoredNonPaidStatus: "تم تجاهل الحالة غير المدفوعة",
+    },
+    customer: {
+      notFound: "لم يتم العثور على العميل",
     },
   },
 };

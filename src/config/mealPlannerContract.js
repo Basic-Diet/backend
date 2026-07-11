@@ -74,6 +74,7 @@ const STANDARD_MEAL_EXTENDED_PROTEIN_KEYS = Object.freeze([
   "beef_steak",
   "shrimp",
   "salmon",
+  "qa_premium_protein",
 ]);
 
 const STANDARD_MEAL_EXTENDED_PROTEIN_KEY_SET = new Set(STANDARD_MEAL_EXTENDED_PROTEIN_KEYS);
@@ -82,6 +83,7 @@ const PREMIUM_MEAL_PROTEIN_KEYS = Object.freeze([
   "beef_steak",
   "shrimp",
   "salmon",
+  "qa_premium_protein",
 ]);
 
 const SUBSCRIPTION_COLD_SANDWICH_KEYS = Object.freeze([
@@ -163,6 +165,7 @@ const PROTEIN_VISUAL_FAMILY_OPTION_KEYS = Object.freeze({
   beef_steak: "premium",
   shrimp: "premium",
   salmon: "premium",
+  qa_premium_protein: "premium",
 });
 
 const SALAD_SELECTION_GROUPS = Object.freeze([

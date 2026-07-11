@@ -63,7 +63,8 @@ async function handleAction(req, res) {
           return errorResponse(res, 409, "ORDER_PAYMENT_REQUIRED", "Paid orders are required for operational fulfillment");
         }
         if (err.status || err.code) {
-          return errorResponse(res, err.status || 500, err.code || "INTERNAL", err.message, err.details);
+          const code = err.code === "INVALID_STATE_TRANSITION" ? "INVALID_TRANSITION" : err.code;
+          return errorResponse(res, err.status || 500, code || "INTERNAL", err.message, err.details);
         }
         throw err;
       }

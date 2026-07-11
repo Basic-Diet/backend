@@ -49,6 +49,9 @@ const PlanSchema = new mongoose.Schema(
     available: { type: Boolean, default: true },
     isAvailable: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date, default: null },
+    category: { type: String, trim: true },
     sortOrder: { type: Number, default: 0 },
   },
   { timestamps: true }
@@ -76,6 +79,7 @@ PlanSchema.methods.isViable = function () {
 PlanSchema.statics.getSellableQuery = function () {
   return {
     isActive: true,
+    isDeleted: { $ne: true },
     isAvailable: { $ne: false },
     active: { $ne: false },
     available: { $ne: false },

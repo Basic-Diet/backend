@@ -283,6 +283,8 @@ module.exports = {
       invalidPremiumCount: "Invalid premium count",
       premiumCountMismatch: "premiumCount must match the total qty of premiumItems when both are provided",
       missingAddonIdOrDate: "Missing addonId or date",
+      invalidAddonCount: "Invalid addon count or missing addonId",
+      invalidMealOrAddonCount: "Invalid meal or addon count",
     },
     subscription: {
       notFound: "Subscription not found",
@@ -313,6 +315,11 @@ module.exports = {
       skipRangeFailed: "Skip range failed",
       selectionFailed: "Selection failed",
       selectionsExceedMealsPerDay: "Selections exceed meals per day",
+      activeNotFound: "Active subscription not found",
+      deliveryAlreadyDeductedToday: "Delivery subscription already deducted today",
+      insufficientRemainingMeals: "Not enough remaining meals",
+      insufficientRegularMeals: "Not enough regular meals",
+      insufficientPremiumMeals: "Not enough premium meals",
     },
     planning: {
       disabled: "Canonical day planning is not enabled for this subscription",
@@ -380,6 +387,8 @@ module.exports = {
       oneTimeCategoryConflict: "One-time add-ons may include at most one item per category",
       oneTimeNotFoundOrInactive: "One-time addon {{addonId}} not found or inactive",
       recurringCategoryConflict: "Recurring add-ons may include at most one item per category",
+      unknownAddon: "Unknown addon: {{addonId}}",
+      insufficientAddonBalance: "Not enough balance for addon: {{addonId}}",
     },
     premiumMeal: {
       notFound: "Premium meal not found",
@@ -423,6 +432,9 @@ module.exports = {
       missingPaymentIdentifiers: "Missing payment identifiers",
       processingFailed: "Webhook processing failed",
       ignoredNonPaidStatus: "Ignored non-paid status",
+    },
+    customer: {
+      notFound: "Customer not found",
     },
   },
 };

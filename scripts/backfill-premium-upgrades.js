@@ -14,7 +14,7 @@ const {
   resolvePremiumKeyFromName,
 } = require("../src/utils/subscription/premiumIdentity");
 
-const REQUIRED_CONFIGS = ["beef_steak", "shrimp", "salmon", "premium_large_salad"];
+const REQUIRED_CONFIGS = ["beef_steak", "shrimp", "salmon", "qa_premium_protein", "premium_large_salad"];
 
 async function processProteinConfig(premiumKey) {
   let createdCount = 0;
@@ -162,6 +162,12 @@ async function backfillPremiumUpgrades() {
   let totalRepaired = 0;
   let totalSkipped = 0;
   const unresolvedSources = [];
+
+  // Clean up any invalid standard proteins that might have been configured as premium manually (e.g. during testing)
+  const cleanupResult = await PremiumUpgradeConfig.deleteMany({ premiumKey: "chicken_fajita" });
+  if (cleanupResult.deletedCount > 0) {
+    console.log(`Cleaned up ${cleanupResult.deletedCount} invalid chicken_fajita configs.`);
+  }
 
   for (const key of REQUIRED_CONFIGS) {
     try {

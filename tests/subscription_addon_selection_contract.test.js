@@ -295,6 +295,207 @@ async function run() {
     ),
     "INVALID_ONE_TIME_ADDON_SELECTION"
   );
+
+  // ─── Regression tests: "Rule of 3" production bug fix ─────────────────────
+  // Root cause: reconcileAddonInclusions was using menuProductIds as a hard
+  // balance-deduction gate. Any juice product whose ID was NOT in the plan's
+  // menuProductIds was forced to pending_payment even when balance remained.
+  //
+  // Fix: menuProductIds is a catalog display hint only. Any item matching the
+  // entitlement category may consume subscription balance up to remainingQty.
+
+  const JUICE_IDS = {
+    orange:  "507f191e810c19729de87020",
+    apple:   "507f191e810c19729de87021",
+    mango:   "507f191e810c19729de87022",
+    berry:   "507f191e810c19729de87023",  // NOT in menuProductIds in old code
+    berryP:  "507f191e810c19729de87024",  // NOT in menuProductIds in old code
+    green:   "507f191e810c19729de87025",  // NOT in menuProductIds in old code
+    beet:    "507f191e810c19729de87026",  // NOT in menuProductIds in old code
+    PLAN_ID: "507f191e810c19729de87027",
+  };
+
+  const SALAD_IDS = {
+    s1: "507f191e810c19729de87030",
+    s2: "507f191e810c19729de87031",
+    s3: "507f191e810c19729de87032",
+    s4: "507f191e810c19729de87033",
+    s5: "507f191e810c19729de87034",
+    PLAN_ID: "507f191e810c19729de87035",
+  };
+
+  // Resolves all 7 juice IDs and 5 salad IDs
+  const resolveProductionChoiceById = async (id) => {
+    const str = String(id);
+    if ([JUICE_IDS.orange, JUICE_IDS.apple, JUICE_IDS.mango,
+         JUICE_IDS.berry, JUICE_IDS.berryP, JUICE_IDS.green, JUICE_IDS.beet].includes(str)) {
+      return choice({ id, category: "juice", name: `Juice ${str.slice(-4)}`, priceHalala: 1100 });
+    }
+    if ([SALAD_IDS.s1, SALAD_IDS.s2, SALAD_IDS.s3, SALAD_IDS.s4, SALAD_IDS.s5].includes(str)) {
+      return choice({ id, category: "small_salad", name: `Salad ${str.slice(-4)}`, priceHalala: 1200 });
+    }
+    return null;
+  };
+
+  // Production-replica subscription: juice plan with menuProductIds restricted to 3 IDs,
+  // but addonBalance has remainingQty = 7 (as seen in the live repro).
+  const productionReplicaSub = {
+    status: "active",
+    addonBalance: [
+      {
+        _id: "507f191e810c19729de87040",
+        addonPlanId: JUICE_IDS.PLAN_ID,
+        category: "juice",
+        remainingQty: 7,
+        consumedQty: 0,
+      },
+      {
+        _id: "507f191e810c19729de87041",
+        addonPlanId: SALAD_IDS.PLAN_ID,
+        category: "small_salad",
+        remainingQty: 5,
+        consumedQty: 0,
+      },
+    ],
+    addonSubscriptions: [
+      {
+        addonId: JUICE_IDS.PLAN_ID,
+        addonPlanId: JUICE_IDS.PLAN_ID,
+        category: "juice",
+        name: "Juice Subscription",
+        maxPerDay: 7,
+        // menuProductIds restricted to 3 — was incorrectly blocking the other 4
+        menuProductIds: [JUICE_IDS.orange, JUICE_IDS.apple, JUICE_IDS.mango],
+      },
+      {
+        addonId: SALAD_IDS.PLAN_ID,
+        addonPlanId: SALAD_IDS.PLAN_ID,
+        category: "small_salad",
+        name: "Small Salad Subscription",
+        maxPerDay: 5,
+        menuProductIds: [], // empty — was always working correctly
+      },
+    ],
+  };
+
+  // Test D — Production repro: 7 juice items, balance=7, menuProductIds=[3 IDs]
+  // Expected: ALL 7 must be source="subscription" (bug was: only first 3 were)
+  const testDDay = { addonSelections: [] };
+  await reconcileAddonInclusions(
+    productionReplicaSub,
+    testDDay,
+    [
+      JUICE_IDS.orange, JUICE_IDS.apple, JUICE_IDS.mango,
+      JUICE_IDS.berry, JUICE_IDS.berryP, JUICE_IDS.green, JUICE_IDS.beet,
+    ],
+    { resolveChoiceProductById: resolveProductionChoiceById }
+  );
+  assert.strictEqual(testDDay.addonSelections.length, 7,
+    "Test D: all 7 juice selections must be present");
+  assert.strictEqual(
+    testDDay.addonSelections.filter((s) => s.source === "subscription").length, 7,
+    "Test D: all 7 juices must be source=subscription when balance=7 (Rule-of-3 regression)"
+  );
+  assert.strictEqual(
+    testDDay.addonSelections.filter((s) => s.source === "pending_payment").length, 0,
+    "Test D: zero juices must be pending_payment when balance covers all"
+  );
+  testDDay.addonSelections.forEach((sel) => {
+    assert.strictEqual(sel.priceHalala, 0,
+      `Test D: ${String(sel.addonId)} must have priceHalala=0 as subscription-covered`);
+  });
+
+  // Test E — Partial balance: 7 juice items, balance=5 → 5 subscription + 2 pending_payment
+  const partialSub = {
+    status: "active",
+    addonBalance: [
+      {
+        _id: "507f191e810c19729de87050",
+        addonPlanId: JUICE_IDS.PLAN_ID,
+        category: "juice",
+        remainingQty: 5,
+        consumedQty: 2,
+      },
+    ],
+    addonSubscriptions: [
+      {
+        addonId: JUICE_IDS.PLAN_ID,
+        addonPlanId: JUICE_IDS.PLAN_ID,
+        category: "juice",
+        name: "Juice Subscription",
+        maxPerDay: 7,
+        menuProductIds: [JUICE_IDS.orange, JUICE_IDS.apple, JUICE_IDS.mango], // still restricted
+      },
+    ],
+  };
+  const testEDay = { addonSelections: [] };
+  await reconcileAddonInclusions(
+    partialSub,
+    testEDay,
+    [
+      JUICE_IDS.orange, JUICE_IDS.apple, JUICE_IDS.mango,
+      JUICE_IDS.berry, JUICE_IDS.berryP, JUICE_IDS.green, JUICE_IDS.beet,
+    ],
+    { resolveChoiceProductById: resolveProductionChoiceById }
+  );
+  assert.strictEqual(testEDay.addonSelections.length, 7,
+    "Test E: all 7 juice selections must be present");
+  assert.strictEqual(
+    testEDay.addonSelections.filter((s) => s.source === "subscription").length, 5,
+    "Test E: exactly 5 juices must be subscription-covered (balance=5)"
+  );
+  assert.strictEqual(
+    testEDay.addonSelections.filter((s) => s.source === "pending_payment").length, 2,
+    "Test E: exactly 2 juices must be pending_payment (balance exhausted)"
+  );
+  testEDay.addonSelections
+    .filter((s) => s.source === "pending_payment")
+    .forEach((sel) => {
+      assert.strictEqual(sel.priceHalala, 1100,
+        "Test E: overage juices must use item priceHalala");
+    });
+
+  // Test F — small_salad 5 items, balance=5, empty menuProductIds → all 5 subscription
+  // (Confirms existing working behavior is preserved after the fix)
+  const testFDay = { addonSelections: [] };
+  await reconcileAddonInclusions(
+    productionReplicaSub,
+    testFDay,
+    [SALAD_IDS.s1, SALAD_IDS.s2, SALAD_IDS.s3, SALAD_IDS.s4, SALAD_IDS.s5],
+    { resolveChoiceProductById: resolveProductionChoiceById }
+  );
+  assert.strictEqual(testFDay.addonSelections.length, 5,
+    "Test F: all 5 salad selections must be present");
+  assert.strictEqual(
+    testFDay.addonSelections.filter((s) => s.source === "subscription").length, 5,
+    "Test F: all 5 small_salads must be subscription-covered (empty menuProductIds)"
+  );
+  assert.strictEqual(
+    testFDay.addonSelections.filter((s) => s.source === "pending_payment").length, 0,
+    "Test F: zero small_salads must be pending_payment"
+  );
+
+  // Test G — Mixed juice + salad in one payload: each category's balance is independent
+  const testGDay = { addonSelections: [] };
+  await reconcileAddonInclusions(
+    productionReplicaSub,
+    testGDay,
+    [
+      JUICE_IDS.orange, JUICE_IDS.berry, JUICE_IDS.berryP, // 3 juices (balance=7)
+      SALAD_IDS.s1, SALAD_IDS.s2,                          // 2 salads (balance=5)
+    ],
+    { resolveChoiceProductById: resolveProductionChoiceById }
+  );
+  assert.strictEqual(testGDay.addonSelections.length, 5,
+    "Test G: 5 total selections");
+  assert.strictEqual(
+    testGDay.addonSelections.filter((s) => s.category === "juice" && s.source === "subscription").length, 3,
+    "Test G: 3 juice items are subscription"
+  );
+  assert.strictEqual(
+    testGDay.addonSelections.filter((s) => s.category === "small_salad" && s.source === "subscription").length, 2,
+    "Test G: 2 salad items are subscription"
+  );
 }
 
 run()
@@ -305,3 +506,4 @@ run()
     console.error(err);
     process.exit(1);
   });
+
