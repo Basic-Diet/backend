@@ -872,6 +872,8 @@ function serializeAppUserAdmin({ coreUser, appUser, subscriptionsCount = 0, acti
     email: coreUser.email || (appUser && appUser.email) || null,
     role: "app_user",
     isActive: Boolean(coreUser.isActive),
+    accountStatus: coreUser.accountStatus || "active",
+    forcePasswordChange: Boolean(coreUser.forcePasswordChange),
     fcmTokens: dedupeStringArray([
       ...(Array.isArray(coreUser.fcmTokens) ? coreUser.fcmTokens : []),
       ...(appUser && Array.isArray(appUser.fcmTokens) ? appUser.fcmTokens : []),
@@ -1623,6 +1625,11 @@ async function createAppUserAdmin(req, res) {
     const fullName = normalizeOptionalFullName(body.fullName || body.name);
     const email = normalizeOptionalEmailOrThrow(body.email);
     const isActive = body.isActive === undefined ? true : Boolean(body.isActive);
+    const temporaryPassword = body.password || body.temporaryPassword;
+
+    if (!temporaryPassword || String(temporaryPassword).length < 6) {
+      return errorResponse(res, 400, "INVALID", "A temporary password (minimum 6 characters) is required when creating a user");
+    }
 
     const existingUser = await User.findOne({ phone }).lean();
     if (existingUser) {
@@ -1638,6 +1645,9 @@ async function createAppUserAdmin(req, res) {
       return errorResponse(res, 409, "CONFLICT", "App user already exists");
     }
 
+    const now = new Date();
+    const passwordHash = await hashAppPassword(temporaryPassword);
+
   const session = await startSafeSession();
     let createdCoreUser;
     let createdAppUser;
@@ -1647,11 +1657,18 @@ async function createAppUserAdmin(req, res) {
       createdCoreUser = await User.create(
         [{
           phone,
+          phoneE164: phone,
+          phoneVerified: true,
           name: fullName || undefined,
           email: email || undefined,
           role: "client",
           isActive,
-          accountStatus: "pending_activation",
+          accountStatus: "active",
+          passwordHash,
+          passwordSetAt: now,
+          forcePasswordChange: true,
+          authProvider: "password",
+          authMethods: ["password"],
           createdByAdminId: req.dashboardUserId,
         }],
         { session }
@@ -3984,7 +4001,12 @@ async function resetAppUserPassword(req, res) {
     return undefined;
   }
 
-  const { reason } = req.body || {};
+  const { reason, password, temporaryPassword } = req.body || {};
+  const rawPassword = password || temporaryPassword;
+
+  if (!rawPassword || String(rawPassword).length < 6) {
+    return errorResponse(res, 400, "INVALID", "A temporary password (minimum 6 characters) is required to reset the user's password");
+  }
 
   const user = await User.findOne({ _id: id, role: "client" });
   if (!user) {
@@ -3996,18 +4018,22 @@ async function resetAppUserPassword(req, res) {
   }
 
   const now = new Date();
-  user.passwordHash = null;
-  user.passwordSetAt = null;
-  user.accountStatus = "reset_requested";
-  user.resetRequestedAt = now;
+  const newPasswordHash = await hashAppPassword(rawPassword);
+  user.passwordHash = newPasswordHash;
+  user.passwordSetAt = now;
+  user.forcePasswordChange = true;
+  user.accountStatus = "active";
+  user.resetRequestedAt = null;
   user.failedLoginAttempts = 0;
   user.lockedUntil = null;
+  user.authProvider = "password";
+  user.authMethods = Array.from(new Set([...(Array.isArray(user.authMethods) ? user.authMethods : []), "password"]));
   await user.save();
 
   await writeActivityLogSafely({
     entityType: "user",
     entityId: user._id,
-    action: "admin_requested_password_reset",
+    action: "admin_reset_app_user_password",
     byUserId: req.dashboardUserId,
     byRole: req.dashboardUserRole,
     meta: {
@@ -4017,12 +4043,12 @@ async function resetAppUserPassword(req, res) {
 
   return res.status(200).json({
     status: true,
-    message: "Password reset requested successfully",
-    messageAr: "تم طلب إعادة تعيين كلمة المرور بنجاح",
+    message: "Password reset successfully. User will be prompted to change it on next login.",
+    messageAr: "تم إعادة تعيين كلمة المرور بنجاح. سيُطلب من المستخدم تغييرها عند تسجيل الدخول التالي.",
     data: {
       userId: String(user._id),
       accountStatus: user.accountStatus,
-      resetRequestedAt: user.resetRequestedAt,
+      forcePasswordChange: true,
     },
   });
 }

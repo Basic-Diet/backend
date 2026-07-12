@@ -522,7 +522,9 @@ async function login(req, res) {
       return errorResponse(res, 403, "RESET_REQUESTED", "Password reset requested. Please set a new password.");
     }
     if (coreUser && coreUser.accountStatus === "pending_activation") {
-      return errorResponse(res, 403, "PENDING_ACTIVATION", "Account pending activation. Please set a password.");
+      // Legacy: admin-created accounts now use forcePasswordChange=true instead.
+      // This guard is kept for backward compatibility with any older records.
+      return errorResponse(res, 403, "PENDING_ACTIVATION", "Account pending activation. Please contact admin.");
     }
     if (coreUser && coreUser.phoneVerified === true && !coreUser.passwordHash) {
       return errorResponse(res, 403, "PASSWORD_RESET_REQUIRED", "Password setup is required");

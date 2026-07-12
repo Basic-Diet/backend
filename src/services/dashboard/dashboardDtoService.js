@@ -306,10 +306,12 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
           : (Array.isArray(pickupRequest.selectedPickupItems) && pickupRequest.selectedPickupItems.length > 0
             ? pickupRequest.selectedPickupItems.map((item, index) => {
                 const itemIdStr = item.itemId ? String(item.itemId) : null;
+                const realId = (item.product && (item.product.id || item.product._id)) || item.addonId || item.sourceId;
+                const realIdStr = realId ? String(realId) : null;
                 const isSandwich = item.itemType === "sandwich";
                 const catalogDoc = isSandwich
-                  ? (catalogMaps.sandwichById && catalogMaps.sandwichById.get(itemIdStr))
-                  : (catalogMaps.productById && catalogMaps.productById.get(itemIdStr));
+                  ? (catalogMaps.sandwichById && (catalogMaps.sandwichById.get(itemIdStr) || catalogMaps.sandwichById.get(realIdStr)))
+                  : (catalogMaps.productById && (catalogMaps.productById.get(itemIdStr) || catalogMaps.productById.get(realIdStr)));
 
                 let defaultNameEn = item.display && item.display.titleEn ? item.display.titleEn : "Unknown";
                 let defaultNameAr = item.display && item.display.titleAr ? item.display.titleAr : "غير معروف";
