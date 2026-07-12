@@ -259,13 +259,13 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null, dashboardPlanC
       })
     : [];
 
-  const menuCategoryKeys = Array.isArray(payload.menuCategoryKeys)
-    ? payload.menuCategoryKeys.map(k => String(k).trim()).filter(Boolean)
-    : [];
-
-  if (dashboardPlanCreate && menuProductIds.length === 0 && menuCategoryKeys.length === 0) {
-    throw { status: 400, code: "INVALID", message: "At least one of menuProductIds or menuCategoryKeys is required" };
+  if (kind === "plan") {
+    if (menuProductIds.length === 0) {
+      throw { status: 400, code: "INVALID", message: "menuProductIds must contain at least one product" };
+    }
   }
+
+  const menuCategoryKeys = [];
 
   let maxPerDay = 1;
   if (payload.maxPerDay !== undefined && payload.maxPerDay !== null) {
@@ -472,7 +472,7 @@ async function buildFullyPopulatedAddonDetail(addonId, { includeInternal = false
   const data = { ...cleanRow };
   data.id = String(row._id);
   data.menuProductIds = row.menuProductIds || [];
-  data.menuCategoryKeys = row.menuCategoryKeys || [];
+  data.menuCategoryKeys = [];
   data.menuProductsCount = data.menuProductIds.length;
 
   if (row.kind === "plan") {
@@ -480,18 +480,7 @@ async function buildFullyPopulatedAddonDetail(addonId, { includeInternal = false
       priceHalala, priceSar, priceLabel, billingMode, billingUnit, price, menuProductId,
     };
 
-    // 1. Fetch menuCategories matching keys
-    const MenuCategory = require("../models/MenuCategory");
-    let catsQuery = MenuCategory.find({ key: { $in: data.menuCategoryKeys } });
-    if (session) catsQuery = catsQuery.session(session);
-    const cats = await catsQuery.lean();
-
-    data.menuCategories = cats.map(c => ({
-      id: String(c._id),
-      key: c.key,
-      name: c.name || { ar: "", en: "" },
-      isActive: c.isActive !== false,
-    }));
+    data.menuCategories = [];
 
     // 2. Fetch menuProducts for menuProductIds
     let prodsQuery = MenuProduct.find({ _id: { $in: data.menuProductIds } }).populate("categoryId");
@@ -509,17 +498,9 @@ async function buildFullyPopulatedAddonDetail(addonId, { includeInternal = false
     }));
 
     // 3. Resolve union of products
-    let catProductIds = [];
-    if (cats.length > 0) {
-      const catIds = cats.map(c => c._id);
-      let catProdsQuery = MenuProduct.find({ categoryId: { $in: catIds }, isActive: true }).select("_id");
-      if (session) catProdsQuery = catProdsQuery.session(session);
-      const catProds = await catProdsQuery.lean();
-      catProductIds = catProds.map(p => String(p._id));
-    }
     const explicitProductIds = data.menuProductIds.map(String);
-    data.resolvedMenuProductIds = Array.from(new Set([...explicitProductIds, ...catProductIds]));
-    data.resolvedMenuProductsCount = data.resolvedMenuProductIds.length;
+    data.resolvedMenuProductIds = explicitProductIds;
+    data.resolvedMenuProductsCount = explicitProductIds.length;
 
     // 4. Fetch planPrices
     const matchQuery = includeInternal === true ? {} : Plan.getSellableQuery();
@@ -618,10 +599,10 @@ function toDashboardAddonPlanLeanDTO(plan) {
     isArchived: plan.isArchived === true,
     archivedAt: plan.archivedAt || null,
     menuProductIds: (plan.menuProductIds || []).map(String),
-    menuCategoryKeys: plan.menuCategoryKeys || [],
-    menuCategories: plan.menuCategories || [],
-    resolvedMenuProductIds: plan.resolvedMenuProductIds || [],
-    resolvedMenuProductsCount: plan.resolvedMenuProductsCount || 0,
+    menuCategoryKeys: [],
+    menuCategories: [],
+    resolvedMenuProductIds: (plan.menuProductIds || []).map(String),
+    resolvedMenuProductsCount: (plan.menuProductIds || []).length,
     menuProducts: (plan.menuProducts || []).map(toDashboardMenuProductPickerDTO),
     planPrices: (plan.planPrices || []).map(toDashboardPlanPriceLeanDTO)
   };
@@ -684,7 +665,7 @@ async function listAddonsAdmin(req, res, options = {}) {
           id: String(row._id),
           ...cleanRow,
           menuProductIds,
-          menuCategoryKeys: row.menuCategoryKeys || [],
+          menuCategoryKeys: [],
           menuProductsCount,
           planPricesCount,
           pricingMode: row.kind === "plan" ? "base_plan_matrix" : undefined,
@@ -862,28 +843,14 @@ async function createAddon(req, res, options = {}) {
       throw { status: 400, code: "INVALID", message: "planPrices must contain at least one item" };
     }
 
-    if (options.dashboardPlanCreate) {
-      if (payload.menuProductIds && payload.menuProductIds.length > 0) {
-        const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
-        if (uniqueProductIds.length !== payload.menuProductIds.length) {
-          throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
-        }
-        const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
-        if (productCount !== payload.menuProductIds.length) {
-          throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
-        }
+    if (payload.kind === "plan") {
+      const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
+      if (uniqueProductIds.length !== payload.menuProductIds.length) {
+        throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
       }
-
-      if (payload.menuCategoryKeys && payload.menuCategoryKeys.length > 0) {
-        const uniqueCategoryKeys = [...new Set(payload.menuCategoryKeys.map(String))];
-        if (uniqueCategoryKeys.length !== payload.menuCategoryKeys.length) {
-          throw { status: 400, code: "INVALID", message: "Duplicate menuCategoryKeys are not allowed" };
-        }
-        const MenuCategory = require("../models/MenuCategory");
-        const categoryCount = await MenuCategory.countDocuments({ key: { $in: payload.menuCategoryKeys } });
-        if (categoryCount !== payload.menuCategoryKeys.length) {
-          throw { status: 400, code: "INVALID", message: "One or more menuCategoryKeys do not exist" };
-        }
+      const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
+      if (productCount !== payload.menuProductIds.length) {
+        throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
       }
     }
 
@@ -1028,28 +995,14 @@ async function updateAddon(req, res, options = {}) {
       }
     }
 
-    if (options.dashboardPlanCreate) {
-      if (payload.menuProductIds && payload.menuProductIds.length > 0) {
-        const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
-        if (uniqueProductIds.length !== payload.menuProductIds.length) {
-          throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
-        }
-        const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
-        if (productCount !== payload.menuProductIds.length) {
-          throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
-        }
+    if (payload.kind === "plan") {
+      const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
+      if (uniqueProductIds.length !== payload.menuProductIds.length) {
+        throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
       }
-
-      if (payload.menuCategoryKeys && payload.menuCategoryKeys.length > 0) {
-        const uniqueCategoryKeys = [...new Set(payload.menuCategoryKeys.map(String))];
-        if (uniqueCategoryKeys.length !== payload.menuCategoryKeys.length) {
-          throw { status: 400, code: "INVALID", message: "Duplicate menuCategoryKeys are not allowed" };
-        }
-        const MenuCategory = require("../models/MenuCategory");
-        const categoryCount = await MenuCategory.countDocuments({ key: { $in: payload.menuCategoryKeys } });
-        if (categoryCount !== payload.menuCategoryKeys.length) {
-          throw { status: 400, code: "INVALID", message: "One or more menuCategoryKeys do not exist" };
-        }
+      const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
+      if (productCount !== payload.menuProductIds.length) {
+        throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
       }
     }
 
@@ -1150,17 +1103,23 @@ async function patchAddon(req, res, options = {}) {
       });
     }
 
-    if (req.body.menuCategoryKeys !== undefined) {
-      if (!Array.isArray(req.body.menuCategoryKeys)) {
-        return errorResponse(res, 400, "INVALID", "menuCategoryKeys must be an array");
+    if (existing.kind === "plan") {
+      payload.menuCategoryKeys = [];
+      const finalProductIds = payload.menuProductIds !== undefined ? payload.menuProductIds : existing.menuProductIds;
+      if (!finalProductIds || finalProductIds.length === 0) {
+        return errorResponse(res, 400, "INVALID", "menuProductIds must contain at least one product");
       }
-      payload.menuCategoryKeys = req.body.menuCategoryKeys.map(k => String(k).trim()).filter(Boolean);
-    }
 
-    const finalProductIds = payload.menuProductIds !== undefined ? payload.menuProductIds : existing.menuProductIds;
-    const finalCategoryKeys = payload.menuCategoryKeys !== undefined ? payload.menuCategoryKeys : existing.menuCategoryKeys;
-    if (existing.kind === "plan" && (!finalProductIds || finalProductIds.length === 0) && (!finalCategoryKeys || finalCategoryKeys.length === 0)) {
-      return errorResponse(res, 400, "INVALID", "At least one of menuProductIds or menuCategoryKeys is required for plan");
+      if (payload.menuProductIds && payload.menuProductIds.length > 0) {
+        const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
+        if (uniqueProductIds.length !== payload.menuProductIds.length) {
+          return errorResponse(res, 400, "INVALID", "Duplicate menuProductIds are not allowed");
+        }
+        const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
+        if (productCount !== payload.menuProductIds.length) {
+          return errorResponse(res, 400, "INVALID", "One or more menuProductIds do not exist");
+        }
+      }
     }
 
     if (req.body.maxPerDay !== undefined && req.body.maxPerDay !== null) {

@@ -114,7 +114,7 @@ async function main() {
     assert.strictEqual(created.body.data.resolvedMenuProductsCount, 1);
     const addonId = created.body.data.id;
 
-    // Test Category-Linked Addon Creation
+    // Test Category-Linked Addon Creation (now fails since category-linking is no longer allowed)
     const categoryLinkedBody = {
       name: { ar: "اشتراك السناك بالتصنيف", en: "Category Snack Subscription" },
       category: "snack",
@@ -124,16 +124,8 @@ async function main() {
       planPrices: [{ basePlanId: String(basePlan._id), priceHalala: 6000, isActive: true }],
     };
     const catCreated = await invoke(createDashboardAddonPlan, { body: categoryLinkedBody });
-    assert.strictEqual(catCreated.statusCode, 201);
-    assert.deepStrictEqual(catCreated.body.data.menuCategoryKeys, ["snacks"]);
-    assert.strictEqual(catCreated.body.data.menuCategories.length, 1);
-    assert.strictEqual(catCreated.body.data.menuCategories[0].key, "snacks");
-    assert.deepStrictEqual(catCreated.body.data.resolvedMenuProductIds, [String(product._id)]);
-    assert.strictEqual(catCreated.body.data.resolvedMenuProductsCount, 1);
-
-    await Addon.deleteOne({ _id: catCreated.body.data.id });
-    await AddonPlanPrice.deleteMany({ addonPlanId: catCreated.body.data.id });
-
+    assert.strictEqual(catCreated.statusCode, 400);
+    assert.ok(catCreated.body.error.message.includes("menuProductIds must contain at least one product"));
 
     assert.strictEqual(await MenuProduct.countDocuments(), 1, "POST links products; it must not create them");
     assert.strictEqual(await AddonPlanPrice.countDocuments({ addonPlanId: addonId, basePlanId: basePlan._id }), 1);
@@ -157,6 +149,7 @@ async function main() {
       priceHalala: 0,
       billingMode: "per_day",
       isActive: true,
+      menuProductIds: [String(product._id)], // Plan must have product linking
     });
 
     const listed = await invoke(listDashboardAddonPlans, { query: { view: "full", kind: "item" } });
@@ -186,9 +179,8 @@ async function main() {
     const invalidCases = [
       [{ ...createBody, name: { ar: "", en: "Missing Arabic" } }, "name.ar"],
       [{ ...createBody, isActive: "true" }, "isActive"],
-      [{ ...createBody, menuProductIds: [], menuCategoryKeys: [] }, "At least one of menuProductIds or menuCategoryKeys is required"],
-      [{ ...createBody, menuCategoryKeys: ["non_existent_category_key"] }, "One or more menuCategoryKeys do not exist"],
-      [{ ...createBody, menuCategoryKeys: ["snacks", "snacks"] }, "Duplicate menuCategoryKeys are not allowed"],
+      [{ ...createBody, menuProductIds: [] }, "menuProductIds must contain at least one product"],
+      [{ ...createBody, menuProductIds: [String(product._id), String(product._id)] }, "Duplicate menuProductIds are not allowed"],
       [{ ...createBody, planPrices: [] }, "planPrices"],
       [{ ...createBody, menuProductIds: [String(new mongoose.Types.ObjectId())] }, "menuProductIds"],
       [{ ...createBody, planPrices: [{ basePlanId: String(new mongoose.Types.ObjectId()), priceHalala: 1 }] }, "basePlanIds"],

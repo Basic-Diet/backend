@@ -379,7 +379,7 @@ async function run() {
   };
 
   // Test D — Production repro: 7 juice items, balance=7, menuProductIds=[3 IDs]
-  // Expected: ALL 7 must be source="subscription" (bug was: only first 3 were)
+  // Expected: ONLY the 3 explicit products in menuProductIds must be source="subscription", others must be pending_payment (since category linking is reverted to product linking)
   const testDDay = { addonSelections: [] };
   await reconcileAddonInclusions(
     productionReplicaSub,
@@ -393,19 +393,23 @@ async function run() {
   assert.strictEqual(testDDay.addonSelections.length, 7,
     "Test D: all 7 juice selections must be present");
   assert.strictEqual(
-    testDDay.addonSelections.filter((s) => s.source === "subscription").length, 7,
-    "Test D: all 7 juices must be source=subscription when balance=7 (Rule-of-3 regression)"
+    testDDay.addonSelections.filter((s) => s.source === "subscription").length, 3,
+    "Test D: only 3 juices in menuProductIds must be source=subscription"
   );
   assert.strictEqual(
-    testDDay.addonSelections.filter((s) => s.source === "pending_payment").length, 0,
-    "Test D: zero juices must be pending_payment when balance covers all"
+    testDDay.addonSelections.filter((s) => s.source === "pending_payment").length, 4,
+    "Test D: 4 juices not in menuProductIds must be pending_payment"
   );
   testDDay.addonSelections.forEach((sel) => {
-    assert.strictEqual(sel.priceHalala, 0,
-      `Test D: ${String(sel.addonId)} must have priceHalala=0 as subscription-covered`);
+    const isExplicit = [JUICE_IDS.orange, JUICE_IDS.apple, JUICE_IDS.mango].includes(String(sel.addonId));
+    if (isExplicit) {
+      assert.strictEqual(sel.priceHalala, 0, `Test D: ${String(sel.addonId)} must have priceHalala=0`);
+    } else {
+      assert.strictEqual(sel.priceHalala, 1100, `Test D: ${String(sel.addonId)} must have priceHalala=1100`);
+    }
   });
 
-  // Test E — Partial balance: 7 juice items, balance=5 → 5 subscription + 2 pending_payment
+  // Test E — Partial balance: 7 juice items, balance=5 → 3 subscription + 4 pending_payment
   const partialSub = {
     status: "active",
     addonBalance: [
@@ -441,12 +445,12 @@ async function run() {
   assert.strictEqual(testEDay.addonSelections.length, 7,
     "Test E: all 7 juice selections must be present");
   assert.strictEqual(
-    testEDay.addonSelections.filter((s) => s.source === "subscription").length, 5,
-    "Test E: exactly 5 juices must be subscription-covered (balance=5)"
+    testEDay.addonSelections.filter((s) => s.source === "subscription").length, 3,
+    "Test E: exactly 3 juices must be subscription-covered (since only 3 match menuProductIds)"
   );
   assert.strictEqual(
-    testEDay.addonSelections.filter((s) => s.source === "pending_payment").length, 2,
-    "Test E: exactly 2 juices must be pending_payment (balance exhausted)"
+    testEDay.addonSelections.filter((s) => s.source === "pending_payment").length, 4,
+    "Test E: exactly 4 juices must be pending_payment"
   );
   testEDay.addonSelections
     .filter((s) => s.source === "pending_payment")
@@ -489,8 +493,8 @@ async function run() {
   assert.strictEqual(testGDay.addonSelections.length, 5,
     "Test G: 5 total selections");
   assert.strictEqual(
-    testGDay.addonSelections.filter((s) => s.category === "juice" && s.source === "subscription").length, 3,
-    "Test G: 3 juice items are subscription"
+    testGDay.addonSelections.filter((s) => s.category === "juice" && s.source === "subscription").length, 1,
+    "Test G: 1 juice item is subscription (only orange is in menuProductIds)"
   );
   assert.strictEqual(
     testGDay.addonSelections.filter((s) => s.category === "small_salad" && s.source === "subscription").length, 2,

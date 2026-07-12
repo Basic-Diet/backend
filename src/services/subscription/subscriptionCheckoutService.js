@@ -462,7 +462,7 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
           totalHalala: sub.totalHalala,
           currency: sub.currency,
           menuProductIds: sub.menuProductIds,
-          menuCategoryKeys: sub.menuCategoryKeys || [],
+          menuCategoryKeys: [],
           priceSource: sub.priceSource,
         })),
         promo: quote.promoCode

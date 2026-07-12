@@ -211,6 +211,9 @@ function findAddonEntitlementForChoice(subscription, category, addonId = null) {
   const entitlements = Array.isArray(subscription && subscription.addonSubscriptions) ? subscription.addonSubscriptions : [];
   return entitlements.find((entry) => {
     if (!entry) return false;
+    if (addonId && Array.isArray(entry.menuProductIds) && entry.menuProductIds.length > 0) {
+      return entry.menuProductIds.some(pid => String(pid) === String(addonId));
+    }
     if (category && entry.category === category) return true;
     if (addonId && String(entry.addonId || entry.addonPlanId || "") === String(addonId)) return true;
     return false;

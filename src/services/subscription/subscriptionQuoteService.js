@@ -922,18 +922,7 @@ async function resolveCheckoutQuoteOrThrow(
   const basePlanNetHalala = divisor > 0 ? Math.round(basePlanPriceHalala / divisor) : basePlanPriceHalala;
   const addonSubscriptions = [];
   for (const item of resolvedAddonItems) {
-    let resolvedProductIds = (item.addon.menuProductIds || []).map(String);
-    if (Array.isArray(item.addon.menuCategoryKeys) && item.addon.menuCategoryKeys.length > 0) {
-      const MenuCategory = require("../../models/MenuCategory");
-      const MenuProduct = require("../../models/MenuProduct");
-      const cats = await MenuCategory.find({ key: { $in: item.addon.menuCategoryKeys } }).select("_id").lean();
-      if (cats.length > 0) {
-        const catIds = cats.map(c => c._id);
-        const catProds = await MenuProduct.find({ categoryId: { $in: catIds }, isActive: true }).select("_id").lean();
-        const catProdIds = catProds.map(p => String(p._id));
-        resolvedProductIds = Array.from(new Set([...resolvedProductIds, ...catProdIds]));
-      }
-    }
+    const resolvedProductIds = (item.addon.menuProductIds || []).map(String);
     addonSubscriptions.push({
       addonId: item.addon._id,
       addonPlanId: item.addon._id,
@@ -950,7 +939,7 @@ async function resolveCheckoutQuoteOrThrow(
       totalHalala: Number(item.totalHalala || 0),
       currency: item.currency || SYSTEM_CURRENCY,
       menuProductIds: resolvedProductIds,
-      menuCategoryKeys: item.addon.menuCategoryKeys || [],
+      menuCategoryKeys: [],
       priceSource: "base_plan_addon_price",
     });
   }

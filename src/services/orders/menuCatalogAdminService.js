@@ -273,7 +273,7 @@ function createMenuCatalogAdminService(deps) {
       if (!["one_time", "subscription"].includes(channel)) {
         throw new MenuValidationError("availableFor contains an unsupported channel");
       }
-      query.availableFor = channel;
+      query.availableFor = { $in: [channel] };
     }
 
     if (itemType !== undefined && itemType !== null && String(itemType).trim() !== "") {
@@ -380,7 +380,7 @@ function createMenuCatalogAdminService(deps) {
         productQuery.isAvailable = normalizeBoolean(options.isAvailable, "isAvailable");
       }
       if (options.availableFor) {
-        productQuery.availableFor = options.availableFor;
+        productQuery.availableFor = { $in: [options.availableFor] };
       }
       
       const products = await MenuProduct.find(productQuery).select("categoryId").lean();
