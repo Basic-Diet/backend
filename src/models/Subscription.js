@@ -86,6 +86,7 @@ const AddonSubscriptionEntitlementSchema = new mongoose.Schema(
     totalHalala: { type: Number, min: 0, default: 0 },
     currency: { type: String, default: "SAR" },
     menuProductIds: { type: [mongoose.Schema.Types.ObjectId], ref: "MenuProduct", default: [] },
+    menuCategoryKeys: { type: [String], default: [] },
     priceSource: { type: String, default: "" },
   },
   { _id: false }

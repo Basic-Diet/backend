@@ -147,6 +147,7 @@ function buildPhase1SubscriptionContract({ payload = {}, resolvedQuote, actorCon
     totalHalala: Number(as.totalHalala || 0),
     currency: String(as.currency || "SAR"),
     menuProductIds: as.menuProductIds || [],
+    menuCategoryKeys: as.menuCategoryKeys || [],
     priceSource: as.priceSource || "",
   }));
 

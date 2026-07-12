@@ -418,7 +418,7 @@ async function runTests() {
       {
         resolveChoiceProductById: async (id) => {
           if (id === String(forbiddenProduct._id)) {
-            return { product: forbiddenProduct, addonCategory: "snack" };
+            return { product: forbiddenProduct, addonCategory: "juice" };
           }
           return null;
         },

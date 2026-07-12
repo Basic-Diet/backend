@@ -920,24 +920,40 @@ async function resolveCheckoutQuoteOrThrow(
 
   const divisor = 1 + (vatPercentage / 100);
   const basePlanNetHalala = divisor > 0 ? Math.round(basePlanPriceHalala / divisor) : basePlanPriceHalala;
-  const addonSubscriptions = resolvedAddonItems.map((item) => ({
-    addonId: item.addon._id,
-    addonPlanId: item.addon._id,
-    name: pickLang(item.addon.name, lang),
-    addonPlanName: pickLang(item.addon.name, lang),
-    category: item.category || item.addon.category,
-    maxPerDay: item.addon.maxPerDay || 1,
-    basePlanId: plan._id,
-    priceHalala: Number(item.unitPriceHalala || 0),
-    quantityPerDay: Number(item.quantityPerDay || item.qty || 1),
-    purchasedDailyQty: Number(item.quantityPerDay || item.qty || 1),
-    includedTotalQty: Number(item.includedTotalQty || 0),
-    unitPlanPriceHalala: Number(item.unitPlanPriceHalala || item.unitPriceHalala || 0),
-    totalHalala: Number(item.totalHalala || 0),
-    currency: item.currency || SYSTEM_CURRENCY,
-    menuProductIds: item.addon.menuProductIds || [],
-    priceSource: "base_plan_addon_price",
-  }));
+  const addonSubscriptions = [];
+  for (const item of resolvedAddonItems) {
+    let resolvedProductIds = (item.addon.menuProductIds || []).map(String);
+    if (Array.isArray(item.addon.menuCategoryKeys) && item.addon.menuCategoryKeys.length > 0) {
+      const MenuCategory = require("../../models/MenuCategory");
+      const MenuProduct = require("../../models/MenuProduct");
+      const cats = await MenuCategory.find({ key: { $in: item.addon.menuCategoryKeys } }).select("_id").lean();
+      if (cats.length > 0) {
+        const catIds = cats.map(c => c._id);
+        const catProds = await MenuProduct.find({ categoryId: { $in: catIds }, isActive: true }).select("_id").lean();
+        const catProdIds = catProds.map(p => String(p._id));
+        resolvedProductIds = Array.from(new Set([...resolvedProductIds, ...catProdIds]));
+      }
+    }
+    addonSubscriptions.push({
+      addonId: item.addon._id,
+      addonPlanId: item.addon._id,
+      name: pickLang(item.addon.name, lang),
+      addonPlanName: pickLang(item.addon.name, lang),
+      category: item.category || item.addon.category,
+      maxPerDay: item.addon.maxPerDay || 1,
+      basePlanId: plan._id,
+      priceHalala: Number(item.unitPriceHalala || 0),
+      quantityPerDay: Number(item.quantityPerDay || item.qty || 1),
+      purchasedDailyQty: Number(item.quantityPerDay || item.qty || 1),
+      includedTotalQty: Number(item.includedTotalQty || 0),
+      unitPlanPriceHalala: Number(item.unitPlanPriceHalala || item.unitPriceHalala || 0),
+      totalHalala: Number(item.totalHalala || 0),
+      currency: item.currency || SYSTEM_CURRENCY,
+      menuProductIds: resolvedProductIds,
+      menuCategoryKeys: item.addon.menuCategoryKeys || [],
+      priceSource: "base_plan_addon_price",
+    });
+  }
 
   let quote = {
     plan,

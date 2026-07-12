@@ -33,7 +33,24 @@ async function invoke(handler, { body = {}, params = {}, query = {} } = {}) {
   return res;
 }
 
-const planKeys = ["archivedAt", "category", "id", "isActive", "isArchived", "kind", "maxPerDay", "menuProductIds", "menuProducts", "name", "planPrices", "type"];
+const planKeys = [
+  "archivedAt",
+  "category",
+  "id",
+  "isActive",
+  "isArchived",
+  "kind",
+  "maxPerDay",
+  "menuCategories",
+  "menuCategoryKeys",
+  "menuProductIds",
+  "menuProducts",
+  "name",
+  "planPrices",
+  "resolvedMenuProductIds",
+  "resolvedMenuProductsCount",
+  "type"
+];
 const productKeys = ["category", "id", "image", "isActive", "key", "name"];
 const priceKeys = ["basePlanId", "basePlanName", "daysCount", "isActive", "mealsCount", "priceHalala", "priceLabel", "priceSar"];
 
@@ -46,6 +63,8 @@ async function main() {
       key: "snacks",
       name: { ar: "وجبات خفيفة", en: "Snacks" },
       isActive: true,
+      isVisible: true,
+      isAvailable: true,
     });
     const product = await MenuProduct.create({
       categoryId: category._id,
@@ -54,6 +73,8 @@ async function main() {
       priceHalala: 900,
       availableFor: ["subscription"],
       isActive: true,
+      isVisible: true,
+      isAvailable: true,
     });
     const basePlan = await Plan.create({
       name: { ar: "سبعة أيام", en: "Seven Days" },
@@ -65,6 +86,13 @@ async function main() {
       isActive: true,
       currency: "SAR",
     });
+
+    // Test Category Picker API
+    const menuCatalogService = require("../src/services/orders/menuCatalogService");
+    const pickerRes = await menuCatalogService.listCategories({ view: "picker", availableFor: "subscription", isVisible: "true", isAvailable: "true" });
+    assert.strictEqual(pickerRes.length, 1);
+    assert.strictEqual(pickerRes[0].key, "snacks");
+    assert.strictEqual(pickerRes[0].productsCount, 1);
 
     const createBody = {
       name: { ar: "اشتراك الزبادي", en: "Yogurt Subscription" },
@@ -82,7 +110,30 @@ async function main() {
     assert.strictEqual(created.body.data.menuProducts[0].id, String(product._id));
     assert.strictEqual(created.body.data.planPrices[0].basePlanId, String(basePlan._id));
     assert.strictEqual(created.body.data.planPrices[0].priceHalala, 7000);
+    assert.deepStrictEqual(created.body.data.resolvedMenuProductIds, [String(product._id)]);
+    assert.strictEqual(created.body.data.resolvedMenuProductsCount, 1);
     const addonId = created.body.data.id;
+
+    // Test Category-Linked Addon Creation
+    const categoryLinkedBody = {
+      name: { ar: "اشتراك السناك بالتصنيف", en: "Category Snack Subscription" },
+      category: "snack",
+      maxPerDay: 1,
+      isActive: true,
+      menuCategoryKeys: ["snacks"],
+      planPrices: [{ basePlanId: String(basePlan._id), priceHalala: 6000, isActive: true }],
+    };
+    const catCreated = await invoke(createDashboardAddonPlan, { body: categoryLinkedBody });
+    assert.strictEqual(catCreated.statusCode, 201);
+    assert.deepStrictEqual(catCreated.body.data.menuCategoryKeys, ["snacks"]);
+    assert.strictEqual(catCreated.body.data.menuCategories.length, 1);
+    assert.strictEqual(catCreated.body.data.menuCategories[0].key, "snacks");
+    assert.deepStrictEqual(catCreated.body.data.resolvedMenuProductIds, [String(product._id)]);
+    assert.strictEqual(catCreated.body.data.resolvedMenuProductsCount, 1);
+
+    await Addon.deleteOne({ _id: catCreated.body.data.id });
+    await AddonPlanPrice.deleteMany({ addonPlanId: catCreated.body.data.id });
+
 
     assert.strictEqual(await MenuProduct.countDocuments(), 1, "POST links products; it must not create them");
     assert.strictEqual(await AddonPlanPrice.countDocuments({ addonPlanId: addonId, basePlanId: basePlan._id }), 1);
@@ -135,7 +186,9 @@ async function main() {
     const invalidCases = [
       [{ ...createBody, name: { ar: "", en: "Missing Arabic" } }, "name.ar"],
       [{ ...createBody, isActive: "true" }, "isActive"],
-      [{ ...createBody, menuProductIds: [] }, "menuProductIds"],
+      [{ ...createBody, menuProductIds: [], menuCategoryKeys: [] }, "At least one of menuProductIds or menuCategoryKeys is required"],
+      [{ ...createBody, menuCategoryKeys: ["non_existent_category_key"] }, "One or more menuCategoryKeys do not exist"],
+      [{ ...createBody, menuCategoryKeys: ["snacks", "snacks"] }, "Duplicate menuCategoryKeys are not allowed"],
       [{ ...createBody, planPrices: [] }, "planPrices"],
       [{ ...createBody, menuProductIds: [String(new mongoose.Types.ObjectId())] }, "menuProductIds"],
       [{ ...createBody, planPrices: [{ basePlanId: String(new mongoose.Types.ObjectId()), priceHalala: 1 }] }, "basePlanIds"],

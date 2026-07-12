@@ -48,6 +48,7 @@ function matchesCondition(row, condition) {
     const value = row[key];
     if (expected && typeof expected === "object" && !Array.isArray(expected)) {
       if (Array.isArray(expected.$in)) return expected.$in.includes(value);
+      if (expected.hasOwnProperty('$ne')) return value !== expected.$ne;
     }
     return value === expected;
   });
@@ -149,7 +150,7 @@ async function run() {
     addonRows.snackItem,
   ];
 
-  assert.deepStrictEqual(resolvePublicAddonFilters({}), { isActive: true });
+  assert.deepStrictEqual(resolvePublicAddonFilters({}), { isActive: true, isArchived: { $ne: true } });
   assert.strictEqual(resolvePublicAddonFilters({ type: "subscription" }).isActive, true);
   assert(resolvePublicAddonFilters({ type: "subscription" }).$or.some((condition) => condition.kind === "plan"));
   assert(resolvePublicAddonFilters({ type: "subscription" }).$or.some((condition) => condition.billingMode));
@@ -205,7 +206,7 @@ async function run() {
     query: {},
     rows: allRows,
   });
-  assert.deepStrictEqual(legacyResult.findCalls[0], { isActive: true });
+  assert.deepStrictEqual(legacyResult.findCalls[0], { isActive: true, isArchived: { $ne: true } });
   assert.strictEqual(legacyResult.res.body.data.length, 5);
 
   const invalidResult = await invokeListAddons({

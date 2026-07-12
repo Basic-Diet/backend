@@ -221,6 +221,13 @@ async function runTests() {
           name: "Small Salad Subscription",
           maxPerDay: 1,
         }
+      ],
+      addonBalance: [
+        {
+          addonId: saladSubDoc._id,
+          category: "small_salad",
+          remainingQty: 7,
+        }
       ]
     };
 

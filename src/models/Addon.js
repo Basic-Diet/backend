@@ -77,6 +77,11 @@ const AddonSchema = new mongoose.Schema(
       default: [],
     },
 
+    menuCategoryKeys: {
+      type: [String],
+      default: [],
+    },
+
     maxPerDay: {
       type: Number,
       default: 1,

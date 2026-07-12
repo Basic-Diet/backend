@@ -258,8 +258,13 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null, dashboardPlanC
         return id;
       })
     : [];
-  if (dashboardPlanCreate && menuProductIds.length === 0) {
-    throw { status: 400, code: "INVALID", message: "menuProductIds must contain at least one item" };
+
+  const menuCategoryKeys = Array.isArray(payload.menuCategoryKeys)
+    ? payload.menuCategoryKeys.map(k => String(k).trim()).filter(Boolean)
+    : [];
+
+  if (dashboardPlanCreate && menuProductIds.length === 0 && menuCategoryKeys.length === 0) {
+    throw { status: 400, code: "INVALID", message: "At least one of menuProductIds or menuCategoryKeys is required" };
   }
 
   let maxPerDay = 1;
@@ -286,6 +291,7 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null, dashboardPlanC
     sortOrder,
     menuProductId,
     menuProductIds,
+    menuCategoryKeys,
     maxPerDay,
     ...derivedBillingFields,
     billingMode,
@@ -466,6 +472,7 @@ async function buildFullyPopulatedAddonDetail(addonId, { includeInternal = false
   const data = { ...cleanRow };
   data.id = String(row._id);
   data.menuProductIds = row.menuProductIds || [];
+  data.menuCategoryKeys = row.menuCategoryKeys || [];
   data.menuProductsCount = data.menuProductIds.length;
 
   if (row.kind === "plan") {
@@ -473,7 +480,20 @@ async function buildFullyPopulatedAddonDetail(addonId, { includeInternal = false
       priceHalala, priceSar, priceLabel, billingMode, billingUnit, price, menuProductId,
     };
 
-    // 1. Fetch menuProducts
+    // 1. Fetch menuCategories matching keys
+    const MenuCategory = require("../models/MenuCategory");
+    let catsQuery = MenuCategory.find({ key: { $in: data.menuCategoryKeys } });
+    if (session) catsQuery = catsQuery.session(session);
+    const cats = await catsQuery.lean();
+
+    data.menuCategories = cats.map(c => ({
+      id: String(c._id),
+      key: c.key,
+      name: c.name || { ar: "", en: "" },
+      isActive: c.isActive !== false,
+    }));
+
+    // 2. Fetch menuProducts for menuProductIds
     let prodsQuery = MenuProduct.find({ _id: { $in: data.menuProductIds } }).populate("categoryId");
     if (session) prodsQuery = prodsQuery.session(session);
     const prods = await prodsQuery.lean();
@@ -488,7 +508,20 @@ async function buildFullyPopulatedAddonDetail(addonId, { includeInternal = false
       isActive: p.isActive,
     }));
 
-    // 2. Fetch planPrices
+    // 3. Resolve union of products
+    let catProductIds = [];
+    if (cats.length > 0) {
+      const catIds = cats.map(c => c._id);
+      let catProdsQuery = MenuProduct.find({ categoryId: { $in: catIds }, isActive: true }).select("_id");
+      if (session) catProdsQuery = catProdsQuery.session(session);
+      const catProds = await catProdsQuery.lean();
+      catProductIds = catProds.map(p => String(p._id));
+    }
+    const explicitProductIds = data.menuProductIds.map(String);
+    data.resolvedMenuProductIds = Array.from(new Set([...explicitProductIds, ...catProductIds]));
+    data.resolvedMenuProductsCount = data.resolvedMenuProductIds.length;
+
+    // 4. Fetch planPrices
     const matchQuery = includeInternal === true ? {} : Plan.getSellableQuery();
     let pricesQuery = AddonPlanPrice.find({ addonPlanId: row._id }).populate({ path: "basePlanId", match: matchQuery });
     if (session) pricesQuery = pricesQuery.session(session);
@@ -540,6 +573,9 @@ async function buildFullyPopulatedAddonDetail(addonId, { includeInternal = false
     data.price = price;
     data.menuProductId = menuProductId;
     data.menuProducts = [];
+    data.menuCategories = [];
+    data.resolvedMenuProductIds = [];
+    data.resolvedMenuProductsCount = 0;
     data.planPrices = [];
     data.planPricesCount = 0;
   }
@@ -582,6 +618,10 @@ function toDashboardAddonPlanLeanDTO(plan) {
     isArchived: plan.isArchived === true,
     archivedAt: plan.archivedAt || null,
     menuProductIds: (plan.menuProductIds || []).map(String),
+    menuCategoryKeys: plan.menuCategoryKeys || [],
+    menuCategories: plan.menuCategories || [],
+    resolvedMenuProductIds: plan.resolvedMenuProductIds || [],
+    resolvedMenuProductsCount: plan.resolvedMenuProductsCount || 0,
     menuProducts: (plan.menuProducts || []).map(toDashboardMenuProductPickerDTO),
     planPrices: (plan.planPrices || []).map(toDashboardPlanPriceLeanDTO)
   };
@@ -644,6 +684,7 @@ async function listAddonsAdmin(req, res, options = {}) {
           id: String(row._id),
           ...cleanRow,
           menuProductIds,
+          menuCategoryKeys: row.menuCategoryKeys || [],
           menuProductsCount,
           planPricesCount,
           pricingMode: row.kind === "plan" ? "base_plan_matrix" : undefined,
@@ -822,13 +863,27 @@ async function createAddon(req, res, options = {}) {
     }
 
     if (options.dashboardPlanCreate) {
-      const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
-      if (uniqueProductIds.length !== payload.menuProductIds.length) {
-        throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
+      if (payload.menuProductIds && payload.menuProductIds.length > 0) {
+        const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
+        if (uniqueProductIds.length !== payload.menuProductIds.length) {
+          throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
+        }
+        const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
+        if (productCount !== payload.menuProductIds.length) {
+          throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
+        }
       }
-      const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
-      if (productCount !== payload.menuProductIds.length) {
-        throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
+
+      if (payload.menuCategoryKeys && payload.menuCategoryKeys.length > 0) {
+        const uniqueCategoryKeys = [...new Set(payload.menuCategoryKeys.map(String))];
+        if (uniqueCategoryKeys.length !== payload.menuCategoryKeys.length) {
+          throw { status: 400, code: "INVALID", message: "Duplicate menuCategoryKeys are not allowed" };
+        }
+        const MenuCategory = require("../models/MenuCategory");
+        const categoryCount = await MenuCategory.countDocuments({ key: { $in: payload.menuCategoryKeys } });
+        if (categoryCount !== payload.menuCategoryKeys.length) {
+          throw { status: 400, code: "INVALID", message: "One or more menuCategoryKeys do not exist" };
+        }
       }
     }
 
@@ -973,6 +1028,31 @@ async function updateAddon(req, res, options = {}) {
       }
     }
 
+    if (options.dashboardPlanCreate) {
+      if (payload.menuProductIds && payload.menuProductIds.length > 0) {
+        const uniqueProductIds = [...new Set(payload.menuProductIds.map(String))];
+        if (uniqueProductIds.length !== payload.menuProductIds.length) {
+          throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
+        }
+        const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
+        if (productCount !== payload.menuProductIds.length) {
+          throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
+        }
+      }
+
+      if (payload.menuCategoryKeys && payload.menuCategoryKeys.length > 0) {
+        const uniqueCategoryKeys = [...new Set(payload.menuCategoryKeys.map(String))];
+        if (uniqueCategoryKeys.length !== payload.menuCategoryKeys.length) {
+          throw { status: 400, code: "INVALID", message: "Duplicate menuCategoryKeys are not allowed" };
+        }
+        const MenuCategory = require("../models/MenuCategory");
+        const categoryCount = await MenuCategory.countDocuments({ key: { $in: payload.menuCategoryKeys } });
+        if (categoryCount !== payload.menuCategoryKeys.length) {
+          throw { status: 400, code: "INVALID", message: "One or more menuCategoryKeys do not exist" };
+        }
+      }
+    }
+
     const imageState = await resolveManagedImageFromRequest({
       body: req.body,
       file: req.file,
@@ -1068,6 +1148,19 @@ async function patchAddon(req, res, options = {}) {
         validateObjectId(id, "menuProductIds");
         return id;
       });
+    }
+
+    if (req.body.menuCategoryKeys !== undefined) {
+      if (!Array.isArray(req.body.menuCategoryKeys)) {
+        return errorResponse(res, 400, "INVALID", "menuCategoryKeys must be an array");
+      }
+      payload.menuCategoryKeys = req.body.menuCategoryKeys.map(k => String(k).trim()).filter(Boolean);
+    }
+
+    const finalProductIds = payload.menuProductIds !== undefined ? payload.menuProductIds : existing.menuProductIds;
+    const finalCategoryKeys = payload.menuCategoryKeys !== undefined ? payload.menuCategoryKeys : existing.menuCategoryKeys;
+    if (existing.kind === "plan" && (!finalProductIds || finalProductIds.length === 0) && (!finalCategoryKeys || finalCategoryKeys.length === 0)) {
+      return errorResponse(res, 400, "INVALID", "At least one of menuProductIds or menuCategoryKeys is required for plan");
     }
 
     if (req.body.maxPerDay !== undefined && req.body.maxPerDay !== null) {

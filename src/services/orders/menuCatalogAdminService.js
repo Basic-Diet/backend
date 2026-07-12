@@ -369,6 +369,70 @@ function createMenuCatalogAdminService(deps) {
   }
 
   async function listCategories(options = {}) {
+    if (options.view === "picker") {
+      const categoryQuery = buildListQuery(options);
+      
+      const productQuery = { isActive: true };
+      if (options.isVisible !== undefined && options.isVisible !== null && String(options.isVisible).trim() !== "") {
+        productQuery.isVisible = normalizeBoolean(options.isVisible, "isVisible");
+      }
+      if (options.isAvailable !== undefined && options.isAvailable !== null && String(options.isAvailable).trim() !== "") {
+        productQuery.isAvailable = normalizeBoolean(options.isAvailable, "isAvailable");
+      }
+      if (options.availableFor) {
+        productQuery.availableFor = options.availableFor;
+      }
+      
+      const products = await MenuProduct.find(productQuery).select("categoryId").lean();
+      const countMap = new Map();
+      for (const p of products) {
+        if (!p.categoryId) continue;
+        const cid = String(p.categoryId);
+        countMap.set(cid, (countMap.get(cid) || 0) + 1);
+      }
+      
+      const pagination = parsePaginationOptions(options);
+      const find = MenuCategory.find(categoryQuery)
+        .sort({ sortOrder: 1, createdAt: -1 })
+        .lean();
+        
+      let categoryDocs = [];
+      let total = 0;
+      if (!pagination) {
+        categoryDocs = await find;
+        total = categoryDocs.length;
+      } else {
+        [categoryDocs, total] = await Promise.all([
+          find.skip(pagination.skip).limit(pagination.limit),
+          MenuCategory.countDocuments(categoryQuery),
+        ]);
+      }
+      
+      const items = categoryDocs.map((c) => ({
+        id: String(c._id),
+        key: c.key,
+        name: c.name || { ar: "", en: "" },
+        isActive: c.isActive !== false,
+        isVisible: c.isVisible !== false,
+        isAvailable: c.isAvailable !== false,
+        productsCount: countMap.get(String(c._id)) || 0,
+      }));
+      
+      if (!pagination) {
+        return items;
+      }
+      
+      return {
+        items,
+        pagination: {
+          page: pagination.page,
+          limit: pagination.limit,
+          total,
+          pages: Math.ceil(total / pagination.limit),
+        },
+      };
+    }
+
     return listModel(MenuCategory, options);
   }
 
