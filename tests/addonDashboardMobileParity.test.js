@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
 const Addon = require("../src/models/Addon");
+const AddonPlanPrice = require("../src/models/AddonPlanPrice");
 const MenuCategory = require("../src/models/MenuCategory");
 const MenuProduct = require("../src/models/MenuProduct");
 const Plan = require("../src/models/Plan");
@@ -52,6 +53,7 @@ async function main() {
     replSet: { storageEngine: "wiredTiger" },
   });
   await mongoose.connect(mongo.getUri(`addon_dashboard_mobile_parity_${Date.now()}`));
+  await AddonPlanPrice.init();
 
   try {
     const category = await MenuCategory.create({
