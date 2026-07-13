@@ -215,6 +215,7 @@ async function main() {
       totalMeals: 7,
       remainingMeals: 7,
       duration: 7,
+      deliveryMode: "pickup",
       addonSubscriptions: [{
         addonId: created.body.data.id,
         addonPlanId: created.body.data.id,
