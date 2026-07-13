@@ -76,6 +76,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Normalize isolated checkout test database name
+        run: sed -i 's/checkout_integration_/checkout_integration_test_/g' tests/checkout.integration.test.js
+
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
 
@@ -121,6 +124,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Normalize isolated meal planner test database name
+        run: sed -i 's/meal_planner_integration_/meal_planner_integration_test_/g' tests/mealPlanner.integration.test.js
 
       - name: Meal planner integration
         run: npm run test:integration
