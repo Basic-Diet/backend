@@ -23,7 +23,6 @@ DraftPremiumItemSchema.pre("validate", function (next) {
   next();
 });
 
-
 const DraftAddonSubscriptionSchema = new mongoose.Schema(
   {
     addonId: { type: mongoose.Schema.Types.ObjectId, ref: "Addon" }, // The Category Plan ID
@@ -185,4 +184,73 @@ CheckoutDraftSchema.index({ paymentId: 1 }, { sparse: true });
 CheckoutDraftSchema.index({ providerInvoiceId: 1 }, { sparse: true });
 CheckoutDraftSchema.index({ "invoiceInitialization.status": 1, "invoiceInitialization.startedAt": 1 });
 
-module.exports = mongoose.model("CheckoutDraft", CheckoutDraftSchema);
+function isIdempotencyDuplicateKeyError(err) {
+  if (!err || err.code !== 11000) return false;
+  const fields = Object.keys(err.keyPattern || err.keyValue || {});
+  if (fields.some((field) => field === "idempotencyKey" || field === "requestHash")) {
+    return true;
+  }
+  const message = String(err.message || "");
+  return message.includes("idempotencyKey") || message.includes("requestHash");
+}
+
+function idempotencyConflictError() {
+  const err = new Error("idempotencyKey is already used with a different checkout payload");
+  err.status = 409;
+  err.code = "IDEMPOTENCY_CONFLICT";
+  return err;
+}
+
+const CheckoutDraft = mongoose.model("CheckoutDraft", CheckoutDraftSchema);
+const originalCreate = CheckoutDraft.create.bind(CheckoutDraft);
+
+// Turn a database-level uniqueness race into the same idempotent result that a
+// caller would receive if the winning draft had been visible during the first
+// lookup. This is intentionally limited to single-document CheckoutDraft.create
+// calls; array/bulk/session variants preserve native Mongoose behavior.
+CheckoutDraft.create = async function createCheckoutDraftWithRaceRecovery(doc, ...args) {
+  if (!doc || Array.isArray(doc) || args.length > 0) {
+    return originalCreate(doc, ...args);
+  }
+
+  try {
+    return await originalCreate(doc);
+  } catch (err) {
+    if (!isIdempotencyDuplicateKeyError(err) || !doc.userId) {
+      throw err;
+    }
+
+    const idempotencyKey = String(doc.idempotencyKey || "").trim();
+    const requestHash = String(doc.requestHash || "").trim();
+
+    if (idempotencyKey) {
+      const existingByKey = await CheckoutDraft.findOne({
+        userId: doc.userId,
+        idempotencyKey,
+      }).sort({ createdAt: -1 });
+
+      if (existingByKey) {
+        const existingHash = String(existingByKey.requestHash || "").trim();
+        if (requestHash && existingHash && existingHash !== requestHash) {
+          throw idempotencyConflictError();
+        }
+        return existingByKey;
+      }
+    }
+
+    if (requestHash) {
+      const existingByHash = await CheckoutDraft.findOne({
+        userId: doc.userId,
+        requestHash,
+        status: "pending_payment",
+      }).sort({ createdAt: -1 });
+      if (existingByHash) {
+        return existingByHash;
+      }
+    }
+
+    throw err;
+  }
+};
+
+module.exports = CheckoutDraft;
