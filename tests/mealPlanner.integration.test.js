@@ -908,7 +908,7 @@ async function runTests() {
     assertEqual(defaultRes.body.status, true, 'default response status');
     assertNoTopLevelOk(defaultRes.body, 'default meal-planner-menu response');
     assertTrue(!!defaultRes.body.data?.builderCatalog, 'default builderCatalog');
-    assertTrue(!!defaultRes.body.data?.builderCatalogV2, 'default builderCatalogV2 compatibility field');
+    assertEqual(defaultRes.body.data?.builderCatalogV2, undefined, 'default v3 response hides builderCatalogV2');
     assertTrue(!!defaultRes.body.data?.plannerCatalog, 'default plannerCatalog');
     assertEqual(defaultRes.body.data?.plannerCatalog?.contractVersion, 'meal_planner_menu.v3', 'default plannerCatalog v3 contract');
     assertTrue(!!defaultRes.body.data?.addonCatalog, 'default addonCatalog');
@@ -949,19 +949,19 @@ async function runTests() {
     );
   });
   
-  await test('builderCatalogV2 default exposes premium meal compatibility section', async () => {
-    const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu');
+  await test('explicit builderCatalogV2 exposes premium meal compatibility section', async () => {
+    const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu?contractVersion=v2');
     const premiumSection = findPlannerSection(res.body.data?.builderCatalogV2, 'premium_meal');
     const premiumProduct = findPlannerProduct(premiumSection, 'premium_meal');
     const proteinGroup = findPlannerGroup(premiumProduct, 'protein');
-    assertTrue(!!premiumSection, 'builderCatalogV2 premium_meal section present by default');
+    assertTrue(!!premiumSection, 'builderCatalogV2 premium_meal section present when v2 is requested');
     assertTrue(!!premiumProduct, 'builderCatalogV2 premium_meal virtual product present');
     assertTrue(!!proteinGroup, 'builderCatalogV2 premium protein group present');
     assertEqual(premiumProduct?.selectionType, 'premium_meal', 'premium product selectionType');
   });
   
-  await test('builderCatalogV2 default has premium_large_salad compatibility product', async () => {
-    const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu');
+  await test('explicit builderCatalogV2 has premium_large_salad compatibility product', async () => {
+    const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu?contractVersion=v2');
     const saladSection = findPlannerSection(res.body.data?.builderCatalogV2, 'premium_large_salad');
     const salad = findPlannerProduct(saladSection, 'premium_large_salad');
     assertTrue(!!saladSection, 'premium_large_salad compatibility section present');
@@ -974,11 +974,11 @@ async function runTests() {
     assertTrue(Array.isArray(salad?.optionGroups), 'premium_large_salad optionGroups is an array');
   });
 
-  await test('builderCatalogV2 default sandwich section does not leak non-sandwich products', async () => {
-    const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu');
+  await test('explicit builderCatalogV2 sandwich section does not leak non-sandwich products', async () => {
+    const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu?contractVersion=v2');
     const sandwichSection = findPlannerSection(res.body.data?.builderCatalogV2, 'sandwich');
     const sandwiches = sandwichSection?.products || [];
-    assertTrue(!!sandwichSection, 'builderCatalogV2 sandwich section present by default');
+    assertTrue(!!sandwichSection, 'builderCatalogV2 sandwich section present when v2 is requested');
     assertTrue(!sandwiches.some((item) => item.id === String(nonSandwichMeal._id)), 'non-sandwich meal excluded');
   });
 
