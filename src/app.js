@@ -117,12 +117,24 @@ function createApp() {
   const allowedOrigins = parseConfiguredCorsOrigins();
   const corsOptions = {
     origin: (origin, callback) => {
-      // Temporarily allow ALL origins for testing purposes
-      return callback(null, true);
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Accept",
+      "Origin",
+      "X-Requested-With",
+      "Idempotency-Key",
+      "X-Idempotency-Key",
+      "X-Request-Id",
+      "X-Correlation-Id",
+    ],
   };
 
   app.use(cors(corsOptions));
@@ -160,29 +172,6 @@ function createApp() {
    *       503:
    *         description: Database unavailable
    */
-  
-  app.get("/debug/info", async (req, res) => {
-    try {
-      const mongoose = require('mongoose');
-      const Subscription = require('./models/Subscription');
-      const sub1 = await Subscription.findById('6a4ee0ae3f09c6ea6751c9c5').lean();
-      const sub2 = await Subscription.findById('6a4ee869f5f18c06748fdacc').lean();
-      
-      res.json({
-        commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.RENDER_GIT_COMMIT || 'unknown',
-        db_host: mongoose.connection.host,
-        db_name: mongoose.connection.name,
-        sub1_found: !!sub1,
-        sub2_found: !!sub2,
-        sub2_data: sub2 ? {
-          addonSubscriptions: sub2.addonSubscriptions,
-          addonBalance: sub2.addonBalance
-        } : null
-      });
-    } catch (e) {
-      res.json({ error: e.message });
-    }
-  });
 
   app.get("/health", async (_req, res) => {
     const state = mongoose.connection.readyState;
