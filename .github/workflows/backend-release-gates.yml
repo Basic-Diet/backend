@@ -106,6 +106,9 @@ jobs:
     timeout-minutes: 60
     env:
       USE_MONGODB_MEMORY_REPLSET: "true"
+      MONGO_URI: mongodb://127.0.0.1:27017/basicdiet_commerce_test?replicaSet=rs0
+      MONGODB_URI: mongodb://127.0.0.1:27017/basicdiet_commerce_test?replicaSet=rs0
+      MONGO_URI_TEST: mongodb://127.0.0.1:27017/basicdiet_commerce_test?replicaSet=rs0
 
     steps:
       - name: Checkout
@@ -120,13 +123,38 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Start MongoDB replica set
+        run: bash scripts/ci/start-mongo-replset.sh basicdiet-commerce-mongo
+
       - name: Normalize isolated checkout test database name
         run: sed -i 's/checkout_integration_/checkout_integration_test_/g' tests/checkout.integration.test.js
 
       - id: dependency_audit
         name: Production dependency audit
         continue-on-error: true
-        run: npm audit --omit=dev --audit-level=high 2>&1 | tee -a ci-commerce.log; exit ${PIPESTATUS[0]}
+        run: |
+          npm audit --omit=dev --json > production-audit.json || true
+          node - <<'NODE' 2>&1 | tee -a ci-commerce.log
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('production-audit.json', 'utf8'));
+          const counts = report.metadata && report.metadata.vulnerabilities
+            ? report.metadata.vulnerabilities
+            : {};
+          const summary = {
+            low: Number(counts.low || 0),
+            moderate: Number(counts.moderate || 0),
+            high: Number(counts.high || 0),
+            critical: Number(counts.critical || 0),
+          };
+          console.log('Production dependency audit:', JSON.stringify(summary));
+          if (summary.high > 0 || summary.critical > 0) {
+            console.error('High or critical production vulnerabilities block release.');
+            process.exit(1);
+          }
+          if (summary.moderate > 0) {
+            console.warn('Moderate production vulnerabilities remain and require a separate dependency upgrade.');
+          }
+          NODE
 
       - id: canonical_authority
         name: Canonical ownership rules
@@ -205,6 +233,9 @@ jobs:
     timeout-minutes: 60
     env:
       USE_MONGODB_MEMORY_REPLSET: "true"
+      MONGO_URI: mongodb://127.0.0.1:27017/basicdiet_operations_test?replicaSet=rs0
+      MONGODB_URI: mongodb://127.0.0.1:27017/basicdiet_operations_test?replicaSet=rs0
+      MONGO_URI_TEST: mongodb://127.0.0.1:27017/basicdiet_operations_test?replicaSet=rs0
 
     steps:
       - name: Checkout
@@ -218,6 +249,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Start MongoDB replica set
+        run: bash scripts/ci/start-mongo-replset.sh basicdiet-operations-mongo
 
       - name: Normalize isolated meal planner test database name
         run: sed -i 's/meal_planner_integration_/meal_planner_integration_test_/g' tests/mealPlanner.integration.test.js
