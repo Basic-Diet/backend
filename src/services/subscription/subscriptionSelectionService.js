@@ -17,9 +17,8 @@ const {
   validateCanonicalMealSlots,
 } = require("./canonicalMealSlotPlannerService");
 const { assertSubscriptionDayModifiable } = require("./subscriptionDayModificationPolicyService");
-const {
-  resolveAddonChoiceProductById,
-} = require("./subscriptionAddonChoicesService");
+const { reconcileAddonInclusions } = require("./subscriptionAddonAllocationService");
+const { findAddonBalanceBucket } = require("./subscriptionAddonPolicyService");
 const {
   buildDayCommercialState,
   finalizeDayCommercialStateForPersistence,
@@ -79,173 +78,6 @@ async function resolvePlanningSubscriptionForOperation(subscription, session = n
     subscription: resolvedSubscription,
     subscriptionId: resolvedSubscriptionId,
   };
-}
-
-async function reconcileAddonInclusions(
-  subscription,
-  day,
-  requestedAddonIds = [],
-  { resolveChoiceProductById = resolveAddonChoiceProductById } = {}
-) {
-
-  if (!Array.isArray(requestedAddonIds) || requestedAddonIds.length === 0) {
-    day.addonSelections = [];
-    return;
-  }
-
-  const choiceMap = new Map();
-  for (const addonId of requestedAddonIds) {
-    if (choiceMap.has(String(addonId))) continue;
-    const choice = await resolveChoiceProductById(addonId);
-    if (choice) choiceMap.set(String(addonId), choice);
-  }
-
-  // Build simulation map for remaining quantities
-  const simulatedRemaining = new Map();
-  const hasAddonBalance = Array.isArray(subscription && subscription.addonBalance) && subscription.addonBalance.length > 0;
-
-  // 2. Prepare the simulated remaining map per category
-  if (hasAddonBalance) {
-    for (const bucket of subscription.addonBalance) {
-      if (!bucket || !bucket.category) continue;
-      const cat = bucket.category;
-      let qty = Number(bucket.remainingQty || 0);
-
-      // Add back existing day selections that were already deducted
-      if (day && Array.isArray(day.addonSelections)) {
-        for (const sel of day.addonSelections) {
-          if (sel.source === "subscription" && sel.category === cat) {
-            qty += 1;
-          }
-        }
-      }
-      const current = simulatedRemaining.get(cat) || 0;
-      simulatedRemaining.set(cat, current + qty);
-    }
-  }
-
-  const newSelections = [];
-
-  for (const addonId of requestedAddonIds) {
-    const choice = choiceMap.get(String(addonId));
-    if (!choice) {
-      throw {
-        status: 400,
-        code: "INVALID_ONE_TIME_ADDON_SELECTION",
-        message: `Add-on choice ${String(addonId)} is not an active one-time MenuProduct in an allowed subscription add-on category`,
-      };
-    }
-
-    const doc = choice.product;
-    const category = choice.addonCategory;
-    const entitlement = findAddonEntitlementForChoice(subscription, category, addonId);
-
-
-    let source = "pending_payment";
-    const unitPriceHalala = doc.priceHalala || Math.round((doc.price || 0) * 100);
-    let priceHalala = unitPriceHalala;
-
-    // Preserve existing 'paid' selections if they match (to avoid re-charging)
-    const existingPaid = (day.addonSelections || []).find(
-      (s) => String(s.addonId) === String(addonId) && s.source === "paid"
-    );
-
-    if (existingPaid) {
-      newSelections.push(existingPaid);
-      continue;
-    }
-
-    // Balance deduction gate: any item whose addonCategory matches an entitlement
-    // category consumes subscription balance if simulatedRemaining > 0.
-    //
-    // menuProductIds on the entitlement is a CATALOG DISPLAY HINT only
-    // (used by buildAddonChoicesCatalog for isEligibleForAllowance).
-    // It must NEVER block balance deduction — a subscriber who purchased a
-    // juice plan is entitled to consume N juices of any juice product, not
-    // only those listed in menuProductIds.
-    //
-    // Items that exhaust the balance (rem == 0) fall through to
-    // pending_payment at the product's own priceHalala.
-    if (entitlement) {
-      let canCover = false;
-      const rem = simulatedRemaining.get(category) || 0;
-      if (rem > 0) {
-        canCover = true;
-        simulatedRemaining.set(category, rem - 1);
-      }
-
-      if (canCover) {
-        source = "subscription";
-        priceHalala = 0;
-      }
-    }
-
-
-    newSelections.push({
-      addonId: doc._id,
-      addonPlanId: entitlement ? (entitlement.addonPlanId || entitlement.addonId) : null,
-      name: resolveAddonSelectionName(doc),
-      category,
-      source,
-      priceHalala,
-      unitPriceHalala,
-      currency: doc.currency || "SAR",
-      consumedAt: new Date(),
-    });
-  }
-
-
-  day.addonSelections = newSelections;
-}
-
-function resolveAddonSelectionName(addonDoc) {
-  if (!addonDoc || addonDoc.name == null) return "";
-  if (typeof addonDoc.name === "string") return addonDoc.name;
-  if (typeof addonDoc.name === "object") {
-    return String(addonDoc.name.en || addonDoc.name.ar || "").trim();
-  }
-  return String(addonDoc.name || "").trim();
-}
-
-function findAddonEntitlementForChoice(subscription, category, addonId = null) {
-  const entitlements = Array.isArray(subscription && subscription.addonSubscriptions) ? subscription.addonSubscriptions : [];
-  return entitlements.find((entry) => {
-    if (!entry) return false;
-
-    // The resolver has already proved that the product is an active daily
-    // add-on in this canonical category. Entitlements grant category credits;
-    // menuProductIds is a catalog snapshot and must not cap those credits.
-    if (category && entry.category === category) return true;
-
-    // Backward-compatible fallback for legacy entitlement rows that predate
-    // category snapshots. Never let a mismatched modern category use this path.
-    if (!entry.category && addonId && Array.isArray(entry.menuProductIds)) {
-      return entry.menuProductIds.some(pid => String(pid) === String(addonId));
-    }
-    if (addonId && String(entry.addonId || entry.addonPlanId || "") === String(addonId)) return true;
-    return false;
-  }) || null;
-}
-
-function findAddonBalanceBucket(subscription, { addonId = null, addonPlanId = null, category = null, unitPriceHalala = null, requirePositiveRemaining = false } = {}) {
-  const balances = Array.isArray(subscription && subscription.addonBalance) ? subscription.addonBalance : [];
-  const entitlements = Array.isArray(subscription && subscription.addonSubscriptions) ? subscription.addonSubscriptions : [];
-  return balances.find((bucket) => {
-    if (!bucket) return false;
-    if (requirePositiveRemaining && Number(bucket.remainingQty || 0) <= 0) return false;
-    if (addonPlanId && String(bucket.addonPlanId || bucket.addonId || "") === String(addonPlanId)) return true;
-    if (addonId && String(bucket.addonId || "") === String(addonId)) return true;
-    if (category && bucket.category === category) return true;
-    if (category) {
-      return entitlements.some((entry) => {
-        const entryPlanId = String(entry.addonPlanId || entry.addonId || "");
-        const bucketPlanId = String(bucket.addonPlanId || bucket.addonId || "");
-        return entry.category === category && entryPlanId && entryPlanId === bucketPlanId;
-      });
-    }
-    if (unitPriceHalala !== null && Number(bucket.unitPriceHalala || 0) === Number(unitPriceHalala || 0)) return true;
-    return false;
-  }) || null;
 }
 
 async function consumePremiumBalanceAtomically({ subscription, dayId, date, premiumKey, session }) {
@@ -621,6 +453,41 @@ async function validateSelectionDateRangeOrThrow(date, sub, endDateOverride) {
 
 function clonePlain(value) {
   return JSON.parse(JSON.stringify(value || null));
+}
+
+function preservePersistedValidationTimestamps(draft, existingDay) {
+  const existingSlots = Array.isArray(existingDay && existingDay.mealSlots)
+    ? existingDay.mealSlots
+    : [];
+  const existingBySlotKey = new Map();
+  const existingBySlotIndex = new Map();
+
+  for (const slot of existingSlots) {
+    if (!slot) continue;
+    if (slot.slotKey) existingBySlotKey.set(String(slot.slotKey), slot);
+    if (slot.slotIndex !== undefined && slot.slotIndex !== null) {
+      existingBySlotIndex.set(Number(slot.slotIndex), slot);
+    }
+  }
+
+  for (const slot of Array.isArray(draft && draft.processedSlots) ? draft.processedSlots : []) {
+    const persistedSlot = (slot.slotKey && existingBySlotKey.get(String(slot.slotKey)))
+      || existingBySlotIndex.get(Number(slot.slotIndex));
+    // Validation is read-only: this field describes the persisted slot's last
+    // modification, not the time at which a hypothetical response was built.
+    slot.updatedAt = persistedSlot && persistedSlot.updatedAt
+      ? persistedSlot.updatedAt
+      : null;
+  }
+
+  if (draft && draft.plannerMeta) {
+    const persistedLastEditedAt = existingDay
+      && existingDay.plannerMeta
+      && existingDay.plannerMeta.lastEditedAt;
+    draft.plannerMeta.lastEditedAt = persistedLastEditedAt || null;
+  }
+
+  return draft;
 }
 
 function isPickupAppendAllowedForExistingDay(subscription, day) {
@@ -1123,6 +990,8 @@ async function performDaySelectionValidation({
     throw { status: 422, code: draft.errorCode || "INVALID_MEAL_PLAN", message: draft.errorMessage || "Meal planner validation failed", slotErrors: draft.slotErrors, debug: draft.debug, rules: getMealPlannerRules(), valid: false };
   }
 
+  preservePersistedValidationTimestamps(draft, day);
+
   const pricingState = await evaluateDaySelectionPricingState({
     subscription: sub,
     subscriptionId: resolvedSubscriptionId,
@@ -1448,4 +1317,5 @@ module.exports = {
   releaseAddonBalanceAtomically,
   resolveMealSlotPlanningLimits,
   buildPlanningDraftSubscriptionView,
+  preservePersistedValidationTimestamps,
 };
