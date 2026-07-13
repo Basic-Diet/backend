@@ -175,11 +175,11 @@ CheckoutDraftSchema.index({ status: 1, createdAt: -1 });
 CheckoutDraftSchema.index({ userId: 1, requestHash: 1, status: 1, createdAt: -1 });
 CheckoutDraftSchema.index(
   { userId: 1, requestHash: 1, status: 1 },
-  { unique: true, partialFilterExpression: { status: "pending_payment", requestHash: { $type: "string", $ne: "" } } }
+  { unique: true, partialFilterExpression: { status: "pending_payment", requestHash: { $type: "string", $gt: "" } } }
 );
 CheckoutDraftSchema.index(
   { userId: 1, idempotencyKey: 1 },
-  { unique: true, sparse: true, partialFilterExpression: { idempotencyKey: { $type: "string", $ne: "" } } }
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string", $gt: "" } } }
 );
 CheckoutDraftSchema.index({ paymentId: 1 }, { sparse: true });
 CheckoutDraftSchema.index({ providerInvoiceId: 1 }, { sparse: true });
