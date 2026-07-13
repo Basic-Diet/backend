@@ -6,6 +6,11 @@ const assert = require("assert");
 const mongoose = require("mongoose");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 
+// The production CheckoutDraft index uses a partial $ne expression that older
+// MongoDB test binaries cannot create. This test creates only the Payment index
+// needed to prove exactly-once payment persistence.
+mongoose.set("autoIndex", false);
+
 const CheckoutDraft = require("../src/models/CheckoutDraft");
 const Payment = require("../src/models/Payment");
 const {
@@ -206,8 +211,13 @@ async function testProviderFailureReleasesClaim() {
       instance: { dbName: `checkout_invoice_concurrency_${Date.now()}` },
     });
     await mongoose.connect(mongoServer.getUri());
-    await CheckoutDraft.syncIndexes();
-    await Payment.syncIndexes();
+    await Payment.collection.createIndex(
+      { provider: 1, providerInvoiceId: 1 },
+      {
+        unique: true,
+        partialFilterExpression: { providerInvoiceId: { $type: "string" } },
+      }
+    );
 
     await testConcurrentInvoiceAndPaymentReuse();
     console.log("  OK  20 concurrent callers create one draft, invoice, and payment");
