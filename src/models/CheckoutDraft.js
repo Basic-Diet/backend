@@ -63,6 +63,21 @@ const DraftPromoSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const InvoiceInitializationSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ["idle", "initializing", "ready", "failed"],
+      default: "idle",
+    },
+    token: { type: String, trim: true, default: "" },
+    startedAt: { type: Date, default: null },
+    completedAt: { type: Date, default: null },
+    lastError: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 /**
  * Item 9: Pre-Activation Model
  * CheckoutDraft explicitly models the pre-activation state along with its paired Payment.
@@ -146,6 +161,7 @@ const CheckoutDraftSchema = new mongoose.Schema(
     paymentId: { type: mongoose.Schema.Types.ObjectId, ref: "Payment" },
     providerInvoiceId: { type: String },
     paymentUrl: { type: String, default: "" },
+    invoiceInitialization: { type: InvoiceInitializationSchema, default: () => ({}) },
     subscriptionId: { type: mongoose.Schema.Types.ObjectId, ref: "Subscription" },
     completedAt: { type: Date },
     failedAt: { type: Date },
@@ -167,5 +183,6 @@ CheckoutDraftSchema.index(
 );
 CheckoutDraftSchema.index({ paymentId: 1 }, { sparse: true });
 CheckoutDraftSchema.index({ providerInvoiceId: 1 }, { sparse: true });
+CheckoutDraftSchema.index({ "invoiceInitialization.status": 1, "invoiceInitialization.startedAt": 1 });
 
 module.exports = mongoose.model("CheckoutDraft", CheckoutDraftSchema);
