@@ -19,7 +19,7 @@
     "test:checkout": "NODE_ENV=test node tests/checkout.integration.test.js",
     "test:orders": "NODE_ENV=test node tests/oneTimeOrderOps.test.js && NODE_ENV=test node tests/oneTimeOrderFullFlow.test.js",
     "test:subscriptions": "NODE_ENV=test node tests/subscriptionBalancePolicy.test.js && NODE_ENV=test node tests/subscriptionDayModificationPolicy.test.js && NODE_ENV=test node tests/subscriptionFulfillmentConcurrency.test.js",
-    "test:security": "NODE_ENV=test node tests/corsPreflight.test.js && NODE_ENV=test node tests/securityHardening.test.js && NODE_ENV=test node tests/webhookSecurity.test.js",
+    "test:security": "NODE_ENV=test node tests/corsPreflight.test.js && NODE_ENV=test node tests/publicApiSurface.test.js && NODE_ENV=test node tests/securityHardening.test.js && NODE_ENV=test node tests/webhookSecurity.test.js",
     "test:mobile-contracts": "NODE_ENV=test node tests/mobileApiContracts.test.js && NODE_ENV=test node tests/mobileAuthPasswordRefresh.test.js && NODE_ENV=test node tests/fulfillmentStatusEndpoint.test.js && NODE_ENV=test node tests/fulfillmentContract.test.js",
     "test:changed-contracts": "bash scripts/run-critical-tests.sh",
     "test:all": "bash scripts/run-all-tests.sh",
