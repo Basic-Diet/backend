@@ -1,0 +1,27 @@
+name: Export backend source
+
+on:
+  push:
+    branches:
+      - "test/premium-meal-backend-lifecycle"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-source
+          path: |
+            src
+            tests
+            scripts
+            package.json
+            package-lock.json
+            .github/workflows/backend-release-gates.yml
+            .github/workflows/premium-meal-backend-lifecycle.yml
+          retention-days: 1
