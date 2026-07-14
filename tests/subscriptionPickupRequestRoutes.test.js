@@ -52,6 +52,16 @@ async function connect() {
   if (mongoose.connection.readyState !== 0) return;
   const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI || "mongodb://localhost:27017/basicdiet_test";
   await mongoose.connect(mongoUri);
+  await Promise.all([
+    Subscription.createCollection(),
+    SubscriptionDay.createCollection(),
+    SubscriptionPickupRequest.createCollection(),
+  ]);
+  await Promise.all([
+    Subscription.init(),
+    SubscriptionDay.init(),
+    SubscriptionPickupRequest.init(),
+  ]);
 }
 
 async function cleanup() {

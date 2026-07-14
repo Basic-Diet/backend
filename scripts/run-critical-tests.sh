@@ -25,27 +25,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [ -f .env ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    # Strip leading whitespace
-    trimmed=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    # Skip empty lines and comments
-    if [ -n "$trimmed" ] && [[ ! "$trimmed" =~ ^# ]]; then
-      export "$trimmed"
-    fi
-  done < .env
-fi
-
 if [ -n "${MONGO_URI_TEST:-}" ]; then
   export MONGO_URI="$MONGO_URI_TEST"
 fi
 
 BASE_MONGO_URI="${MONGO_URI:-}"
-echo "DEBUG MONGO_URI is: '${MONGO_URI}'"
 BASE_DB_NAME=""
 
 if [ -n "$BASE_MONGO_URI" ]; then
-  BASE_DB_NAME=$(mongo_uri_db_name "$BASE_MONGO_URI")
+  BASE_DB_NAME=$(assert_safe_base_test_mongo_uri "$BASE_MONGO_URI") || exit 1
   echo "Using base MONGO_URI: $(mask_mongo_uri "$BASE_MONGO_URI")"
   echo "Base database: $BASE_DB_NAME"
 else

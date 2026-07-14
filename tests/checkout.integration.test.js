@@ -42,9 +42,13 @@ const CheckoutDraft = require('../src/models/CheckoutDraft');
 const Zone = require('../src/models/Zone');
 const Setting = require('../src/models/Setting');
 const Addon = require('../src/models/Addon');
+const MenuCategory = require('../src/models/MenuCategory');
+const MenuProduct = require('../src/models/MenuProduct');
+const PremiumUpgradeConfig = require('../src/models/PremiumUpgradeConfig');
 const { ensureSafeForDestructiveOp } = require('../src/utils/dbSafety');
 const { VAT_PERCENTAGE } = require('../src/config/vat');
 const dateUtils = require('../src/utils/date');
+const { getRestaurantBusinessDate } = require('../src/services/restaurantHoursService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
 const PORT = process.env.PORT || 3000;
@@ -76,6 +80,7 @@ let testZone = null;
 let addonPlanJuice = null;
 let addonPlanSnack = null;
 let addonItemJuice = null;
+let premiumLargeSaladProduct = null;
 
 const TEST_USER_PHONE = '+966501234999';
 const TEST_USER_PASSWORD = 'testpassword123';
@@ -225,6 +230,70 @@ async function seedBuilderCatalog() {
     });
     await canonicalBeefSteak.save();
   }
+
+  const premiumCategory = await MenuCategory.findOneAndUpdate(
+    { key: 'checkout_test_premium' },
+    {
+      $set: {
+        key: 'checkout_test_premium',
+        name: { ar: 'اختبار بريميوم', en: 'Checkout Premium' },
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: new Date(),
+      },
+    },
+    { upsert: true, new: true }
+  );
+
+  premiumLargeSaladProduct = await MenuProduct.findOneAndUpdate(
+    { key: 'premium_large_salad' },
+    {
+      $set: {
+        categoryId: premiumCategory._id,
+        key: 'premium_large_salad',
+        name: { ar: 'سلطة كبيرة مميزة', en: 'Premium Large Salad' },
+        description: { ar: 'سلطة مميزة للاختبار', en: 'Premium salad test product' },
+        itemType: 'premium_large_salad',
+        pricingModel: 'fixed',
+        priceHalala: 2900,
+        currency: 'SAR',
+        availableFor: ['subscription'],
+        isCustomizable: true,
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: new Date(),
+      },
+    },
+    { upsert: true, new: true }
+  );
+
+  await PremiumUpgradeConfig.findOneAndUpdate(
+    { premiumKey: 'premium_large_salad' },
+    {
+      $set: {
+        sourceType: 'menu_product',
+        sourceId: premiumLargeSaladProduct._id,
+        sourceProductId: premiumLargeSaladProduct._id,
+        sourceGroupId: null,
+        selectionType: 'premium_large_salad',
+        premiumKey: 'premium_large_salad',
+        displayGroupKey: 'premium',
+        upgradeDeltaHalala: 2900,
+        currency: 'SAR',
+        isEnabled: true,
+        isVisible: true,
+        status: 'active',
+        sourceSnapshot: {
+          key: 'premium_large_salad',
+          name: premiumLargeSaladProduct.name,
+          context: { productKey: 'premium_large_salad' },
+        },
+      },
+    },
+    { upsert: true, new: true }
+  );
   
   testZone = await Zone.findOne({ name: { $regex: /test/i } });
   if (!testZone) {
@@ -309,6 +378,11 @@ if (proteinsWithoutKey.length >= 2) {
       sortOrder: 1,
     });
     await addonPlanJuice.save();
+  } else {
+    addonPlanJuice.isActive = true;
+    addonPlanJuice.isArchived = false;
+    addonPlanJuice.priceHalala = 1100;
+    await addonPlanJuice.save();
   }
 
   addonPlanSnack = await Addon.findOne({ kind: 'plan', category: 'snack', billingMode: 'per_day' });
@@ -325,6 +399,11 @@ if (proteinsWithoutKey.length >= 2) {
       sortOrder: 3,
     });
     await addonPlanSnack.save();
+  } else {
+    addonPlanSnack.isActive = true;
+    addonPlanSnack.isArchived = false;
+    addonPlanSnack.priceHalala = 500;
+    await addonPlanSnack.save();
   }
 
   addonItemJuice = await Addon.findOne({ kind: 'item', category: 'juice', billingMode: 'flat_once' });
@@ -340,6 +419,11 @@ if (proteinsWithoutKey.length >= 2) {
       isActive: true,
       sortOrder: 2,
     });
+    await addonItemJuice.save();
+  } else {
+    addonItemJuice.isActive = true;
+    addonItemJuice.isArchived = false;
+    addonItemJuice.priceHalala = 1100;
     await addonItemJuice.save();
   }
 
@@ -390,7 +474,7 @@ async function connectDatabase() {
   const mongoUri = useMemoryReplSet
     ? await (async () => {
       mongoReplSet = await MongoMemoryReplSet.create({ replSet: { storageEngine: 'wiredTiger' } });
-      return mongoReplSet.getUri(`checkout_integration_${Date.now()}`);
+      return mongoReplSet.getUri(`checkout_integration_test_${Date.now()}`);
     })()
     : resolveMongoUri();
   const dbName = getDbNameFromUri(mongoUri);
@@ -455,6 +539,7 @@ async function runTests() {
   console.log(`  Delivery Zone ID: ${testZone._id}`);
   
   const startDate = buildDateOffset(1);
+  const sameDayStartDate = await getRestaurantBusinessDate();
   const buildBaseSubscriptionPayload = () => ({
     planId: String(testPlan._id),
     grams: 300,
@@ -586,10 +671,11 @@ async function runTests() {
     assertEqual(draft.contractSnapshot?.delivery?.slot?.window, TEST_DELIVERY_WINDOW, 'contract delivery window stored');
   });
 
-  await test('activated subscription retains delivery slot/window and fulfillment status returns deliveryWindow', async () => {
+  await test('same-day home delivery activates first day as pickup override and keeps later days as delivery', async () => {
     const idempotencyKey = `checkout_test_delivery_status_${Date.now()}`;
     const checkoutRes = await makeRequest('POST', '/api/subscriptions/checkout', {
       ...buildBaseSubscriptionPayload(),
+      startDate: sameDayStartDate,
       delivery: {
         ...buildBaseSubscriptionPayload().delivery,
         address: {
@@ -629,14 +715,15 @@ async function runTests() {
     assertEqual(subscription.deliverySlot?.window, TEST_DELIVERY_WINDOW, 'subscription delivery window retained');
     assertEqual(subscription.deliveryWindow, TEST_DELIVERY_WINDOW, 'subscription deliveryWindow retained');
 
-    const day1StatusRes = await makeRequest('GET', `/api/subscriptions/${result.subscriptionId}/days/${startDate}/fulfillment/status`);
+    const day1StatusRes = await makeRequest('GET', `/api/subscriptions/${result.subscriptionId}/days/${sameDayStartDate}/fulfillment/status`);
     assertEqual(day1StatusRes.status, 200, 'day 1 fulfillment status response');
     assertEqual(day1StatusRes.body.data?.deliveryMode, 'delivery', 'day 1 root delivery mode');
     assertEqual(day1StatusRes.body.data?.effectiveFulfillmentMode, 'pickup', 'day 1 uses pickup override');
     assertEqual(day1StatusRes.body.data?.fulfillmentModeOverride, 'pickup', 'day 1 pickup override returned');
     assertEqual(day1StatusRes.body.data?.firstDayFulfillmentOverride, true, 'day 1 first-day override flag');
+    assertNotNull(day1StatusRes.body.data?.pickupLocation, 'day 1 pickup location returned');
 
-    const secondDate = dateUtils.addDaysToKSADateString(startDate, 1);
+    const secondDate = dateUtils.addDaysToKSADateString(sameDayStartDate, 1);
     const statusRes = await makeRequest('GET', `/api/subscriptions/${result.subscriptionId}/days/${secondDate}/fulfillment/status`);
     assertEqual(statusRes.status, 200, 'day 2 fulfillment status response');
     assertEqual(statusRes.body.data?.deliveryMode, 'delivery', 'day 2 delivery mode');
@@ -646,6 +733,42 @@ async function runTests() {
     assertEqual(statusRes.body.data?.deliveryWindow?.window, TEST_DELIVERY_WINDOW, 'day 2 fulfillment delivery window value');
     assertEqual(statusRes.body.data?.deliverySlot?.slotId, TEST_DELIVERY_SLOT_ID, 'day 2 fulfillment delivery slotId');
     assertEqual(statusRes.body.data?.lockedReason, null, 'day 2 fulfillment is not locked for missing window');
+  });
+
+  await test('future home delivery starts as delivery without first-day pickup override', async () => {
+    const idempotencyKey = `checkout_test_future_delivery_status_${Date.now()}`;
+    const checkoutRes = await makeRequest('POST', '/api/subscriptions/checkout', {
+      ...buildBaseSubscriptionPayload(),
+      idempotencyKey,
+    });
+    assertEqual(checkoutRes.status, 201, 'future delivery checkout status');
+    const draft = await CheckoutDraft.findById(checkoutRes.body.data?.draftId).lean();
+    assertTrue(!!draft, 'future delivery draft exists');
+
+    const Payment = require('../src/models/Payment');
+    const payment = new Payment({
+      userId: testUser._id,
+      draftId: draft._id,
+      type: 'subscription_activation',
+      amount: draft.breakdown.totalHalala,
+      currency: 'SAR',
+      status: 'paid',
+      provider: 'moyasar',
+      providerInvoiceId: `test_future_delivery_invoice_${Date.now()}`,
+      invoiceResponse: { id: `test_future_delivery_invoice_${Date.now()}`, url: 'https://example.com/pay' },
+    });
+    await payment.save();
+
+    const { finalizeSubscriptionDraftPaymentFlow } = require('../src/services/subscription/subscriptionActivationService');
+    const result = await finalizeSubscriptionDraftPaymentFlow({ draft, payment }, null);
+    assertTrue(result.applied, 'future delivery activation applied');
+
+    const day1StatusRes = await makeRequest('GET', `/api/subscriptions/${result.subscriptionId}/days/${startDate}/fulfillment/status`);
+    assertEqual(day1StatusRes.status, 200, 'future day 1 fulfillment status response');
+    assertEqual(day1StatusRes.body.data?.deliveryMode, 'delivery', 'future day 1 root delivery mode');
+    assertEqual(day1StatusRes.body.data?.effectiveFulfillmentMode, 'delivery', 'future day 1 remains delivery');
+    assertEqual(day1StatusRes.body.data?.fulfillmentModeOverride, null, 'future day 1 has no pickup override');
+    assertEqual(day1StatusRes.body.data?.firstDayFulfillmentOverride, false, 'future day 1 first-day override flag false');
   });
 
   await test('POST /api/subscriptions/quote rejects invalid delivery slot with 422', async () => {

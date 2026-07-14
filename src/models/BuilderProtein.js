@@ -50,6 +50,8 @@ const BuilderProteinSchema = new mongoose.Schema(
     currency: { type: String, default: "SAR" },
     availableForSubscription: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
+    isArchived: { type: Boolean, default: false, index: true },
+    archivedAt: { type: Date, default: null },
     sortOrder: { type: Number, default: 0 },
     nutrition: { type: NutritionSchema, default: () => ({}) },
   },

@@ -30,6 +30,7 @@ const {
   performDaySelectionValidation,
 } = require("../src/services/subscription/subscriptionSelectionService");
 const { markPickupNoShow } = require("../src/controllers/kitchenController");
+const { runMongoTransactionWithRetry } = require("../src/services/mongoTransactionRetryService");
 const dateUtils = require("../src/utils/date");
 const BuilderProtein = require("../src/models/BuilderProtein");
 const BuilderCarb = require("../src/models/BuilderCarb");
@@ -61,6 +62,7 @@ function mockQuery(result) {
 
 async function withMockedPlannerCatalog(fn) {
   const originalProteinFind = BuilderProtein.find;
+  const originalProteinFindOne = BuilderProtein.findOne;
   const originalCarbFind = BuilderCarb.find;
   const originalMealCategoryFindOne = MealCategory.findOne;
   const originalMealFind = Meal.find;
@@ -87,6 +89,17 @@ async function withMockedPlannerCatalog(fn) {
       extraFeeHalala: 1500,
     },
   ]);
+  BuilderProtein.findOne = () => mockQuery({
+    _id: PLANNER_IDS.premiumProtein,
+    isPremium: true,
+    premiumKey: "shrimp",
+    displayCategoryKey: "premium",
+    proteinFamilyKey: "fish",
+    ruleTags: ["premium"],
+    extraFeeHalala: 1500,
+    isActive: true,
+    availableForSubscription: true,
+  });
   BuilderCarb.find = () => mockQuery([
     { _id: PLANNER_IDS.carbOne, isActive: true, availableForSubscription: true, displayCategoryKey: "standard_carbs" },
   ]);
@@ -99,6 +112,7 @@ async function withMockedPlannerCatalog(fn) {
     return await fn();
   } finally {
     BuilderProtein.find = originalProteinFind;
+    BuilderProtein.findOne = originalProteinFindOne;
     BuilderCarb.find = originalCarbFind;
     MealCategory.findOne = originalMealCategoryFindOne;
     Meal.find = originalMealFind;
@@ -267,11 +281,10 @@ async function runTests() {
     assert.strictEqual(sub1Repeated.remainingMeals, 30, "Repeated reads must not mutate remainingMeals");
 
     // Test 3: Operational skip does not deduct remainingMeals
-    const sessionSkip = await mongoose.startSession();
-    sessionSkip.startTransaction();
-    await applyOperationalSkipForDate({ sub: sub1AfterRead, date: "2026-06-04", session: sessionSkip });
-    await sessionSkip.commitTransaction();
-    sessionSkip.endSession();
+    await runMongoTransactionWithRetry(
+      (session) => applyOperationalSkipForDate({ sub: sub1AfterRead, date: "2026-06-04", session }),
+      { label: "subscription_balance_policy_operational_skip" }
+    );
     
     const sub1AfterSkip = await Subscription.findById(sub1._id).lean();
     assert.strictEqual(sub1AfterSkip.remainingMeals, 30, "applyOperationalSkipForDate must not deduct remainingMeals");

@@ -45,14 +45,19 @@ const {
   serializeDashboardPreviewOption,
   isCustomerVisibleProduct,
   isCustomerVisibleGroup,
-  isCustomerVisibleOption,
+  isCustomerVisibleOption: isPresenterCustomerVisibleOption,
   resolvePublicProductCategory,
   sortPublicProducts,
 } = require("./menuCatalogPresenter");
 const { validateMenuCatalog } = require("./menuCatalogValidationService");
-
+const {
+  CUSTOMER_VISIBLE_CARB_KEYS,
+  STANDARD_MEAL_PROTEIN_KEYS,
+} = require("../../config/mealPlannerContract");
 const SYSTEM_CURRENCY = "SAR";
 const SNAKE_CASE_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+const CUSTOMER_VISIBLE_CARB_KEY_SET = new Set(CUSTOMER_VISIBLE_CARB_KEYS);
+const STANDARD_MEAL_PROTEIN_KEY_SET = new Set(STANDARD_MEAL_PROTEIN_KEYS);
 class MenuValidationError extends Error {
   constructor(message, code = "VALIDATION_ERROR", status = 400, details) {
     super(message);
@@ -207,6 +212,16 @@ function serializeDoc(doc) {
 
 function serializeDashboardOption(option) {
   return menuCatalogAdminService.serializeDashboardOption(option);
+}
+
+function isCustomerVisibleOption(option, group, product) {
+  if (group?.key === "carbs") {
+    return CUSTOMER_VISIBLE_CARB_KEY_SET.has(option?.key);
+  }
+  if (product?.key === "basic_meal" && group?.key === "proteins") {
+    return STANDARD_MEAL_PROTEIN_KEY_SET.has(option?.key);
+  }
+  return isPresenterCustomerVisibleOption(option, group, product);
 }
 
 function parsePaginationOptions(options = {}) {

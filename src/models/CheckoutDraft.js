@@ -8,9 +8,19 @@ const DraftPremiumItemSchema = new mongoose.Schema(
   {
     proteinId: { type: mongoose.Schema.Types.ObjectId, ref: "BuilderProtein", default: null },
     premiumKey: { type: String, required: true, trim: true },
+    entityType: { type: String, trim: true, default: "premium_meal" },
+    sourceModel: { type: String, trim: true, default: "" },
+    sourceId: { type: String, trim: true, default: "" },
+    name: { type: String, default: "" },
+    nameI18n: {
+      ar: { type: String, default: "" },
+      en: { type: String, default: "" },
+    },
+    imageUrl: { type: String, default: "" },
     qty: { type: Number, min: 1, required: true },
     unitExtraFeeHalala: { type: Number, min: 0, required: true },
     currency: { type: String, default: "SAR" },
+    catalogVersion: { type: mongoose.Schema.Types.Mixed, default: null },
     priceSource: { type: String, trim: true, default: "" },
   },
   { _id: false }

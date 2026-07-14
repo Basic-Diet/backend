@@ -10,7 +10,7 @@ function positiveInteger(value) {
 
 function hasExplicitKitchenMeals(day = {}) {
   const mealSlots = Array.isArray(day.mealSlots) ? day.mealSlots : [];
-  if (mealSlots.some((slot) => slot && slot.status === "complete")) return true;
+  if (mealSlots.filter(Boolean).length > 0) return true;
   if (Array.isArray(day.materializedMeals) && day.materializedMeals.filter(Boolean).length > 0) return true;
   if (Array.isArray(day.selections) && day.selections.filter(Boolean).length > 0) return true;
   if (Array.isArray(day.baseMealSlots) && day.baseMealSlots.filter(Boolean).length > 0) return true;

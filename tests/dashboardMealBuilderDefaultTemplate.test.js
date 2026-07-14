@@ -13,6 +13,7 @@ const MenuCategory = require("../src/models/MenuCategory");
 const MenuOption = require("../src/models/MenuOption");
 const MenuOptionGroup = require("../src/models/MenuOptionGroup");
 const MenuProduct = require("../src/models/MenuProduct");
+const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
 
@@ -143,6 +144,47 @@ async function seedCatalog() {
   for (const option of carbs) {
     await ProductGroupOption.create({ productId: basicMeal._id, groupId: carbsGroup._id, optionId: option._id, sortOrder: option.sortOrder });
   }
+  const premiumOptions = proteins.filter((option) => ["beef_steak", "shrimp", "salmon"].includes(option.key));
+  await Promise.all(premiumOptions.map((option) => PremiumUpgradeConfig.create({
+    sourceType: "menu_option",
+    sourceId: option._id,
+    sourceProductId: basicMeal._id,
+    sourceGroupId: proteinsGroup._id,
+    selectionType: "premium_meal",
+    premiumKey: option.key,
+    displayGroupKey: "premium",
+    upgradeDeltaHalala: Number(option.extraPriceHalala || 0),
+    currency: "SAR",
+    isEnabled: true,
+    isVisible: true,
+    status: "active",
+    sortOrder: option.sortOrder,
+    sourceSnapshot: {
+      key: option.key,
+      name: option.name,
+      context: { productKey: basicMeal.key, groupKey: proteinsGroup.key },
+    },
+  })));
+  await PremiumUpgradeConfig.create({
+    sourceType: "menu_product",
+    sourceId: premiumLargeSalad._id,
+    sourceProductId: premiumLargeSalad._id,
+    sourceGroupId: null,
+    selectionType: "premium_large_salad",
+    premiumKey: "premium_large_salad",
+    displayGroupKey: "premium",
+    upgradeDeltaHalala: premiumLargeSalad.priceHalala,
+    currency: "SAR",
+    isEnabled: true,
+    isVisible: true,
+    status: "active",
+    sortOrder: 99,
+    sourceSnapshot: {
+      key: premiumLargeSalad.key,
+      name: premiumLargeSalad.name,
+      context: { productKey: premiumLargeSalad.key },
+    },
+  });
   await ProductOptionGroup.create({ productId: premiumLargeSalad._id, groupId: proteinsGroup._id, minSelections: 1, maxSelections: 1, isRequired: true, sortOrder: 1 });
   await ProductOptionGroup.create({ productId: premiumLargeSalad._id, groupId: leafyGreens._id, minSelections: 0, maxSelections: 2, isRequired: false, sortOrder: 2 });
   await ProductOptionGroup.create({ productId: premiumLargeSalad._id, groupId: vegetablesLegumes._id, minSelections: 0, maxSelections: 19, isRequired: false, sortOrder: 3 });

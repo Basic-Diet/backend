@@ -18,7 +18,6 @@ const {
 const { 
   getPremiumDisplayName, 
   resolvePremiumKeyFromName,
-  CANONICAL_PREMIUM_KEYS,
   normalizePremiumItemKey,
   PREMIUM_LARGE_SALAD_KEY,
 } = require("../../utils/subscription/premiumIdentity");
@@ -156,7 +155,7 @@ function findMatchingCatalogItem(balanceRow, premiumCatalog) {
   const balanceProteinId = String(balanceRow.proteinId);
 
   const normalizedBalanceKey = normalizePremiumItemKey(balanceRow.premiumKey);
-  if (normalizedBalanceKey && CANONICAL_PREMIUM_KEYS.includes(normalizedBalanceKey)) {
+  if (normalizedBalanceKey) {
     const keyMatch = byPremiumKey.get(normalizedBalanceKey);
     if (keyMatch) {
       return { match: keyMatch, matchType: "premiumKey" };
@@ -173,7 +172,7 @@ function findMatchingCatalogItem(balanceRow, premiumCatalog) {
 
 function resolvePremiumKeyFromRow(balanceRow, premiumCatalog) {
   const normalizedBalanceKey = normalizePremiumItemKey(balanceRow.premiumKey);
-  if (normalizedBalanceKey && CANONICAL_PREMIUM_KEYS.includes(normalizedBalanceKey)) {
+  if (normalizedBalanceKey) {
     return normalizedBalanceKey;
   }
 
@@ -185,7 +184,7 @@ function resolvePremiumKeyFromRow(balanceRow, premiumCatalog) {
   const name = balanceRow.name || balanceRow.name_ar || "";
   if (name) {
     const resolved = resolvePremiumKeyFromName(name);
-    if (resolved && CANONICAL_PREMIUM_KEYS.includes(resolved)) {
+    if (resolved) {
       return resolved;
     }
   }
@@ -217,7 +216,7 @@ function buildSubscriptionPremiumBalanceSummary(subscription, premiumCatalog, la
 
     const key = resolvePremiumKeyFromRow(row, premiumCatalog);
 
-    if (!key || !CANONICAL_PREMIUM_KEYS.includes(key)) {
+    if (!key) {
       continue;
     }
 
@@ -225,10 +224,31 @@ function buildSubscriptionPremiumBalanceSummary(subscription, premiumCatalog, la
       premiumKey: key,
       purchasedQtyTotal: 0,
       remainingQtyTotal: 0,
+      name: "",
+      nameI18n: null,
+      imageUrl: "",
+      unitExtraFeeHalala: null,
+      currency: "",
     };
 
     existing.purchasedQtyTotal += purchasedQty;
     existing.remainingQtyTotal += remainingQty;
+    if (!existing.name && row.name) {
+      existing.name = typeof row.name === "object"
+        ? (row.name[lang] || row.name.en || row.name.ar || "")
+        : String(row.name || "");
+    }
+    if (!existing.nameI18n && row.nameI18n && typeof row.nameI18n === "object") {
+      existing.nameI18n = {
+        ar: String(row.nameI18n.ar || ""),
+        en: String(row.nameI18n.en || ""),
+      };
+    }
+    if (!existing.imageUrl && row.imageUrl) existing.imageUrl = String(row.imageUrl || "");
+    if (existing.unitExtraFeeHalala === null && row.unitExtraFeeHalala !== undefined) {
+      existing.unitExtraFeeHalala = Number(row.unitExtraFeeHalala || 0);
+    }
+    if (!existing.currency && row.currency) existing.currency = String(row.currency || "");
 
     summaryMap.set(key, existing);
   }
@@ -239,7 +259,7 @@ function buildSubscriptionPremiumBalanceSummary(subscription, premiumCatalog, la
   for (const catalogItem of allItems) {
     const catalogKey = catalogItem.premiumKey;
 
-    if (!catalogKey || !CANONICAL_PREMIUM_KEYS.includes(catalogKey)) {
+    if (!catalogKey) {
       continue;
     }
 
@@ -251,7 +271,11 @@ function buildSubscriptionPremiumBalanceSummary(subscription, premiumCatalog, la
       result.push({
         premiumMealId: catalogItem.id,
         premiumKey: catalogKey,
-        name: catalogItem.name,
+        name: summary && summary.name ? summary.name : catalogItem.name,
+        nameI18n: summary && summary.nameI18n ? summary.nameI18n : undefined,
+        imageUrl: summary && summary.imageUrl ? summary.imageUrl : undefined,
+        unitExtraFeeHalala: summary && summary.unitExtraFeeHalala !== null ? summary.unitExtraFeeHalala : undefined,
+        currency: summary && summary.currency ? summary.currency : undefined,
         purchasedQtyTotal,
         remainingQtyTotal,
         consumedQtyTotal: purchasedQtyTotal - remainingQtyTotal,
@@ -265,10 +289,6 @@ function buildSubscriptionPremiumBalanceSummary(subscription, premiumCatalog, la
     if (existingKeys.has(key)) {
       continue;
     }
-    if (!CANONICAL_PREMIUM_KEYS.includes(key)) {
-      continue;
-    }
-
     const catalogItem = byPremiumKey.get(key);
     if (catalogItem) {
       continue;
@@ -278,7 +298,11 @@ function buildSubscriptionPremiumBalanceSummary(subscription, premiumCatalog, la
       result.push({
         premiumMealId: key,
         premiumKey: key,
-        name: getPremiumDisplayName({ premiumKey: key, lang }),
+        name: summary.name || getPremiumDisplayName({ premiumKey: key, lang }),
+        nameI18n: summary.nameI18n || undefined,
+        imageUrl: summary.imageUrl || undefined,
+        unitExtraFeeHalala: summary.unitExtraFeeHalala !== null ? summary.unitExtraFeeHalala : undefined,
+        currency: summary.currency || undefined,
         purchasedQtyTotal: summary.purchasedQtyTotal,
         remainingQtyTotal: summary.remainingQtyTotal,
         consumedQtyTotal: summary.purchasedQtyTotal - summary.remainingQtyTotal,

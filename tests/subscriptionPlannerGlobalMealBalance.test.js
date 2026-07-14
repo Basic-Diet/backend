@@ -18,6 +18,7 @@ const MealCategory = require("../src/models/MealCategory");
 const Meal = require("../src/models/Meal");
 const SaladIngredient = require("../src/models/SaladIngredient");
 const Sandwich = require("../src/models/Sandwich");
+const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
 const {
   performDaySelectionUpdate,
   performDaySelectionValidation,
@@ -25,8 +26,17 @@ const {
 const {
   updateBulkDaySelectionsForClient,
 } = require("../src/services/subscription/subscriptionSelectionClientService");
+const {
+  getFutureBusinessDate,
+  getTestBusinessDate,
+} = require("./helpers/businessDateHelper");
 
 const TEST_TAG = `planner-global-balance-${Date.now()}`;
+const SUBSCRIPTION_START_DATE = getTestBusinessDate();
+const SUBSCRIPTION_END_DATE = getFutureBusinessDate(45);
+const PLANNER_DATE_A = getFutureBusinessDate(1);
+const PLANNER_DATE_B = getFutureBusinessDate(2);
+const PLANNER_DATE_C = getFutureBusinessDate(3);
 const PLANNER_IDS = {
   regularProtein: "507f191e810c19729de870a1",
   premiumProtein: "507f191e810c19729de870a2",
@@ -105,6 +115,18 @@ async function connect() {
   if (mongoose.connection.readyState === 0) {
     await mongoose.connect(process.env.MONGO_URI || process.env.MONGODB_URI || "mongodb://localhost:27017/basicdiet_test");
   }
+  await Promise.all([
+    User.createCollection(),
+    Plan.createCollection(),
+    Subscription.createCollection(),
+    SubscriptionDay.createCollection(),
+    PremiumUpgradeConfig.createCollection(),
+  ]);
+  await Promise.all([
+    Subscription.init(),
+    SubscriptionDay.init(),
+    PremiumUpgradeConfig.init(),
+  ]);
 }
 
 async function cleanup() {
@@ -118,8 +140,39 @@ async function cleanup() {
     SubscriptionDay.deleteMany({ subscriptionId: { $in: subscriptionIds } }),
     Subscription.deleteMany({ _id: { $in: subscriptionIds } }),
     Plan.deleteMany({ _id: { $in: planIds } }),
+    PremiumUpgradeConfig.deleteMany({ "metadata.testTag": TEST_TAG }),
     User.deleteMany({ _id: { $in: userIds } }),
   ]);
+}
+
+async function seedPremiumUpgradeConfig() {
+  await PremiumUpgradeConfig.updateOne(
+    { premiumKey: "shrimp" },
+    {
+      $set: {
+        sourceType: "menu_option",
+        sourceId: new mongoose.Types.ObjectId(),
+        sourceProductId: null,
+        sourceGroupId: null,
+        selectionType: "premium_meal",
+        premiumKey: "shrimp",
+        displayGroupKey: "premium",
+        upgradeDeltaHalala: 1500,
+        currency: "SAR",
+        isEnabled: true,
+        isVisible: true,
+        status: "active",
+        sortOrder: 1,
+        metadata: { testTag: TEST_TAG },
+        sourceSnapshot: {
+          key: "shrimp",
+          name: { en: "Shrimp", ar: "Shrimp" },
+          context: { fixture: "subscriptionPlannerGlobalMealBalance" },
+        },
+      },
+    },
+    { upsert: true }
+  );
 }
 
 async function seedSubscription({ totalMeals = 10, selectedMealsPerDay = 1, suffix = "000" } = {}) {
@@ -144,9 +197,9 @@ async function seedSubscription({ totalMeals = 10, selectedMealsPerDay = 1, suff
     userId: user._id,
     planId: plan._id,
     status: "active",
-    startDate: new Date("2026-06-01T00:00:00+03:00"),
-    endDate: new Date("2026-06-15T00:00:00+03:00"),
-    validityEndDate: new Date("2026-07-30T00:00:00+03:00"),
+    startDate: new Date(`${SUBSCRIPTION_START_DATE}T00:00:00+03:00`),
+    endDate: new Date(`${SUBSCRIPTION_END_DATE}T00:00:00+03:00`),
+    validityEndDate: new Date(`${SUBSCRIPTION_END_DATE}T00:00:00+03:00`),
     totalMeals,
     remainingMeals: totalMeals,
     selectedGrams: 200,
@@ -190,51 +243,52 @@ async function runTests() {
   try {
     await connect();
     await cleanup();
+    await seedPremiumUpgradeConfig();
 
     await withMockedPlannerCatalog(async () => {
       const { subscription: sub } = await seedSubscription({ suffix: "001" });
-      await save(sub, "2026-06-20", buildSlots(5));
+      await save(sub, PLANNER_DATE_A, buildSlots(5));
       assert.strictEqual(await countCompleteSlots(sub._id), 5, "Day 9 saves 5 meals");
 
-      await save(sub, "2026-06-21", buildSlots(5));
+      await save(sub, PLANNER_DATE_B, buildSlots(5));
       assert.strictEqual(await countCompleteSlots(sub._id), 10, "Day 10 can fill the remaining 5 meals");
 
       await assertLimitExceeded(
-        () => save(sub, "2026-06-21", buildSlots(6)),
+        () => save(sub, PLANNER_DATE_B, buildSlots(6)),
         "Editing Day 10 to 6 meals should exceed the 10-meal allowance"
       );
       await assertLimitExceeded(
-        () => save(sub, "2026-06-21", buildSlots(10)),
+        () => save(sub, PLANNER_DATE_B, buildSlots(10)),
         "Editing Day 10 to 10 meals should exceed the 10-meal allowance"
       );
 
-      await save(sub, "2026-06-20", buildSlots(3));
-      await save(sub, "2026-06-21", buildSlots(7));
+      await save(sub, PLANNER_DATE_A, buildSlots(3));
+      await save(sub, PLANNER_DATE_B, buildSlots(7));
       assert.strictEqual(await countCompleteSlots(sub._id), 10, "Editing Day 9 down frees planning capacity elsewhere");
 
       const { subscription: validationSub } = await seedSubscription({ suffix: "002" });
-      await save(validationSub, "2026-06-20", buildSlots(5));
+      await save(validationSub, PLANNER_DATE_A, buildSlots(5));
       await performDaySelectionValidation({
         userId: validationSub.userId,
         subscriptionId: validationSub._id,
-        date: "2026-06-21",
+        date: PLANNER_DATE_B,
         mealSlots: buildSlots(5),
       });
       await assertLimitExceeded(
         () => performDaySelectionValidation({
           userId: validationSub.userId,
           subscriptionId: validationSub._id,
-          date: "2026-06-21",
+          date: PLANNER_DATE_B,
           mealSlots: buildSlots(6),
         }),
         "Validate-only should reject plans that exceed the global allowance"
       );
 
       const { subscription: idempotentSub } = await seedSubscription({ suffix: "003" });
-      await save(idempotentSub, "2026-06-20", buildSlots(5));
-      const secondSave = await save(idempotentSub, "2026-06-20", buildSlots(5));
+      await save(idempotentSub, PLANNER_DATE_A, buildSlots(5));
+      const secondSave = await save(idempotentSub, PLANNER_DATE_A, buildSlots(5));
       assert.strictEqual(secondSave.idempotent, true, "Sending the same day payload again is idempotent");
-      await save(idempotentSub, "2026-06-21", buildSlots(5));
+      await save(idempotentSub, PLANNER_DATE_B, buildSlots(5));
       assert.strictEqual(await countCompleteSlots(idempotentSub._id), 10, "Idempotent retry does not double-count Day 9");
 
       const { subscription: bulkRejectSub } = await seedSubscription({ suffix: "004" });
@@ -243,8 +297,8 @@ async function runTests() {
         userId: bulkRejectSub.userId,
         lang: "en",
         requests: [
-          { date: "2026-06-20", mealSlots: buildSlots(6) },
-          { date: "2026-06-21", mealSlots: buildSlots(5) },
+          { date: PLANNER_DATE_A, mealSlots: buildSlots(6) },
+          { date: PLANNER_DATE_B, mealSlots: buildSlots(5) },
         ],
         writeLogSafelyFn: async () => {},
         loadWalletCatalogMapsSafelyFn: async () => ({ addonNames: new Map() }),
@@ -259,8 +313,8 @@ async function runTests() {
         userId: bulkExactSub.userId,
         lang: "en",
         requests: [
-          { date: "2026-06-20", mealSlots: buildSlots(5) },
-          { date: "2026-06-21", mealSlots: buildSlots(5) },
+          { date: PLANNER_DATE_A, mealSlots: buildSlots(5) },
+          { date: PLANNER_DATE_B, mealSlots: buildSlots(5) },
         ],
         writeLogSafelyFn: async () => {},
         loadWalletCatalogMapsSafelyFn: async () => ({ addonNames: new Map() }),
@@ -269,19 +323,19 @@ async function runTests() {
       assert.strictEqual(await countCompleteSlots(bulkExactSub._id), 10);
 
       const { subscription: premiumSub } = await seedSubscription({ suffix: "006" });
-      await save(premiumSub, "2026-06-20", buildSlots(5, { premium: true }));
-      await save(premiumSub, "2026-06-21", buildSlots(5));
+      await save(premiumSub, PLANNER_DATE_A, buildSlots(5, { premium: true }));
+      await save(premiumSub, PLANNER_DATE_B, buildSlots(5));
       assert.strictEqual(await countCompleteSlots(premiumSub._id), 10, "Premium slots count as one planned meal each");
 
       const { subscription: outsideSub } = await seedSubscription({ suffix: "007" });
-      await save(outsideSub, "2026-06-19", buildSlots(4));
+      await save(outsideSub, PLANNER_DATE_A, buildSlots(4));
       const outsideReject = await updateBulkDaySelectionsForClient({
         subscriptionId: outsideSub._id,
         userId: outsideSub.userId,
         lang: "en",
         requests: [
-          { date: "2026-06-20", mealSlots: buildSlots(3) },
-          { date: "2026-06-21", mealSlots: buildSlots(4) },
+          { date: PLANNER_DATE_B, mealSlots: buildSlots(3) },
+          { date: PLANNER_DATE_C, mealSlots: buildSlots(4) },
         ],
         writeLogSafelyFn: async () => {},
         loadWalletCatalogMapsSafelyFn: async () => ({ addonNames: new Map() }),

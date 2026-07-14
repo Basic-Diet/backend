@@ -62,14 +62,40 @@ function isPlainObject(value) {
   );
 }
 
-function validationError(message, details) {
+function validationError(message, details, status = 400, code = "VALIDATION_ERROR") {
   return {
     ok: false,
-    status: 400,
-    code: "VALIDATION_ERROR",
+    status,
+    code,
     message,
     details,
   };
+}
+
+function hasLegacyRootSelectionPayload(body = {}) {
+  return Array.isArray(body.selections)
+    || Array.isArray(body.meals)
+    || Array.isArray(body.premiumSelections);
+}
+
+function legacyRootSelectionError() {
+  return validationError(
+    "Legacy day selection payload is no longer supported. Submit mealSlots with canonical planner fields.",
+    {
+      expectedPayload: {
+        mealSlots: [
+          {
+            slotIndex: 1,
+            selectionType: "standard_meal",
+            proteinId: "protein_id",
+            carbs: [{ carbId: "carb_id", grams: 150 }],
+          },
+        ],
+      },
+    },
+    422,
+    "LEGACY_DAY_SELECTION_UNSUPPORTED"
+  );
 }
 
 function validateIdList(value, field) {
@@ -254,7 +280,9 @@ async function updateDaySelectionForClient({
   const contractVersion = body.contractVersion || body.plannerContractVersion || body.version;
   const requestedOneTimeAddonIds =
     body.addonsOneTime !== undefined ? body.addonsOneTime : body.oneTimeAddonSelections;
-  const shapeError = validateMealSlotsRequestShape({ mealSlots: body.mealSlots, requestedOneTimeAddonIds });
+  const shapeError = hasLegacyRootSelectionPayload(body) && !Array.isArray(body.mealSlots)
+    ? legacyRootSelectionError()
+    : validateMealSlotsRequestShape({ mealSlots: body.mealSlots, requestedOneTimeAddonIds });
   if (shapeError) return shapeError;
 
   try {

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs every tests/**/*.test.js file with one isolated MongoDB database per file.
+# Runs every classified tests/**/*.test.js file with one isolated MongoDB database per file.
 
 TEST_DIR="tests"
 REPORT_DIR="test-reports"
@@ -12,6 +12,11 @@ FAILED_LOG="$REPORT_DIR/failed-tests.log"
 TIMEOUT_LOG="$REPORT_DIR/timeout-tests.log"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ "${USE_MONGODB_MEMORY_REPLSET:-}" = "true" ] && [ -z "${MONGO_URI:-}" ] && [ -z "${USE_MONGODB_MEMORY_REPLSET_STARTED:-}" ]; then
+  exec node "$SCRIPT_DIR/with-memory-replset.js" -- bash "$0" "$@"
+fi
+
 source "$SCRIPT_DIR/test-db-isolation.sh"
 
 mkdir -p "$REPORT_DIR" "$FAILED_DETAIL_DIR"
@@ -46,7 +51,7 @@ BASE_DB_NAME=""
 if [ -n "${MONGO_URI:-}" ]; then
   HAS_MONGO=true
   BASE_MONGO_URI="$MONGO_URI"
-  BASE_DB_NAME=$(mongo_uri_db_name "$BASE_MONGO_URI") || exit 1
+  BASE_DB_NAME=$(assert_safe_base_test_mongo_uri "$BASE_MONGO_URI") || exit 1
   echo "Using base MONGO_URI: $(mask_mongo_uri "$BASE_MONGO_URI")" | tee -a "$FULL_LOG"
   echo "Base database: $BASE_DB_NAME" | tee -a "$FULL_LOG"
 else
@@ -72,18 +77,19 @@ FAILED_TESTS=0
 TIMEOUT_TESTS=0
 SKIPPED_TESTS=0
 
-mapfile -t TEST_FILES < <(find "$TEST_DIR" -type f -name "*.test.js" | sort)
+mapfile -t TEST_MANIFEST < <(node "$SCRIPT_DIR/test-runner-dispatcher.js" --manifest-tsv)
 
-for test_file in "${TEST_FILES[@]}"; do
+for test_entry in "${TEST_MANIFEST[@]}"; do
+  IFS=$'\t' read -r test_file TEST_FRAMEWORK TEST_RUNNER REQUIRES_MONGO_TEXT REQUIRES_REPLSET_TEXT SAFE_TO_PARALLELIZE_TEXT TEST_COMMAND <<< "$test_entry"
   TOTAL_TESTS=$((TOTAL_TESTS + 1))
 
   REQUIRES_MONGO=false
-  if grep -Eq "MONGO_URI|MONGODB_URI|mongoose|mongodb" "$test_file"; then
-    REQUIRES_MONGO=true
-  fi
+  [ "$REQUIRES_MONGO_TEXT" = "yes" ] && REQUIRES_MONGO=true
 
   echo "----------------------------------------" | tee -a "$FULL_LOG"
   echo "Running: $test_file" | tee -a "$FULL_LOG"
+  echo "  Framework: $TEST_FRAMEWORK ($TEST_RUNNER)" | tee -a "$FULL_LOG"
+  echo "  Command: $TEST_COMMAND" | tee -a "$FULL_LOG"
 
   if [ "$REQUIRES_MONGO" = true ] && [ "$HAS_MONGO" = false ]; then
     echo "SKIPPED: $test_file (Requires MONGO_URI)" | tee -a "$FULL_LOG"
@@ -117,9 +123,15 @@ for test_file in "${TEST_FILES[@]}"; do
   DETAIL_LOG="$FAILED_DETAIL_DIR/${SAFE_TEST_NAME}.log"
   TMP_OUT=$(mktemp /tmp/basicdiet145_test_out_XXXXXX)
 
+  RUN_COMMAND="$TEST_COMMAND"
+  for arg in "${PASSTHROUGH_ARGS[@]}"; do
+    printf -v QUOTED_ARG "%q" "$arg"
+    RUN_COMMAND="$RUN_COMMAND $QUOTED_ARG"
+  done
+
   MONGO_URI="$TEST_MONGO_URI" MONGODB_URI="$TEST_MONGO_URI" NODE_ENV=test \
     timeout "$TIMEOUT_SECONDS" \
-    node "$test_file" "${PASSTHROUGH_ARGS[@]}" \
+    bash -c "$RUN_COMMAND" \
     >"$TMP_OUT" 2>&1
   EXIT_CODE=$?
 

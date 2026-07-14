@@ -8,10 +8,20 @@ const PremiumBalanceSchema = new mongoose.Schema(
   {
     premiumKey: { type: String, required: true, trim: true },
     proteinId: { type: mongoose.Schema.Types.ObjectId, ref: "BuilderProtein", default: null },
+    entityType: { type: String, trim: true, default: "premium_meal" },
+    sourceModel: { type: String, trim: true, default: "" },
+    sourceId: { type: String, trim: true, default: "" },
+    name: { type: mongoose.Schema.Types.Mixed, default: "" },
+    nameI18n: {
+      ar: { type: String, default: "" },
+      en: { type: String, default: "" },
+    },
+    imageUrl: { type: String, default: "" },
     purchasedQty: { type: Number, min: 0, default: 0 },
     remainingQty: { type: Number, min: 0, default: 0 },
     unitExtraFeeHalala: { type: Number, min: 0, default: 0 },
     currency: { type: String, default: "SAR" },
+    catalogVersion: { type: mongoose.Schema.Types.Mixed, default: null },
     purchasedAt: { type: Date, default: Date.now },
   },
   { _id: true }

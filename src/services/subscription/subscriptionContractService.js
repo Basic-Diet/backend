@@ -122,9 +122,19 @@ function buildPhase1SubscriptionContract({ payload = {}, resolvedQuote, actorCon
     return {
       proteinId,
       premiumKey: item.premiumKey || null,
+      entityType: item.entityType || (item.premiumKey === "premium_large_salad" ? "premium_large_salad" : "premium_meal"),
+      sourceModel: item.sourceModel || null,
+      sourceId: item.sourceId ? String(item.sourceId) : proteinId,
+      name: item.name || "",
+      nameI18n: {
+        ar: String(item.nameI18n && item.nameI18n.ar || ""),
+        en: String(item.nameI18n && item.nameI18n.en || ""),
+      },
+      imageUrl: String(item.imageUrl || ""),
       qty: Number(item.qty || 0),
       unitExtraFeeHalala: Number(item.unitExtraFeeHalala || 0),
       currency: String(item.currency || "SAR"),
+      catalogVersion: item.catalogVersion || null,
       priceSource: item.priceSource || null,
     };
   });

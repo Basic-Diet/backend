@@ -19,6 +19,7 @@ const CatalogItem = require("../../src/models/CatalogItem");
 const SaladIngredient = require("../../src/models/SaladIngredient");
 const Sandwich = require("../../src/models/Sandwich");
 const MealBuilderConfig = require("../../src/models/MealBuilderConfig");
+const PremiumUpgradeConfig = require("../../src/models/PremiumUpgradeConfig");
 const Zone = require("../../src/models/Zone");
 const { getSubscriptionBuilderCatalogWithV2 } = require("../../src/services/catalog/CatalogService");
 const { publishMenu } = require("../../src/services/orders/menuCatalogService");
@@ -68,7 +69,6 @@ const canonicalCatalogItems = [
   { key: "beef_steak", itemKind: "protein", nutrition: { calories: 270 } },
   { key: "shrimp", itemKind: "protein", nutrition: { calories: 380 } },
   { key: "salmon", itemKind: "protein", nutrition: { calories: 210 } },
-  { key: "qa_premium_protein", itemKind: "protein", nutrition: { calories: 250 } },
 ];
 
 const menuOptionCatalogItemKeyByOptionKey = {
@@ -99,7 +99,6 @@ const menuOptionCatalogItemKeyByOptionKey = {
   beef_steak: "beef_steak",
   shrimp: "shrimp",
   salmon: "salmon",
-  qa_premium_protein: "qa_premium_protein",
 };
 
 const menuProductCatalogItemKeyByProductKey = {
@@ -360,7 +359,6 @@ const proteinRows = [
   { key: "beef_steak", name: name("ستيك لحم", "Beef Steak"), calories: 270, proteinFamilyKey: "beef" },
   { key: "shrimp", name: name("جمبري", "Shrimp"), calories: 380, proteinFamilyKey: "fish" },
   { key: "salmon", name: name("سالمون", "Salmon"), calories: 210, proteinFamilyKey: "fish" },
-  { key: "qa_premium_protein", name: name("بروتين فحص الجودة آمن للتعديل", "QA Premium Protein (Safe to Mutate)"), calories: 250, proteinFamilyKey: "beef" },
   { key: "boiled_eggs", name: name("بيض مسلوق", "Boiled Eggs"), calories: 155, proteinFamilyKey: "eggs" },
   { key: "tuna", name: name("تونا", "Tuna"), calories: 116, proteinFamilyKey: "fish" },
   { key: "chicken_fajita", name: name("فاهيتا", "Chicken Fajita"), calories: 200, proteinFamilyKey: "chicken" },
@@ -1357,6 +1355,71 @@ async function seedProducts({ catalogItemMap = new Map(), categoryMap, groupMap,
   return productMap;
 }
 
+async function seedPremiumUpgradeConfigs({ productMap, groupMap, optionMap, sync = false }) {
+  const basicMeal = productMap.get("basic_meal");
+  const premiumLargeSalad = productMap.get("premium_large_salad");
+  const proteinsGroup = groupMap.get("proteins");
+  if (!basicMeal || !proteinsGroup) return;
+
+  for (const relation of premiumMealProteinRelations) {
+    const option = optionMap.get(`proteins:${relation.key}`);
+    if (!option) continue;
+    await upsertByMode(
+      PremiumUpgradeConfig,
+      { premiumKey: relation.premiumKey || relation.key },
+      {
+        sourceType: "menu_option",
+        sourceId: option._id,
+        sourceProductId: basicMeal._id,
+        sourceGroupId: proteinsGroup._id,
+        selectionType: "premium_meal",
+        premiumKey: relation.premiumKey || relation.key,
+        displayGroupKey: "premium",
+        upgradeDeltaHalala: Number(relation.extraFeeHalala || 0),
+        currency: SYSTEM_CURRENCY,
+        isEnabled: true,
+        isVisible: true,
+        status: "active",
+        sortOrder: Number(relation.sortOrder || 0),
+        sourceSnapshot: {
+          key: option.key,
+          name: option.name,
+          context: { productKey: basicMeal.key, groupKey: proteinsGroup.key },
+        },
+      },
+      { label: "Premium upgrade configs", sync }
+    );
+  }
+
+  if (premiumLargeSalad) {
+    await upsertByMode(
+      PremiumUpgradeConfig,
+      { premiumKey: "premium_large_salad" },
+      {
+        sourceType: "menu_product",
+        sourceId: premiumLargeSalad._id,
+        sourceProductId: premiumLargeSalad._id,
+        sourceGroupId: null,
+        selectionType: "premium_large_salad",
+        premiumKey: "premium_large_salad",
+        displayGroupKey: "premium",
+        upgradeDeltaHalala: Number(premiumLargeSalad.priceHalala || 0),
+        currency: SYSTEM_CURRENCY,
+        isEnabled: true,
+        isVisible: true,
+        status: "active",
+        sortOrder: 999,
+        sourceSnapshot: {
+          key: premiumLargeSalad.key,
+          name: premiumLargeSalad.name,
+          context: { productKey: premiumLargeSalad.key },
+        },
+      },
+      { label: "Premium upgrade configs", sync }
+    );
+  }
+}
+
 async function seedSandwichCompatibility(productMap, { sync = false } = {}) {
   const subscriptionSandwichKeys = [...SUBSCRIPTION_COLD_SANDWICH_KEYS];
   const sandwichProducts = productRows.filter((row) => subscriptionSandwichKeys.includes(row.key));
@@ -1692,6 +1755,7 @@ async function seedCatalog({
   const { groupMap, optionMap } = await seedOptionGroupsAndOptions({ catalogItemMap, sync: runSync });
   await seedBuilderCompatibilityMirrors({ optionMap, builderCategoryMap, sync: runSync });
   const productMap = await seedProducts({ catalogItemMap, categoryMap, groupMap, optionMap, sync: runSync });
+  await seedPremiumUpgradeConfigs({ productMap, groupMap, optionMap, sync: runSync });
   await seedSandwichCompatibility(productMap, { sync: runSync });
   if (includeSubscriptionPlans) {
     await seedSubscriptionPlans({ sync: runSync, cleanupFlatPlans: runSync });

@@ -4,7 +4,6 @@ const {
   loadCatalogItemsByIdForDocs,
 } = require("./catalogAvailabilityService");
 const {
-  PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
   PREMIUM_LARGE_SALAD_PREMIUM_KEY,
 } = require("../../config/mealPlannerContract");
 const {
@@ -13,7 +12,7 @@ const {
 
 const PREMIUM_LARGE_SALAD_PRODUCT_KEY = "premium_large_salad";
 const PREMIUM_LARGE_SALAD_FALLBACK_PRODUCT_KEY = "basic_salad";
-const LEGACY_FALLBACK_PRICE_SOURCE = "legacy_config_fallback";
+const LEGACY_FALLBACK_PRICE_SOURCE = "catalog_unavailable";
 
 function activeSubscriptionProductQuery(extra = {}) {
   return {
@@ -96,11 +95,12 @@ async function resolvePremiumLargeSaladPricing({ session = null } = {}) {
     product: null,
     productId: null,
     productKey: null,
-    priceHalala: PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
-    extraFeeHalala: PREMIUM_LARGE_SALAD_FIXED_PRICE_HALALA,
+    priceHalala: 0,
+    extraFeeHalala: 0,
     currency: "SAR",
     source: LEGACY_FALLBACK_PRICE_SOURCE,
-    isLegacyFallback: true,
+    isLegacyFallback: false,
+    isCatalogUnavailable: true,
   };
 }
 

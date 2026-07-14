@@ -75,6 +75,7 @@ function normalizePremiumItem(item) {
   }
 
   const name = item.name || (item.protein && (item.protein.name?.en || item.protein.name?.ar)) || null;
+  const nameI18n = item.nameI18n || (item.protein && item.protein.name) || {};
 
   return {
     proteinId: normalizeOptionalObjectId(canonicalProteinId || proteinId),
@@ -83,6 +84,15 @@ function normalizePremiumItem(item) {
     currency: SYSTEM_CURRENCY,
     premiumKey,
     name,
+    nameI18n: {
+      ar: String(nameI18n.ar || ""),
+      en: String(nameI18n.en || ""),
+    },
+    imageUrl: String(item.imageUrl || (item.protein && item.protein.imageUrl) || ""),
+    sourceModel: item.sourceModel || (item.protein ? "BuilderProtein" : null),
+    sourceId: normalizeOptionalObjectId(item.sourceId || proteinId),
+    entityType: item.entityType || (premiumKey === "premium_large_salad" ? "premium_large_salad" : "premium_meal"),
+    catalogVersion: item.catalogVersion || (item.protein && item.protein.updatedAt) || null,
     originalProteinId: normalizeOptionalObjectId(proteinId),
     priceSource: item.priceSource || item.resolutionSource || null,
   };
@@ -326,9 +336,16 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
               premiumItems: normalizedPremiumItems.map((item) => ({
                 proteinId: item.proteinId,
                 premiumKey: item.premiumKey,
+                entityType: item.entityType,
+                sourceModel: item.sourceModel,
+                sourceId: item.sourceId,
+                name: item.name,
+                nameI18n: item.nameI18n,
+                imageUrl: item.imageUrl,
                 qty: item.qty,
                 unitExtraFeeHalala: item.unitExtraFeeHalala,
                 currency: item.currency,
+                catalogVersion: item.catalogVersion,
                 priceSource: item.priceSource || null,
               })),
             },

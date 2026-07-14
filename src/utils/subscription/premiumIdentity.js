@@ -2,6 +2,9 @@ const BuilderProtein = require("../../models/BuilderProtein");
 const {
   resolveSubscriptionPremiumUpgradePricing,
 } = require("../../services/subscription/premiumUpgradeConfigService");
+const {
+  resolvePremiumCatalogItem,
+} = require("../../services/catalog/catalogResolutionService");
 
 const PREMIUM_LARGE_SALAD_KEY = "premium_large_salad";
 const LEGACY_CUSTOM_PREMIUM_SALAD_KEY = "custom_premium_salad";
@@ -11,7 +14,7 @@ const PREMIUM_ITEM_KEY_ALIASES = Object.freeze({
   [PREMIUM_LARGE_SALAD_KEY]: PREMIUM_LARGE_SALAD_KEY,
 });
 
-const CANONICAL_PREMIUM_KEYS = ["shrimp", "beef_steak", "salmon", PREMIUM_LARGE_SALAD_KEY];
+const CANONICAL_PREMIUM_KEYS = [];
 
 const STATIC_PREMIUM_ITEMS = {
   [PREMIUM_LARGE_SALAD_KEY]: {
@@ -90,7 +93,7 @@ function resolvePremiumKeyFromName(name) {
 }
 
 function isCanonicalPremiumKey(key) {
-  return key && CANONICAL_PREMIUM_KEYS.includes(normalizePremiumItemKey(key));
+  return Boolean(normalizePremiumItemKey(key));
 }
 
 async function resolveCanonicalPremiumIdentity(input) {
@@ -120,16 +123,18 @@ async function resolveCanonicalPremiumIdentity(input) {
   let resolvedUnitExtraFeeHalala = 0;
   let canonicalProteinDoc = null;
   let canonicalProteinId = null;
+  let canonicalMenuOptionDoc = null;
+  let canonicalMenuProductDoc = null;
   let resolutionSource = null;
 
-  if (normalizedInputPremiumKey && isCanonicalPremiumKey(normalizedInputPremiumKey)) {
+  if (normalizedInputPremiumKey) {
     resolvedPremiumKey = normalizedInputPremiumKey;
     resolutionSource = "inputPremiumKey";
     log(resolutionSource, { resolvedPremiumKey });
   }
 
   if (!resolvedPremiumKey && builderProteinDoc) {
-    if (builderProteinDoc.premiumKey && isCanonicalPremiumKey(builderProteinDoc.premiumKey)) {
+    if (builderProteinDoc.premiumKey) {
       resolvedPremiumKey = normalizePremiumItemKey(builderProteinDoc.premiumKey);
       resolutionSource = "builderProteinDoc.premiumKey";
       log(resolutionSource, { resolvedPremiumKey });
@@ -158,7 +163,7 @@ async function resolveCanonicalPremiumIdentity(input) {
       try {
         const proteinDoc = await BuilderProtein.findById(effectiveProteinId).lean();
         if (proteinDoc) {
-          if (proteinDoc.premiumKey && isCanonicalPremiumKey(proteinDoc.premiumKey)) {
+          if (proteinDoc.premiumKey) {
             resolvedPremiumKey = normalizePremiumItemKey(proteinDoc.premiumKey);
             resolutionSource = "proteinId.premiumKey";
             log(resolutionSource, { resolvedPremiumKey });
@@ -195,9 +200,37 @@ async function resolveCanonicalPremiumIdentity(input) {
   }
 
   if (resolvedPremiumKey) {
+    try {
+      const catalogResolution = await resolvePremiumCatalogItem({
+        premiumKey: resolvedPremiumKey,
+        proteinId,
+        builderProteinDoc,
+      });
+      canonicalProteinDoc = catalogResolution.builderProteinDoc || null;
+      canonicalMenuOptionDoc = catalogResolution.menuOptionDoc || null;
+      canonicalMenuProductDoc = catalogResolution.menuProductDoc || null;
+      canonicalProteinId = canonicalProteinDoc && canonicalProteinDoc._id ? canonicalProteinDoc._id : null;
+      if (!resolvedName && catalogResolution.sourceSnapshot && catalogResolution.sourceSnapshot.name) {
+        resolvedName = catalogResolution.sourceSnapshot.name.en || catalogResolution.sourceSnapshot.name.ar || resolvedName;
+      }
+      if (resolvedUnitExtraFeeHalala === 0) {
+        const sourceDoc = canonicalMenuOptionDoc || canonicalProteinDoc || canonicalMenuProductDoc;
+        resolvedUnitExtraFeeHalala = Number(
+          sourceDoc && (sourceDoc.extraPriceHalala !== undefined ? sourceDoc.extraPriceHalala : sourceDoc.extraFeeHalala !== undefined ? sourceDoc.extraFeeHalala : sourceDoc.priceHalala)
+          || 0
+        );
+      }
+    } catch (err) {
+      log("catalogResolution.error", { error: err.message, code: err.code });
+      if (!builderProteinDoc && !proteinId && !isStaticPremiumItem(resolvedPremiumKey)) {
+        throw err;
+      }
+    }
+
     const upgrade = await resolveSubscriptionPremiumUpgradePricing(resolvedPremiumKey, {
       fallbackPriceHalala: resolvedUnitExtraFeeHalala,
-      builderProteinDoc,
+      optionDoc: canonicalMenuOptionDoc,
+      builderProteinDoc: canonicalProteinDoc || builderProteinDoc,
     });
     resolvedUnitExtraFeeHalala = upgrade.priceHalala;
     resolutionSource = upgrade.priceSource;
@@ -214,11 +247,14 @@ async function resolveCanonicalPremiumIdentity(input) {
         });
       }
     } else {
-      canonicalProteinDoc = await BuilderProtein.findOne({
-        premiumKey: resolvedPremiumKey,
-        isPremium: true,
-        isActive: true,
-      }).lean();
+      if (!canonicalProteinDoc) {
+        canonicalProteinDoc = await BuilderProtein.findOne({
+          premiumKey: resolvedPremiumKey,
+          isPremium: true,
+          isActive: true,
+          isArchived: { $ne: true },
+        }).lean();
+      }
 
       if (canonicalProteinDoc) {
         canonicalProteinId = canonicalProteinDoc._id;
@@ -230,7 +266,7 @@ async function resolveCanonicalPremiumIdentity(input) {
           resolvedName,
           resolvedUnitExtraFeeHalala,
         });
-      } else if (!isStaticPremiumItem(resolvedPremiumKey)) {
+      } else if (!canonicalMenuOptionDoc && !canonicalMenuProductDoc && !isStaticPremiumItem(resolvedPremiumKey)) {
         const err = new Error(`No active canonical protein found for premiumKey: ${resolvedPremiumKey}`);
         err.code = "INVALID_PREMIUM_ITEM";
         throw err;
@@ -250,6 +286,8 @@ async function resolveCanonicalPremiumIdentity(input) {
     premiumKey: resolvedPremiumKey,
     canonicalProteinId,
     canonicalProteinDoc,
+    canonicalMenuOptionDoc,
+    canonicalMenuProductDoc,
     name: resolvedName,
     unitExtraFeeHalala: resolvedUnitExtraFeeHalala,
     currency: "SAR",

@@ -22,11 +22,24 @@ const SubscriptionPickupRequest = require("../src/models/SubscriptionPickupReque
 const User = require("../src/models/User");
 const { DASHBOARD_JWT_SECRET } = require("../src/services/dashboardTokenService");
 const { ORDER_STATUSES } = require("../src/utils/orderState");
+const {
+  getFutureBusinessDate,
+  getTestBusinessDate,
+} = require("./helpers/businessDateHelper");
 
 const TEST_TAG = `delivery-lifecycle-${Date.now()}`;
 const ORIGINAL_ONE_TIME_ORDER_DELIVERY_ENABLED = process.env.ONE_TIME_ORDER_DELIVERY_ENABLED;
 const dashboardUsers = new Map();
 const results = { passed: 0, failed: 0 };
+const DAY_0 = getTestBusinessDate();
+const DAY_1 = getFutureBusinessDate(1);
+const DAY_2 = getFutureBusinessDate(2);
+const DAY_3 = getFutureBusinessDate(3);
+const DAY_4 = getFutureBusinessDate(4);
+const DAY_5 = getFutureBusinessDate(5);
+const DAY_6 = getFutureBusinessDate(6);
+const SUBSCRIPTION_START_DATE = getFutureBusinessDate(-7);
+const SUBSCRIPTION_END_DATE = getFutureBusinessDate(30);
 
 async function test(name, fn) {
   try {
@@ -112,9 +125,9 @@ async function createSubscription(user, overrides = {}) {
     userId: user._id,
     planId: new mongoose.Types.ObjectId(),
     status: "active",
-    startDate: new Date("2026-05-01T00:00:00.000Z"),
-    endDate: new Date("2026-05-30T00:00:00.000Z"),
-    validityEndDate: new Date("2026-05-30T00:00:00.000Z"),
+    startDate: new Date(`${SUBSCRIPTION_START_DATE}T00:00:00+03:00`),
+    endDate: new Date(`${SUBSCRIPTION_END_DATE}T00:00:00+03:00`),
+    validityEndDate: new Date(`${SUBSCRIPTION_END_DATE}T00:00:00+03:00`),
     totalMeals: 20,
     remainingMeals: 20,
     selectedGrams: 200,
@@ -130,7 +143,7 @@ async function createSubscription(user, overrides = {}) {
 async function createDay(subscription, overrides = {}) {
   return SubscriptionDay.create({
     subscriptionId: subscription._id,
-    date: overrides.date || "2026-05-21",
+    date: overrides.date || DAY_0,
     status: overrides.status || "open",
     materializedMeals: [{
       slotKey: "slot_1",
@@ -138,6 +151,8 @@ async function createDay(subscription, overrides = {}) {
       operationalSku: `${TEST_TAG}-meal`,
     }],
     mealSlots: [{ slotIndex: 1, slotKey: "slot_1", status: "complete" }],
+    plannerState: "confirmed",
+    planningState: "confirmed",
     ...overrides,
   });
 }
@@ -146,7 +161,7 @@ async function createPickupRequest(subscription, user, overrides = {}) {
   return SubscriptionPickupRequest.create({
     subscriptionId: subscription._id,
     userId: user._id,
-    date: overrides.date || "2026-05-21",
+    date: overrides.date || DAY_0,
     mealCount: overrides.mealCount || 1,
     status: overrides.status || "locked",
     creditsReserved: overrides.creditsReserved !== undefined ? overrides.creditsReserved : true,
@@ -177,8 +192,8 @@ async function createOrder(user, overrides = {}) {
     paymentStatus: overrides.paymentStatus || "paid",
     fulfillmentMethod,
     deliveryMode: fulfillmentMethod,
-    fulfillmentDate: overrides.fulfillmentDate || "2026-05-21",
-    deliveryDate: overrides.fulfillmentDate || "2026-05-21",
+    fulfillmentDate: overrides.fulfillmentDate || DAY_0,
+    deliveryDate: overrides.fulfillmentDate || DAY_0,
     items: [{
       itemType: "sandwich",
       name: { en: `${TEST_TAG} sandwich`, ar: "" },
@@ -261,7 +276,7 @@ async function cleanup() {
     await test("subscription delivery cancel, reopen, dispatch, and fulfill are executable and sync Delivery", async () => {
       const subscription = await createSubscription(user, { deliveryMode: "delivery" });
 
-      const openCancelDay = await createDay(subscription, { date: "2026-05-21", status: "open" });
+      const openCancelDay = await createDay(subscription, { date: DAY_0, status: "open" });
       let res = await api.post("/api/dashboard/ops/actions/cancel").set(auth("admin")).send({
         entityId: String(openCancelDay._id),
         entityType: "subscription_day",
@@ -270,7 +285,7 @@ async function cleanup() {
       expectStatus(res, 200, "delivery open cancel");
       assert.strictEqual(res.body.data.status, "delivery_canceled");
 
-      const lockedDay = await createDay(subscription, { date: "2026-05-22", status: "open" });
+      const lockedDay = await createDay(subscription, { date: DAY_1, status: "open" });
       res = await api.post("/api/dashboard/ops/actions/lock").set(auth("admin")).send({
         entityId: String(lockedDay._id),
         entityType: "subscription_day",
@@ -284,7 +299,7 @@ async function cleanup() {
       expectStatus(res, 200, "delivery locked reopen");
       assert.strictEqual(res.body.data.status, "open");
 
-      const flowDay = await createDay(subscription, { date: "2026-05-23", status: "open" });
+      const flowDay = await createDay(subscription, { date: DAY_2, status: "open" });
       res = await api.post("/api/dashboard/ops/actions/prepare").set(auth("admin")).send({
         entityId: String(flowDay._id),
         entityType: "subscription_day",
@@ -294,7 +309,7 @@ async function cleanup() {
       res = await api.post("/api/dashboard/ops/actions/dispatch").set(auth("courier")).send({
         entityId: String(flowDay._id),
         entityType: "subscription_day",
-        payload: { etaAt: "2026-05-23T15:30:00.000Z" },
+        payload: { etaAt: `${DAY_2}T15:30:00.000+03:00` },
       });
       expectStatus(res, 200, "delivery dispatch");
       assert.strictEqual(res.body.data.status, "out_for_delivery");
@@ -316,7 +331,7 @@ async function cleanup() {
       const otherUser = await seedUser("other-subscription-user");
 
       const openCancelDay = await createDay(subscription, {
-        date: "2026-05-24",
+        date: DAY_3,
         status: "open",
         pickupRequested: true,
       });
@@ -329,7 +344,7 @@ async function cleanup() {
       assert.strictEqual(res.body.data.status, "canceled_at_branch");
 
       const flowDay = await createDay(subscription, {
-        date: "2026-05-25",
+        date: DAY_4,
         status: "open",
         pickupRequested: true,
         pickupRequestedAt: new Date(),
@@ -341,7 +356,7 @@ async function cleanup() {
       expectStatus(res, 422, "planned pickup day prepare blocked");
       assert.strictEqual(res.body.error.code, "PICKUP_REQUEST_REQUIRED");
 
-      const pickupRequest = await createPickupRequest(subscription, user, { date: "2026-05-25" });
+      const pickupRequest = await createPickupRequest(subscription, user, { date: DAY_4 });
       res = await api.post("/api/dashboard/ops/actions/start_preparation").set(auth("kitchen")).send({
         entityId: String(pickupRequest._id),
         entityType: "subscription_pickup_request",
@@ -357,7 +372,7 @@ async function cleanup() {
       const pickupCode = res.body.data.context.pickupCode;
       assert.match(pickupCode, /^\d{6}$/);
 
-      res = await api.get("/api/dashboard/pickup/queue?date=2026-05-25&method=pickup&view=legacy").set(auth("kitchen"));
+      res = await api.get(`/api/dashboard/pickup/queue?date=${DAY_4}&method=pickup&view=legacy`).set(auth("kitchen"));
       expectStatus(res, 200, "pickup queue");
       const row = res.body.data.items.find((item) => item.entityId === String(pickupRequest._id));
       assert(row, "ready pickup request should be in queue");
@@ -382,7 +397,7 @@ async function cleanup() {
       assert.strictEqual(String(fulfilledRequest.fulfilledByDashboardUserId), String(dashboardUsers.get("kitchen")._id));
 
       const noShowRequest = await createPickupRequest(subscription, user, {
-        date: "2026-05-26",
+        date: DAY_5,
         status: "ready_for_pickup",
         pickupCode: "123456",
         pickupCodeIssuedAt: new Date(),
@@ -403,7 +418,7 @@ async function cleanup() {
           status: ORDER_STATUSES.IN_PREPARATION,
         });
         let res = await api.post(`/api/dashboard/orders/${dispatchOrder._id}/actions/dispatch`).set(auth("courier")).send({
-          etaAt: "2026-05-21T15:30:00.000Z",
+          etaAt: `${DAY_0}T15:30:00.000+03:00`,
         });
         expectStatus(res, 200, "order delivery dispatch");
         assert.strictEqual(res.body.data.status, "out_for_delivery");
@@ -463,7 +478,7 @@ async function cleanup() {
     await test("pickup fulfill still requires dashboard auth and an allowed role", async () => {
       const subscription = await createSubscription(user, { deliveryMode: "pickup" });
       const day = await createDay(subscription, {
-        date: "2026-05-27",
+        date: DAY_6,
         status: "ready_for_pickup",
         pickupRequested: true,
         pickupCode: "111222",

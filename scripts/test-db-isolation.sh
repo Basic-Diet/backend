@@ -106,6 +106,32 @@ is_safe_test_db_name() {
   return 0
 }
 
+is_safe_base_test_db_name() {
+  local db_name="$1"
+  local low_db
+
+  low_db=$(printf "%s" "$db_name" | tr '[:upper:]' '[:lower:]')
+  [[ -n "$low_db" ]] || return 1
+  [[ "$low_db" == *test* || "$low_db" == *local* || "$low_db" == *ci* ]] || return 1
+  [[ "$low_db" != "basicdiet145" ]] || return 1
+  [[ ! "$low_db" =~ (^|_)(prod|production|live)(_|$) ]] || return 1
+
+  return 0
+}
+
+assert_safe_base_test_mongo_uri() {
+  local uri="$1"
+  local db_name
+
+  db_name=$(mongo_uri_db_name "$uri") || return 1
+  if ! is_safe_base_test_db_name "$db_name"; then
+    echo "ERROR: refusing base MongoDB database '$db_name' for tests; use an isolated database name containing test, local, or ci." >&2
+    return 1
+  fi
+
+  printf "%s" "$db_name"
+}
+
 drop_test_db_if_safe() {
   local uri="$1"
   local db_name="$2"

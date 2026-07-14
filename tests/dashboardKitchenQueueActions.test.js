@@ -14,8 +14,10 @@ const Subscription = require("../src/models/Subscription");
 const SubscriptionDay = require("../src/models/SubscriptionDay");
 const User = require("../src/models/User");
 const { DASHBOARD_JWT_SECRET } = require("../src/services/dashboardTokenService");
+const { getTestBusinessDate } = require("./helpers/businessDateHelper");
 
 const TEST_TAG = `dashboard-kitchen-queue-actions-${Date.now()}`;
+const TEST_DATE = getTestBusinessDate();
 
 async function connect() {
   if (mongoose.connection.readyState === 0) {
@@ -80,7 +82,7 @@ async function main() {
   });
   const day = await SubscriptionDay.create({
     subscriptionId: subscription._id,
-    date: "2026-05-10",
+    date: TEST_DATE,
     status: "open",
     materializedMeals: [{
       slotKey: "slot_1",
@@ -92,7 +94,7 @@ async function main() {
   });
 
   try {
-    let res = await api.get("/api/dashboard/kitchen/queue?date=2026-05-10&method=delivery").set(auth(dashboardUser));
+    let res = await api.get(`/api/dashboard/kitchen/queue?date=${TEST_DATE}&method=delivery`).set(auth(dashboardUser));
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
     const row = res.body.data.items.find((item) => item.ids.entityType === "subscription_day" && item.ids.entityId === String(day._id));
     assert(row, "subscription_day row should be present");

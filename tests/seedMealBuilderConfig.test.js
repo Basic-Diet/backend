@@ -13,6 +13,7 @@ const MenuCategory = require("../src/models/MenuCategory");
 const MenuOption = require("../src/models/MenuOption");
 const MenuOptionGroup = require("../src/models/MenuOptionGroup");
 const MenuProduct = require("../src/models/MenuProduct");
+const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
 const { BOOTSTRAP_KEY, seedMealBuilderConfig } = require("../scripts/bootstrap/seed-meal-builder");
@@ -105,7 +106,7 @@ async function seedCatalog({ includeSalad = true, disallowedSaladProtein = false
     })
     : null;
 
-  const [chicken, salmon, rice, saladProtein, badSaladProtein, extraProtein] = await Promise.all([
+  const [chicken, salmon, shrimp, rice, saladProtein, badSaladProtein, extraProtein] = await Promise.all([
     MenuOption.create({
       groupId: proteinsGroup._id,
       key: "grilled_chicken",
@@ -119,6 +120,16 @@ async function seedCatalog({ includeSalad = true, disallowedSaladProtein = false
       key: "salmon",
       premiumKey: "salmon",
       name: { en: "Salmon", ar: "Salmon" },
+      extraPriceHalala: 3000,
+      availableFor: ["subscription"],
+      availableForSubscription: true,
+      publishedAt: now,
+    }),
+    MenuOption.create({
+      groupId: proteinsGroup._id,
+      key: "shrimp",
+      premiumKey: "shrimp",
+      name: { en: "Shrimp", ar: "Shrimp" },
       extraPriceHalala: 3000,
       availableFor: ["subscription"],
       availableForSubscription: true,
@@ -165,9 +176,55 @@ async function seedCatalog({ includeSalad = true, disallowedSaladProtein = false
   await ProductOptionGroup.create({ productId: basicMeal._id, groupId: carbsGroup._id, minSelections: 1, maxSelections: 2, isRequired: true, sortOrder: 2 });
   await ProductGroupOption.create({ productId: basicMeal._id, groupId: proteinsGroup._id, optionId: chicken._id, extraPriceHalala: 0, sortOrder: 1 });
   await ProductGroupOption.create({ productId: basicMeal._id, groupId: proteinsGroup._id, optionId: salmon._id, extraPriceHalala: 3000, sortOrder: 2 });
+  await ProductGroupOption.create({ productId: basicMeal._id, groupId: proteinsGroup._id, optionId: shrimp._id, extraPriceHalala: 3000, sortOrder: 3 });
+  await ProductGroupOption.create({ productId: basicMeal._id, groupId: proteinsGroup._id, optionId: badSaladProtein._id, extraPriceHalala: 3000, sortOrder: 4 });
   await ProductGroupOption.create({ productId: basicMeal._id, groupId: carbsGroup._id, optionId: rice._id, extraPriceHalala: 0, sortOrder: 1 });
+  await Promise.all([
+    [salmon, 3000],
+    [shrimp, 3000],
+    [badSaladProtein, 3000],
+  ].map(([option, price], index) => PremiumUpgradeConfig.create({
+    sourceType: "menu_option",
+    sourceId: option._id,
+    sourceProductId: basicMeal._id,
+    sourceGroupId: proteinsGroup._id,
+    selectionType: "premium_meal",
+    premiumKey: option.premiumKey || option.key,
+    displayGroupKey: "premium",
+    upgradeDeltaHalala: price,
+    currency: "SAR",
+    isEnabled: true,
+    isVisible: true,
+    status: "active",
+    sortOrder: (index + 1) * 10,
+    sourceSnapshot: {
+      key: option.key,
+      name: option.name,
+      context: { productKey: basicMeal.key, groupKey: proteinsGroup.key },
+    },
+  })));
 
   if (salad) {
+    await PremiumUpgradeConfig.create({
+      sourceType: "menu_product",
+      sourceId: salad._id,
+      sourceProductId: salad._id,
+      sourceGroupId: null,
+      selectionType: "premium_large_salad",
+      premiumKey: "premium_large_salad",
+      displayGroupKey: "premium",
+      upgradeDeltaHalala: salad.priceHalala,
+      currency: "SAR",
+      isEnabled: true,
+      isVisible: true,
+      status: "active",
+      sortOrder: 99,
+      sourceSnapshot: {
+        key: salad.key,
+        name: salad.name,
+        context: { productKey: salad.key },
+      },
+    });
     await ProductOptionGroup.create({ productId: salad._id, groupId: proteinsGroup._id, minSelections: 1, maxSelections: 1, isRequired: true, sortOrder: 1 });
     await ProductGroupOption.create({
       productId: salad._id,

@@ -119,6 +119,13 @@ function resolveAddonUnitPriceHalala(addon) {
   return 0;
 }
 
+function localizedNameObject(value = {}) {
+  return {
+    ar: String((value && value.ar) || ""),
+    en: String((value && value.en) || ""),
+  };
+}
+
 function normalizeSlotInput(slot = {}) {
   if (!slot || typeof slot !== "object" || Array.isArray(slot)) {
     return { type: "delivery", window: "", slotId: "" };
@@ -794,9 +801,14 @@ async function resolveCheckoutQuoteOrThrow(
       } catch (resolveErr) {
         const err = new Error(`Invalid premiumKey: ${item.premiumKey} - ${resolveErr.message}`);
         err.code = "INVALID_PREMIUM_ITEM";
+        err.status = resolveErr.status || 422;
         throw err;
       }
-      doc = resolved.canonicalProteinDoc || null;
+      doc = resolved.canonicalMenuOptionDoc
+        ? { ...resolved.canonicalMenuOptionDoc, _sourceModel: "MenuOption" }
+        : resolved.canonicalMenuProductDoc
+          ? { ...resolved.canonicalMenuProductDoc, _sourceModel: "MenuProduct" }
+        : resolved.canonicalProteinDoc || null;
     } else {
       doc = premiumById.get(item.id);
       if (!doc) {
@@ -840,7 +852,7 @@ async function resolveCheckoutQuoteOrThrow(
     const upgrade = await resolveSubscriptionPremiumUpgradePricing(premiumKey, {
       fallbackPriceHalala: resolved.unitExtraFeeHalala,
       optionDoc: doc && doc._sourceModel === "MenuOption" ? doc : null,
-      builderProteinDoc: doc && doc._sourceModel !== "MenuOption" ? doc : null,
+      builderProteinDoc: doc && !doc._sourceModel ? doc : null,
     });
     const unitExtraFeeHalala = Number(upgrade.priceHalala);
     const priceSource = upgrade.priceSource;
@@ -860,6 +872,12 @@ async function resolveCheckoutQuoteOrThrow(
       premiumKey,
       canonicalProteinId: resolved.canonicalProteinId,
       name: resolved.name,
+      nameI18n: localizedNameObject((doc && doc.name) || {}),
+      imageUrl: String((doc && doc.imageUrl) || ""),
+      sourceModel: doc && doc._sourceModel ? doc._sourceModel : doc ? "BuilderProtein" : null,
+      sourceId: doc && doc._id ? doc._id : null,
+      entityType: premiumKey === "premium_large_salad" ? "premium_large_salad" : "premium_meal",
+      catalogVersion: doc && doc.updatedAt ? doc.updatedAt : null,
       priceSource,
     });
   }

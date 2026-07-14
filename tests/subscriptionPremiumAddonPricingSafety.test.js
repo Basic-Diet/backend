@@ -18,6 +18,7 @@ const MenuCategory = require("../src/models/MenuCategory");
 const MenuOption = require("../src/models/MenuOption");
 const MenuOptionGroup = require("../src/models/MenuOptionGroup");
 const MenuProduct = require("../src/models/MenuProduct");
+const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
 
@@ -92,6 +93,28 @@ async function seedSaladCatalog() {
     await ProductGroupOption.create({ productId: product._id, groupId: proteinGroup._id, optionId: protein._id });
     await ProductGroupOption.create({ productId: product._id, groupId: sauceGroup._id, optionId: sauce._id });
   }
+
+  await PremiumUpgradeConfig.create({
+    sourceType: "menu_product",
+    sourceId: premiumSalad._id,
+    sourceProductId: premiumSalad._id,
+    sourceGroupId: null,
+    selectionType: "premium_large_salad",
+    premiumKey: "premium_large_salad",
+    displayGroupKey: "premium",
+    upgradeDeltaHalala: premiumSalad.priceHalala,
+    currency: "SAR",
+    isEnabled: true,
+    isVisible: true,
+    status: "active",
+    sortOrder: 1,
+    metadata: { testOnly: true },
+    sourceSnapshot: {
+      key: premiumSalad.key,
+      name: premiumSalad.name,
+      context: { fixture: "subscriptionPremiumAddonPricingSafety" },
+    },
+  });
 
   return { premiumSalad, basicSalad, proteinGroup, sauceGroup, protein, sauce };
 }

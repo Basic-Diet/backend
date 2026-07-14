@@ -15,7 +15,7 @@ function isRetryableMongoTransactionError(err) {
   }
 
   const code = Number(err.code);
-  if ([112, 244, 251].includes(code)) return true;
+  if ([24, 112, 244, 251].includes(code)) return true;
 
   const message = String(err.message || "").toLowerCase();
   return (

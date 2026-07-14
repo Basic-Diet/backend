@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const SubscriptionDay = require("../../../src/models/SubscriptionDay");
 const Subscription = require("../../../src/models/Subscription");
+const PremiumUpgradeConfig = require("../../../src/models/PremiumUpgradeConfig");
 const { executeAction } = require("../../../src/services/dashboard/opsTransitionService");
 const { runMongoTransactionWithRetry } = require("../../../src/services/mongoTransactionRetryService");
 
@@ -26,6 +27,27 @@ describe("Add-on Rollback via opsTransitionService", () => {
   beforeEach(async () => {
     // Setup fresh mock data for each test
     addonBucketId = new mongoose.Types.ObjectId();
+    await PremiumUpgradeConfig.create({
+      sourceType: "menu_product",
+      sourceId: new mongoose.Types.ObjectId(),
+      sourceProductId: new mongoose.Types.ObjectId(),
+      sourceGroupId: null,
+      selectionType: "premium_large_salad",
+      premiumKey: "custom_premium_salad",
+      displayGroupKey: "premium",
+      upgradeDeltaHalala: 1500,
+      currency: "SAR",
+      isEnabled: true,
+      isVisible: true,
+      status: "active",
+      sortOrder: 1,
+      metadata: { testOnly: true },
+      sourceSnapshot: {
+        key: "custom_premium_salad",
+        name: { en: "Custom Premium Salad", ar: "Custom Premium Salad" },
+        context: { fixture: "opsTransitionService.addonRollback" },
+      },
+    });
     const sub = await Subscription.create({
       userId: new mongoose.Types.ObjectId(),
       planId: new mongoose.Types.ObjectId(),
@@ -83,6 +105,7 @@ describe("Add-on Rollback via opsTransitionService", () => {
   afterEach(async () => {
     await Subscription.deleteMany({ _id: subId });
     await SubscriptionDay.deleteMany({ _id: dayId });
+    await PremiumUpgradeConfig.deleteMany({ premiumKey: "custom_premium_salad" });
   });
 
   it("should release addon balance when day is canceled", async () => {

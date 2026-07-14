@@ -14,6 +14,7 @@ const MenuOptionGroup = require("../src/models/MenuOptionGroup");
 const MenuProduct = require("../src/models/MenuProduct");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
+const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
 const Subscription = require("../src/models/Subscription");
 const SubscriptionDay = require("../src/models/SubscriptionDay");
 const User = require("../src/models/User");
@@ -69,6 +70,26 @@ async function seedFixture() {
     priceHalala: 2900,
     availableFor: ["subscription"],
     publishedAt: now,
+  });
+  await PremiumUpgradeConfig.create({
+    sourceType: "menu_product",
+    sourceId: salad._id,
+    sourceProductId: salad._id,
+    sourceGroupId: null,
+    selectionType: "premium_large_salad",
+    premiumKey: "premium_large_salad",
+    displayGroupKey: "premium",
+    upgradeDeltaHalala: salad.priceHalala,
+    currency: "SAR",
+    isEnabled: true,
+    isVisible: true,
+    status: "active",
+    sortOrder: 99,
+    sourceSnapshot: {
+      key: salad.key,
+      name: salad.name,
+      context: { productKey: salad.key },
+    },
   });
   const allowedProtein = await MenuOption.create({
     groupId: proteinsGroup._id,

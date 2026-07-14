@@ -8,6 +8,7 @@ const { resolvePremiumMealCatalogEntry } = require("../utils/subscription/subscr
 const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
 const { resolveManagedImageFromRequest } = require("../services/adminImageService");
+const { archiveDocument } = require("../services/catalog/catalogArchiveGuardService");
 const {
   normalizeOptionalString,
   parseBooleanField,
@@ -488,11 +489,12 @@ async function deleteBuilderPremiumMeal(req, res) {
     return errorResponse(res, err.status, err.code, err.message);
   }
 
-  const deleted = await BuilderProtein.findOneAndDelete({ _id: id, isPremium: true }).lean();
-  if (!deleted) {
+  const row = await BuilderProtein.findOne({ _id: id, isPremium: true });
+  if (!row) {
     return errorResponse(res, 404, "NOT_FOUND", "Premium meal not found");
   }
-  return res.status(200).json({ status: true });
+  await archiveDocument(row);
+  return res.status(200).json({ status: true, data: { id: row.id, isActive: false, isArchived: true, archivedAt: row.archivedAt } });
 }
 
 async function toggleBuilderPremiumMealActive(req, res) {

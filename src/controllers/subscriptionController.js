@@ -1061,7 +1061,7 @@ async function quoteSubscription(req, res, runtimeOverrides = null) {
     if (err.code === "INVALID_SELECTION") {
       return errorResponse(res, 400, "INVALID", err.message);
     }
-    if (err.code === "INVALID_PREMIUM_ITEM" || err.code === "UNKNOWN_PREMIUM_KEY") {
+    if (["INVALID_PREMIUM_ITEM", "UNKNOWN_PREMIUM_KEY", "PREMIUM_UPGRADE_UNAVAILABLE", "PREMIUM_ITEM_UNAVAILABLE"].includes(err.code)) {
       return errorResponse(res, 422, "INVALID_PREMIUM_ITEM", err.message);
     }
     if (err.code === "PRICE_MATRIX_NOT_FOUND") {
@@ -1113,7 +1113,7 @@ async function checkoutSubscription(req, res, runtimeOverrides = null) {
     if (err.code === "INVALID_SELECTION") {
       return errorResponse(res, 400, "INVALID", err.message);
     }
-    if (err.code === "INVALID_PREMIUM_ITEM" || err.code === "UNKNOWN_PREMIUM_KEY") {
+    if (["INVALID_PREMIUM_ITEM", "UNKNOWN_PREMIUM_KEY", "PREMIUM_UPGRADE_UNAVAILABLE", "PREMIUM_ITEM_UNAVAILABLE"].includes(err.code)) {
       return errorResponse(res, 422, "INVALID_PREMIUM_ITEM", err.message);
     }
     if (err.status === 409 && err.code === "IDEMPOTENCY_CONFLICT") {

@@ -16,10 +16,16 @@ const Subscription = require("../src/models/Subscription");
 const SubscriptionDay = require("../src/models/SubscriptionDay");
 const SubscriptionPickupRequest = require("../src/models/SubscriptionPickupRequest");
 const { dashboardAuth } = require("./helpers/dashboardAuthHelper");
+const {
+  getFutureBusinessDate,
+  getTestBusinessDate,
+} = require("./helpers/businessDateHelper");
 
 const TEST_TAG = `pickup-request-ops-${Date.now()}`;
 const TEST_PLAN_ID = new mongoose.Types.ObjectId();
-const TODAY = "2026-05-18";
+const TODAY = getTestBusinessDate();
+const SUBSCRIPTION_START_DATE = getFutureBusinessDate(-7);
+const SUBSCRIPTION_END_DATE = getFutureBusinessDate(30);
 const results = { passed: 0, failed: 0 };
 
 function appToken(userId) {
@@ -80,9 +86,9 @@ async function seedSubscriptionContext({ remainingMeals = 8 } = {}) {
     userId: user._id,
     planId: TEST_PLAN_ID,
     status: "active",
-    startDate: new Date("2026-05-01T00:00:00Z"),
-    endDate: new Date("2026-06-01T00:00:00Z"),
-    validityEndDate: new Date("2026-06-01T00:00:00Z"),
+    startDate: new Date(`${SUBSCRIPTION_START_DATE}T00:00:00+03:00`),
+    endDate: new Date(`${SUBSCRIPTION_END_DATE}T00:00:00+03:00`),
+    validityEndDate: new Date(`${SUBSCRIPTION_END_DATE}T00:00:00+03:00`),
     totalMeals: 10,
     remainingMeals,
     selectedGrams: 200,
@@ -174,7 +180,7 @@ async function getRemainingMeals(subscriptionId) {
 
     await test("ops can move in_preparation -> ready_for_pickup and generate pickupCode on request only", async () => {
       const { pickupRequest, day } = await seedReservedPickupRequest({ status: "in_preparation" });
-      const preparedAt = new Date("2026-05-18T10:00:00.000Z");
+      const preparedAt = new Date(`${TODAY}T10:00:00.000+03:00`);
       await SubscriptionPickupRequest.updateOne(
         { _id: pickupRequest._id },
         { $set: { preparationStartedAt: preparedAt, pickupPreparedAt: preparedAt } }

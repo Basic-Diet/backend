@@ -44,6 +44,22 @@ function assertValidPremiumBalanceRows(rows) {
   }
 }
 
+function premiumSnapshotName(item = {}, fallbackName = "") {
+  if (item.nameI18n && typeof item.nameI18n === "object") {
+    return item.nameI18n.en || item.nameI18n.ar || fallbackName || item.name || "";
+  }
+  return item.name || fallbackName || "";
+}
+
+function hasImmutablePremiumSnapshot(item = {}) {
+  return Boolean(
+    item
+      && item.premiumKey
+      && Number.isSafeInteger(Number(item.unitExtraFeeHalala))
+      && Number(item.unitExtraFeeHalala) >= 0
+  );
+}
+
 // Removed isCanonicalCheckoutDraft as the system now assumes a single unified contract model.
 
 
@@ -51,6 +67,26 @@ function assertValidPremiumBalanceRows(rows) {
 async function toCanonicalPremiumBalanceRows(draft) {
   const rows = [];
   for (const item of (draft.premiumItems || [])) {
+    if (hasImmutablePremiumSnapshot(item)) {
+      rows.push({
+        proteinId: normalizeOptionalObjectId(item.proteinId),
+        premiumKey: item.premiumKey,
+        name: premiumSnapshotName(item),
+        nameI18n: item.nameI18n || undefined,
+        imageUrl: item.imageUrl || "",
+        purchasedQty: Number(item.qty || 0),
+        remainingQty: Number(item.qty || 0),
+        unitExtraFeeHalala: Number(item.unitExtraFeeHalala || 0),
+        currency: item.currency || SYSTEM_CURRENCY,
+        sourceModel: item.sourceModel || "",
+        sourceId: item.sourceId || "",
+        entityType: item.entityType || "premium_meal",
+        catalogVersion: item.catalogVersion || null,
+        purchasedAt: new Date(),
+      });
+      continue;
+    }
+
     // Normalize proteinId before passing to identity resolver (avoids findById("") errors)
     const normalizedProteinId = normalizeOptionalObjectId(item.proteinId);
 
@@ -161,6 +197,26 @@ async function toPremiumBalanceRowsFromContractEntitlements(contractSnapshot, la
         key: "errors.activation.invalidPremiumEntitlement",
         fallbackMessage: "Invalid premium entitlement quantity in contract",
       });
+    }
+
+    if (hasImmutablePremiumSnapshot(item)) {
+      rows.push({
+        proteinId: normalizeOptionalObjectId(item.proteinId),
+        premiumKey: item.premiumKey,
+        name: premiumSnapshotName(item),
+        nameI18n: item.nameI18n || undefined,
+        imageUrl: item.imageUrl || "",
+        purchasedQty: qty,
+        remainingQty: qty,
+        unitExtraFeeHalala: Number(item.unitExtraFeeHalala || 0),
+        currency: String(item.currency || SYSTEM_CURRENCY),
+        sourceModel: item.sourceModel || "",
+        sourceId: item.sourceId || "",
+        entityType: item.entityType || "premium_meal",
+        catalogVersion: item.catalogVersion || null,
+        purchasedAt: new Date(),
+      });
+      continue;
     }
 
     // Normalize proteinId before passing to identity resolver to avoid BuilderProtein.findById("")

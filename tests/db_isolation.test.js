@@ -1,4 +1,6 @@
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 const { getDbNameFromUri, resolveMongoUri } = require("../src/utils/mongoUriResolver");
 const { validateEnv } = require("../src/utils/validateEnv");
 
@@ -91,6 +93,37 @@ async function runTests() {
     assert.strictEqual(validateEnv().ok, true);
 
     console.log("✅ validateEnv MongoDB isolation passed\n");
+
+    console.log("Testing shell test-runner MongoDB safety...");
+
+    const criticalRunnerSource = fs.readFileSync(path.join(__dirname, "..", "scripts", "run-critical-tests.sh"), "utf8");
+    const allRunnerSource = fs.readFileSync(path.join(__dirname, "..", "scripts", "run-all-tests.sh"), "utf8");
+    const memoryReplSetWrapperSource = fs.readFileSync(path.join(__dirname, "..", "scripts", "with-memory-replset.js"), "utf8");
+
+    assert(!criticalRunnerSource.includes("DEBUG MONGO_URI"), "critical runner must not print raw MongoDB URIs");
+    assert(!criticalRunnerSource.includes("done < .env"), "critical runner must not auto-source local .env");
+    assert(
+      criticalRunnerSource.includes("assert_safe_base_test_mongo_uri"),
+      "critical runner must validate the base MongoDB test URI"
+    );
+    assert(
+      allRunnerSource.includes("assert_safe_base_test_mongo_uri"),
+      "all-test runner must validate the base MongoDB test URI"
+    );
+    assert(
+      allRunnerSource.includes("with-memory-replset.js"),
+      "all-test runner must start an isolated MongoMemory replica set when explicitly requested"
+    );
+    assert(
+      memoryReplSetWrapperSource.includes("USE_MONGODB_MEMORY_REPLSET_STARTED"),
+      "memory replset wrapper must guard against recursive runner startup"
+    );
+    assert(
+      !memoryReplSetWrapperSource.includes("console.log(uri)") && !memoryReplSetWrapperSource.includes("console.error(uri)"),
+      "memory replset wrapper must not print raw MongoDB URIs"
+    );
+
+    console.log("✅ shell test-runner MongoDB safety passed\n");
 
     // Test resolveMongoUri in Dev/Prod mode
     console.log("Testing resolveMongoUri (NODE_ENV=development)...");

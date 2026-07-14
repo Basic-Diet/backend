@@ -1,0 +1,55 @@
+
+=== Test Summary ===
+Generated at:           Tue Jul 14 19:45:02 EEST 2026
+Total Tests Discovered: 153
+Passed:                 109
+Failed:                 44
+Timed Out:              0
+Skipped:                0
+====================
+
+Failed/timeout detail logs:
+  test-reports/failed-details/addonBootstrapAndReadModels.log
+  test-reports/failed-details/adminUserRegistrationAndReset.log
+  test-reports/failed-details/authPasswordBackendContract.log
+  test-reports/failed-details/branchPickupOperationalGuard.log
+  test-reports/failed-details/controllers_adminController_concurrency.log
+  test-reports/failed-details/courierDeliveryContract.log
+  test-reports/failed-details/dashboardAdminEndpoints.log
+  test-reports/failed-details/dashboardMealBuilderFullCycle.log
+  test-reports/failed-details/dashboardMealBuilderHydratedDraft.log
+  test-reports/failed-details/dashboardMealBuilderPickers.log
+  test-reports/failed-details/dashboardPremiumUpgrades.log
+  test-reports/failed-details/dashboardSubscriptionPlannerConfig.log
+  test-reports/failed-details/dashboardSubscriptionsContractPhase1.log
+  test-reports/failed-details/fulfillmentLifecyclePostmanSimulation.log
+  test-reports/failed-details/guestAccess.log
+  test-reports/failed-details/homeDeliveryAndBranchPickupRules.log
+  test-reports/failed-details/homeDeliveryPostmanContract.log
+  test-reports/failed-details/manual_verify_allow_applied_reconciliation.log
+  test-reports/failed-details/mealPlannerCanonicalContract.log
+  test-reports/failed-details/mealPlannerCanonicalV3Write.log
+  test-reports/failed-details/mealPlannerPaymentContract.log
+  test-reports/failed-details/mealPlanner_integration.log
+  test-reports/failed-details/oneTimeAddonVerifyAlias.log
+  test-reports/failed-details/oneTimeMenuCatalog.log
+  test-reports/failed-details/oneTimeOrderFullFlow.log
+  test-reports/failed-details/oneTimeOrderPremiumUpgradeIsolation.log
+  test-reports/failed-details/oneTimeOrders.log
+  test-reports/failed-details/operationsHistoricalMutationContract.log
+  test-reports/failed-details/orderDeliveryLifecycleFixes.log
+  test-reports/failed-details/premium_extra_day_update_guard.log
+  test-reports/failed-details/seedCatalogCanonicalV3Contract.log
+  test-reports/failed-details/seedCatalogRebuild_integration.log
+  test-reports/failed-details/seedMealBuilderConfig.log
+  test-reports/failed-details/smoke_integrity.log
+  test-reports/failed-details/subscriptionAddonBalanceModel.log
+  test-reports/failed-details/subscriptionFulfillmentPolicy.log
+  test-reports/failed-details/subscriptionMealBuilderContract.log
+  test-reports/failed-details/subscriptionPickupRequestClientService.log
+  test-reports/failed-details/subscriptionPickupRequestOps.log
+  test-reports/failed-details/subscriptionPickupRequestRoutes.log
+  test-reports/failed-details/subscriptionPlannerDashboardToFlutter_e2e.log
+  test-reports/failed-details/subscription_addon_selection_readback_integration.log
+  test-reports/failed-details/unified_day_payment_verify.log
+  test-reports/failed-details/vatSystem.log

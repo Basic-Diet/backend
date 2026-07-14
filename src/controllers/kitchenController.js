@@ -25,6 +25,7 @@ const {
 const { buildSubscriptionDayFulfillmentState } = require("../services/subscription/subscriptionDayFulfillmentStateService");
 const { consumeSubscriptionDayCredits } = require("../services/subscription/subscriptionDayConsumptionService");
 const { logger } = require("../utils/logger");
+const { runMongoTransactionWithRetry } = require("../services/mongoTransactionRetryService");
 const validateObjectId = require("../utils/validateObjectId");
 const errorResponse = require("../utils/errorResponse");
 const { resolveOptionalPagination, buildPaginationMeta } = require("../utils/optionalPagination");
@@ -1089,21 +1090,62 @@ async function markPickupNoShow(req, res) {
     return errorResponse(res, err.status, err.code, err.message);
   }
 
-  const session = await startSafeSession();
   let day;
   let deductedCredits = 0;
   try {
-    session.startTransaction();
+    const result = await runMongoTransactionWithRetry(async (session) => {
+      day = await SubscriptionDay.findById(dayId).session(session);
+      if (!day) {
+        const err = new Error("Day not found");
+        err.status = 404;
+        err.code = "NOT_FOUND";
+        throw err;
+      }
+      if (day.status === "no_show") {
+        return { idempotent: true };
+      }
+      if (day.status !== "ready_for_pickup") {
+        const err = new Error("Only ready pickup days can be marked as no-show");
+        err.status = 409;
+        err.code = "INVALID_TRANSITION";
+        throw err;
+      }
 
-    day = await SubscriptionDay.findById(dayId).session(session);
-    if (!day) {
-      await session.abortTransaction();
-      session.endSession();
-      return errorResponse(res, 404, "NOT_FOUND", "Day not found");
-    }
-    if (day.status === "no_show") {
-      await session.commitTransaction();
-      session.endSession();
+      const sub = await Subscription.findById(day.subscriptionId).session(session).lean();
+      if (!sub) {
+        const err = new Error("Subscription not found");
+        err.status = 404;
+        err.code = "NOT_FOUND";
+        throw err;
+      }
+      if (sub.deliveryMode !== "pickup") {
+        const err = new Error("Not a pickup subscription");
+        err.status = 400;
+        err.code = "INVALID";
+        throw err;
+      }
+      if (!day.pickupRequested) {
+        const err = new Error("Cannot mark no-show without a pickup prepare request");
+        err.status = 409;
+        err.code = "PICKUP_PREPARE_REQUIRED";
+        throw err;
+      }
+
+      deductedCredits = 0;
+      day.status = "no_show";
+      day.pickupRequested = false;
+      day.pickupNoShowAt = new Date();
+      appendOperationAudit(day, {
+        action: "no_show",
+        actor: req.dashboardUserId || req.userId,
+      });
+      await day.save({ session });
+      return { idempotent: false };
+    }, {
+      label: "kitchen_mark_pickup_no_show",
+      context: { dayId },
+    });
+    if (result.idempotent) {
       return res.status(200).json({
         status: true,
         data: day,
@@ -1112,47 +1154,10 @@ async function markPickupNoShow(req, res) {
         idempotent: true,
       });
     }
-    if (day.status !== "ready_for_pickup") {
-      await session.abortTransaction();
-      session.endSession();
-      return errorResponse(res, 409, "INVALID_TRANSITION", "Only ready pickup days can be marked as no-show");
-    }
-
-    const sub = await Subscription.findById(day.subscriptionId).session(session).lean();
-    if (!sub) {
-      await session.abortTransaction();
-      session.endSession();
-      return errorResponse(res, 404, "NOT_FOUND", "Subscription not found");
-    }
-    if (sub.deliveryMode !== "pickup") {
-      await session.abortTransaction();
-      session.endSession();
-      return errorResponse(res, 400, "INVALID", "Not a pickup subscription");
-    }
-    if (!day.pickupRequested) {
-      await session.abortTransaction();
-      session.endSession();
-      return errorResponse(res, 409, "PICKUP_PREPARE_REQUIRED", "Cannot mark no-show without a pickup prepare request");
-    }
-
-    // No-show under the new TOTAL_BALANCE_WITHIN_VALIDITY policy does not consume meals
-    // Only explicit operational fulfillments or Cashier operations consume meals.
-    deductedCredits = 0;
-
-    day.status = "no_show";
-    day.pickupRequested = false;
-    day.pickupNoShowAt = new Date();
-    appendOperationAudit(day, {
-      action: "no_show",
-      actor: req.dashboardUserId || req.userId,
-    });
-    await day.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+    if (err && err.status && err.code) {
+      return errorResponse(res, err.status, err.code, err.message);
+    }
     logger.error("kitchenController.markPickupNoShow failed", { dayId, error: err.message, stack: err.stack });
     return errorResponse(res, 500, "INTERNAL", "Pickup no-show update failed");
   }

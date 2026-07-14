@@ -180,6 +180,17 @@ function resolvePremiumMealExtraFeeHalala(option, premiumConfigState = null) {
   return fee;
 }
 
+function isConfiguredPremiumMealProtein(option, premiumConfigState = null) {
+  const key = String(option?.premiumKey || option?.key || "").trim().toLowerCase();
+  const hasActiveConfig = Boolean(
+    key
+      && premiumConfigState
+      && typeof premiumConfigState.getActiveConfig === "function"
+      && premiumConfigState.getActiveConfig(key)
+  );
+  return hasActiveConfig || isSubscriptionPremiumMealProtein(option);
+}
+
 function buildProteinPayload(option, lang, { isPremium, premiumConfigState = null }) {
   const proteinFamilyKey = inferProteinFamilyKey(option);
   const displayCategoryKey = normalizeProteinDisplayCategoryKey(option.displayCategoryKey, {
@@ -758,7 +769,7 @@ async function buildCanonicalPlannerCatalogV3({ builderCatalog, context = {}, la
     product: basicMealProduct,
     lang,
     optionFilter({ option, group }) {
-      if (group.key === MENU_PROTEIN_GROUP_KEY) return !isSubscriptionPremiumMealProtein(option);
+      if (group.key === MENU_PROTEIN_GROUP_KEY) return !isConfiguredPremiumMealProtein(option, premiumConfigState);
       if (group.key === MENU_CARB_GROUP_KEY) return isCustomerVisibleCarb(option);
       return true;
     },
@@ -769,7 +780,7 @@ async function buildCanonicalPlannerCatalogV3({ builderCatalog, context = {}, la
     lang,
     optionFilter({ option, group }) {
       if (group.key === MENU_PROTEIN_GROUP_KEY) {
-        if (!isSubscriptionPremiumMealProtein(option)) return false;
+        if (!isConfiguredPremiumMealProtein(option, premiumConfigState)) return false;
         return !premiumConfigState?.hasConfigs || premiumConfigState.isAllowed(option.premiumKey || option.key);
       }
       if (group.key === MENU_CARB_GROUP_KEY) return isCustomerVisibleCarb(option);
@@ -1239,7 +1250,7 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
   const normalizedProteins = proteinOptions
     .map((option) => {
       return buildProteinPayload(option, lang, { 
-        isPremium: isSubscriptionPremiumMealProtein(option),
+        isPremium: isConfiguredPremiumMealProtein(option, premiumConfigState),
         premiumConfigState,
       });
     })
