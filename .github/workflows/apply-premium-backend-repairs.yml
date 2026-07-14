@@ -35,7 +35,7 @@ jobs:
           node --check tests/checkout.integration.test.js
           node --check tests/mealPlanner.integration.test.js
           node --check tests/oneTimeMenuCatalog.test.js
-      - name: Commit repairs
+      - name: Commit and attempt publication
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -48,6 +48,13 @@ jobs:
             tests/checkout.integration.test.js \
             tests/mealPlanner.integration.test.js \
             tests/oneTimeMenuCatalog.test.js
-          git status --short
-          git commit -m "fix(backend): repair premium and add-on lifecycles"
-          git push origin HEAD:test/premium-meal-backend-lifecycle
+          git status --short > repair-publication.log
+          git commit -m "fix(backend): repair premium and add-on lifecycles" >> repair-publication.log 2>&1
+          git push origin HEAD:test/premium-meal-backend-lifecycle >> repair-publication.log 2>&1 || true
+          cat repair-publication.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: repair-publication-log
+          path: repair-publication.log
+          retention-days: 1
