@@ -316,9 +316,11 @@ async function run() {
     "subscription-specific choices must not include globally mapped products from another plan");
   assert.deepStrictEqual(
     entitledData.meal.choices.map((choice) => choice.id),
-    [fixtureModels.ids.beefMeal, fixtureModels.ids.berry, fixtureModels.ids.chickenMeal],
-    "subscription-specific choices preserve menuProductIds order"
+    [fixtureModels.ids.beefMeal, fixtureModels.ids.chickenMeal],
+    "meal group contains only products whose source category resolves to meal"
   );
+  assert(!entitledData.meal.choices.some((choice) => choice.id === fixtureModels.ids.berry),
+    "juice products linked by a meal entitlement must stay out of the meal group");
   assert(!entitledData.meal.choices.some((choice) => choice.id === fixtureModels.ids.unrelatedMeal));
   assert.strictEqual(entitledData.meal.choices[0].addonPlanId, fixtureModels.ids.mealPlanAddon);
   assert.strictEqual(entitledData.meal.choices[0].addonPlanName, "Meal Plan");
@@ -328,9 +330,9 @@ async function run() {
   assert.strictEqual(entitledData.meal.choices[0].includedTotalQty, 7);
   assert.strictEqual(entitledData.meal.choices[0].isEligibleForAllowance, true);
   assert.strictEqual(
-    entitledData.meal.choices.find((choice) => choice.id === fixtureModels.ids.berry).addonPlanId,
-    fixtureModels.ids.mealPlanAddon,
-    "duplicate products across plans are returned deterministically with plan context"
+    entitledData.juice.choices.filter((choice) => choice.id === fixtureModels.ids.berry).length,
+    1,
+    "duplicate products across plans are returned once in their correct display group"
   );
   assert.strictEqual(entitledData.meal.choices[0].coveredQty, 1);
   assert.strictEqual(entitledData.meal.choices[0].paidQty, 0);
@@ -342,11 +344,24 @@ async function run() {
     userId: fixtureModels.ids.subscriptionOwner,
     models: fixtureModels,
   });
-  assert.deepStrictEqual(Object.keys(currentSubscriptionData), ["juice", "meal"]);
+  assert.deepStrictEqual(Object.keys(currentSubscriptionData), ["juice", "snack", "small_salad", "meal"]);
   assert.deepStrictEqual(
     currentSubscriptionData.meal.choices.map((choice) => choice.id),
-    [fixtureModels.ids.beefMeal, fixtureModels.ids.berry, fixtureModels.ids.chickenMeal],
-    "authenticated requests without subscriptionId resolve the current subscription snapshot"
+    [fixtureModels.ids.chickenMeal, fixtureModels.ids.beefMeal, fixtureModels.ids.unrelatedMeal],
+    "authenticated requests without subscriptionId merge generic meal products with entitlement metadata"
+  );
+  assert(currentSubscriptionData.juice, "merged catalog keeps generic juice category");
+  assert(currentSubscriptionData.snack, "merged catalog keeps generic snack category");
+  assert(currentSubscriptionData.small_salad, "merged catalog keeps generic small_salad category");
+  assert.strictEqual(
+    currentSubscriptionData.meal.choices.find((choice) => choice.id === fixtureModels.ids.beefMeal).isEligibleForAllowance,
+    true,
+    "linked meal product is marked allowance eligible"
+  );
+  assert.strictEqual(
+    currentSubscriptionData.meal.choices.find((choice) => choice.id === fixtureModels.ids.unrelatedMeal).isEligibleForAllowance,
+    false,
+    "unrelated generic meal product remains visible but is not allowance eligible"
   );
 
   const mealOnlyData = await buildAddonChoicesCatalog({
@@ -358,7 +373,82 @@ async function run() {
   assert.deepStrictEqual(Object.keys(mealOnlyData), ["meal"]);
   assert.deepStrictEqual(
     mealOnlyData.meal.choices.map((choice) => choice.id),
-    [fixtureModels.ids.beefMeal, fixtureModels.ids.berry, fixtureModels.ids.chickenMeal]
+    [fixtureModels.ids.beefMeal, fixtureModels.ids.chickenMeal]
+  );
+
+  const mismatchedModels = buildModels();
+  mismatchedModels.SubscriptionModel = {
+    find(query) {
+      const doc = String(query.userId || "") === mismatchedModels.ids.subscriptionOwner && query.status === "active"
+        ? {
+          _id: "507f191e810c19729de86997",
+          userId: mismatchedModels.ids.subscriptionOwner,
+          addonSubscriptions: [{
+            addonPlanId: mismatchedModels.ids.mealPlanAddon,
+            addonPlanName: "اشتراك وجبات",
+            category: "snack",
+            maxPerDay: 3,
+            includedTotalQty: 3,
+            menuProductIds: [
+              mismatchedModels.ids.beefMeal,
+              mismatchedModels.ids.brownie,
+              mismatchedModels.ids.chickenMeal,
+            ],
+          }],
+          addonBalance: [{
+            addonPlanId: mismatchedModels.ids.mealPlanAddon,
+            category: "snack",
+            includedTotalQty: 3,
+            remainingQty: 2,
+          }],
+        }
+        : null;
+      return queryResult(doc ? [doc] : []);
+    },
+  };
+  const mismatchedData = await buildAddonChoicesCatalog({
+    lang: "en",
+    userId: mismatchedModels.ids.subscriptionOwner,
+    models: mismatchedModels,
+  });
+  assert(mismatchedData.juice, "mismatched entitlement merge keeps generic juice");
+  assert(mismatchedData.snack, "mismatched entitlement merge keeps generic snack");
+  assert(mismatchedData.small_salad, "mismatched entitlement merge keeps generic small_salad");
+  assert(mismatchedData.meal, "mismatched entitlement merge adds meal category");
+  assert.deepStrictEqual(
+    mismatchedData.meal.choices.map((choice) => choice.id),
+    [mismatchedModels.ids.chickenMeal, mismatchedModels.ids.beefMeal, mismatchedModels.ids.unrelatedMeal],
+    "meal products from a snack-stored entitlement are grouped under meal while generic meal products remain visible"
+  );
+  assert(!mismatchedData.snack.choices.some((choice) => choice.id === mismatchedModels.ids.beefMeal));
+  assert.strictEqual(
+    mismatchedData.meal.choices.find((choice) => choice.id === mismatchedModels.ids.beefMeal).entitlementCategory,
+    "snack",
+    "original stored category is preserved as metadata"
+  );
+  assert.strictEqual(
+    mismatchedData.meal.choices.find((choice) => choice.id === mismatchedModels.ids.beefMeal).isEligibleForAllowance,
+    true
+  );
+  assert.strictEqual(
+    mismatchedData.meal.choices.find((choice) => choice.id === mismatchedModels.ids.unrelatedMeal).isEligibleForAllowance,
+    false
+  );
+  assert(
+    mismatchedData.snack.choices.some((choice) => choice.id === mismatchedModels.ids.brownie && choice.isEligibleForAllowance === true),
+    "mixed snapshots keep dessert/snack products under snack"
+  );
+  const mismatchedMealOnly = await buildAddonChoicesCatalog({
+    lang: "en",
+    category: "meal",
+    userId: mismatchedModels.ids.subscriptionOwner,
+    models: mismatchedModels,
+  });
+  assert.deepStrictEqual(Object.keys(mismatchedMealOnly), ["meal"]);
+  assert.deepStrictEqual(
+    mismatchedMealOnly.meal.choices.map((choice) => choice.id),
+    [mismatchedModels.ids.chickenMeal, mismatchedModels.ids.beefMeal, mismatchedModels.ids.unrelatedMeal],
+    "dynamic category filtering returns the merged meal category"
   );
 
   const partialPreview = buildAddonChoicePricingPreview({

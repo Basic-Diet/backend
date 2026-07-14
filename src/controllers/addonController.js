@@ -1,5 +1,6 @@
 const Addon = require("../models/Addon");
 const { startSafeSession } = require("../utils/mongoTransactionSupport");
+const MenuCategory = require("../models/MenuCategory");
 const MenuProduct = require("../models/MenuProduct");
 const { getRequestLang } = require("../utils/i18n");
 const { resolveAddonCatalogEntry } = require("../utils/subscription/subscriptionCatalog");
@@ -12,6 +13,9 @@ const {
   parseBooleanField,
   parseLocalizedFieldFromBody,
 } = require("../utils/requestFields");
+const {
+  resolveDisplayCategoryForProduct,
+} = require("../services/subscription/subscriptionAddonChoicesService");
 
 const SYSTEM_CURRENCY = "SAR";
 const ADDON_IMAGE_FOLDER = "addons";
@@ -296,6 +300,38 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null, dashboardPlanC
     ...derivedBillingFields,
     billingMode,
   };
+}
+
+async function assertAddonPlanProductCategoryCompatibility(payload) {
+  if (!payload || payload.kind !== "plan" || !Array.isArray(payload.menuProductIds) || payload.menuProductIds.length === 0) {
+    return;
+  }
+  const products = await MenuProduct.find({ _id: { $in: payload.menuProductIds } }).lean();
+  const productIds = new Set(products.map((product) => String(product._id)));
+  if (productIds.size !== payload.menuProductIds.length) {
+    throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
+  }
+
+  const categoryIds = [...new Set(products.map((product) => String(product.categoryId || "")).filter(Boolean))];
+  const categories = await MenuCategory.find({ _id: { $in: categoryIds } }).lean();
+  const categoryById = new Map(categories.map((category) => [String(category._id), category]));
+  const displayCategories = products
+    .map((product) => resolveDisplayCategoryForProduct(product, categoryById.get(String(product.categoryId)), {
+      entitlementCategory: payload.category,
+    }))
+    .filter(Boolean);
+
+  if (displayCategories.length > 0 && !displayCategories.includes(payload.category)) {
+    throw {
+      status: 400,
+      code: "ADDON_PLAN_CATEGORY_PRODUCT_MISMATCH",
+      message: "Add-on plan category does not match any linked product category",
+      details: {
+        planCategory: payload.category,
+        productDisplayCategories: [...new Set(displayCategories)],
+      },
+    };
+  }
 }
 
 function resolveAdminAddonFilters(query = {}, { forceKind = null } = {}) {
@@ -851,10 +887,7 @@ async function createAddon(req, res, options = {}) {
       if (uniqueProductIds.length !== payload.menuProductIds.length) {
         throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
       }
-      const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
-      if (productCount !== payload.menuProductIds.length) {
-        throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
-      }
+      await assertAddonPlanProductCategoryCompatibility(payload);
     }
 
     const imageState = await resolveManagedImageFromRequest({
@@ -1003,10 +1036,7 @@ async function updateAddon(req, res, options = {}) {
       if (uniqueProductIds.length !== payload.menuProductIds.length) {
         throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
       }
-      const productCount = await MenuProduct.countDocuments({ _id: { $in: payload.menuProductIds } });
-      if (productCount !== payload.menuProductIds.length) {
-        throw { status: 400, code: "INVALID", message: "One or more menuProductIds do not exist" };
-      }
+      await assertAddonPlanProductCategoryCompatibility(payload);
     }
 
     const imageState = await resolveManagedImageFromRequest({
