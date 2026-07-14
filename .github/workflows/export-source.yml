@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - "test/premium-meal-backend-lifecycle"
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
