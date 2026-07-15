@@ -61,6 +61,12 @@ const mobileLoginLimiter = buildLimiter({
   message: "errors.rateLimit.login",
 });
 
+const adminPasswordResetLimiter = buildLimiter({
+  windowMs: Number(process.env.RATE_LIMIT_ADMIN_PASSWORD_RESET_WINDOW_MS) || 15 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_ADMIN_PASSWORD_RESET_MAX) || 30,
+  message: "errors.rateLimit.adminPasswordReset",
+});
+
 const accountDeletionLimiter = buildLimiter({
   windowMs: Number(process.env.RATE_LIMIT_ACCOUNT_DELETION_WINDOW_MS) || 15 * 60 * 1000,
   max: Number(process.env.RATE_LIMIT_ACCOUNT_DELETION_MAX) || 5,
@@ -73,6 +79,7 @@ module.exports = {
   checkoutLimiter,
   dashboardLoginLimiter,
   mobileLoginLimiter,
+  adminPasswordResetLimiter,
   accountDeletionLimiter,
   buildRateLimitPayload,
 };

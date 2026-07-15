@@ -1,14 +1,19 @@
 const AppUser = require("../models/AppUser");
 const User = require("../models/User");
+const jwt = require("jsonwebtoken");
 const { isApiError } = require("../utils/apiError");
 const { assertValidPhoneE164, requestOtpForPhone, verifyOtpCode } = require("../services/otpService");
 const {
   issueAppAccessToken,
   issueGuestAccessToken,
+  issueCustomerPasswordChangeToken,
   ACCESS_TOKEN_EXPIRES_SECONDS,
   GUEST_TOKEN_EXPIRES_SECONDS,
+  PASSWORD_CHANGE_TOKEN_EXPIRES_SECONDS,
+  JWT_ACCESS_SECRET,
 } = require("../services/appTokenService");
 const { validateAppPassword, hashAppPassword, compareAppPassword } = require("../services/appPasswordService");
+const { clearTemporaryPasswordState } = require("../services/customerTemporaryPasswordService");
 const { writeLog } = require("../utils/log");
 const {
   createRefreshSession,
@@ -42,6 +47,21 @@ function serializeAuthUser(user) {
     phoneVerified: Boolean(user.phoneVerified),
     forcePasswordChange: Boolean(user.forcePasswordChange),
   };
+}
+
+function isTemporaryPasswordExpired(user, now = new Date()) {
+  if (!user || user.forcePasswordChange !== true) return false;
+  if (!user.temporaryPasswordExpiresAt) return true;
+  return new Date(user.temporaryPasswordExpiresAt).getTime() <= now.getTime();
+}
+
+function temporaryPasswordExpiredResponse(res) {
+  return errorResponse(
+    res,
+    403,
+    "TEMPORARY_PASSWORD_EXPIRED",
+    "Temporary password expired. Contact the restaurant for a new password."
+  );
 }
 
 function mapAuthErrorCode(code) {
@@ -134,6 +154,14 @@ async function writeCustomerAuthActivityLog(user, action, meta = {}) {
   } catch (_err) {
     // Auth should not fail because non-critical audit persistence failed.
   }
+}
+
+function getBearerToken(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  return authHeader.split(" ")[1];
 }
 
 function normalizeOptionalFullName(fullName) {
@@ -310,7 +338,9 @@ async function register(req, res) {
     coreUser.passwordHash = await hashAppPassword(password);
     coreUser.passwordSetAt = now;
     coreUser.passwordChangedAt = now;
+    coreUser.authVersion = Number(coreUser.authVersion || 0) + 1;
     coreUser.forcePasswordChange = false;
+    clearTemporaryPasswordState(coreUser);
     coreUser.accountStatus = "active";
     coreUser.resetRequestedAt = null;
     coreUser.authProvider = "password";
@@ -419,6 +449,9 @@ async function verifyOtp(req, res) {
       appUser.fcmTokens = [];
       await appUser.save();
     }
+    if (coreUser.forcePasswordChange === true) {
+      return errorResponse(res, 403, "PASSWORD_CHANGE_REQUIRED", "Password change required");
+    }
 
     return res.status(200).json({
       status: "otp_verified",
@@ -486,6 +519,10 @@ async function verifyRegister(req, res) {
       coreUser.email = effectiveEmail || undefined;
     }
     coreUser.passwordHash = await hashAppPassword(password);
+    coreUser.passwordSetAt = new Date();
+    coreUser.passwordChangedAt = new Date();
+    coreUser.authVersion = Number(coreUser.authVersion || 0) + 1;
+    clearTemporaryPasswordState(coreUser);
     coreUser.accountStatus = "active";
     coreUser.resetRequestedAt = null;
     coreUser.lastLoginAt = new Date();
@@ -543,6 +580,34 @@ async function login(req, res) {
       return errorResponse(res, 403, "FORBIDDEN", "User account is inactive");
     }
 
+    if (coreUser.forcePasswordChange === true) {
+      if (isTemporaryPasswordExpired(coreUser)) {
+        return temporaryPasswordExpiredResponse(res);
+      }
+      coreUser.lastLoginAt = new Date();
+      coreUser.failedLoginAttempts = 0;
+      coreUser.lockedUntil = null;
+      await coreUser.save();
+      await writeCustomerAuthActivityLog(coreUser, "customer_temporary_password_login", {
+        temporaryPasswordGeneration: Number(coreUser.temporaryPasswordGeneration || 0),
+        authVersion: Number(coreUser.authVersion || 0),
+      });
+
+      return res.status(200).json({
+        ok: true,
+        status: "password_change_required",
+        mustChangePassword: true,
+        passwordChangeToken: issueCustomerPasswordChangeToken(coreUser),
+        expiresIn: PASSWORD_CHANGE_TOKEN_EXPIRES_SECONDS,
+        user: {
+          id: String(coreUser._id),
+          phoneE164: coreUser.phoneE164 || coreUser.phone,
+          fullName: coreUser.name || null,
+          forcePasswordChange: true,
+        },
+      });
+    }
+
     coreUser.lastLoginAt = new Date();
     coreUser.failedLoginAttempts = 0;
     coreUser.lockedUntil = null;
@@ -571,6 +636,9 @@ async function changePassword(req, res) {
     if (!user) {
       return errorResponse(res, 401, "AUTH_REQUIRED", "Authentication required");
     }
+    if (user.forcePasswordChange === true) {
+      return errorResponse(res, 403, "PASSWORD_CHANGE_REQUIRED", "Use complete-password-change to set a permanent password");
+    }
     if (!user.passwordHash || !(await compareAppPassword(currentPassword, user.passwordHash))) {
       return errorResponse(res, 401, "INVALID_CREDENTIALS", "Invalid current password");
     }
@@ -584,7 +652,9 @@ async function changePassword(req, res) {
     user.passwordHash = await hashAppPassword(newPassword);
     user.passwordChangedAt = now;
     user.passwordSetAt = user.passwordSetAt || now;
+    user.authVersion = Number(user.authVersion || 0) + 1;
     user.forcePasswordChange = false;
+    clearTemporaryPasswordState(user);
     user.authProvider = "password";
     user.authMethods = Array.from(new Set([...(Array.isArray(user.authMethods) ? user.authMethods : []), "password"]));
     await user.save();
@@ -595,7 +665,97 @@ async function changePassword(req, res) {
       status: true,
       message: "Password changed successfully",
       messageAr: "تم تغيير كلمة المرور بنجاح",
+      requiresLogin: true,
     });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+async function completePasswordChange(req, res) {
+  try {
+    if (!isPasswordAuthEnabled()) {
+      return passwordAuthDisabledResponse(res);
+    }
+
+    const token = getBearerToken(req);
+    if (!token) {
+      return errorResponse(res, 401, "INVALID_PASSWORD_CHANGE_TOKEN", "Password change token is required");
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_ACCESS_SECRET);
+    } catch (err) {
+      return errorResponse(
+        res,
+        401,
+        "INVALID_PASSWORD_CHANGE_TOKEN",
+        err && err.name === "TokenExpiredError" ? "Password change token expired" : "Invalid password change token"
+      );
+    }
+
+    if (decoded.tokenType !== "customer_password_change" || decoded.role !== "client" || !decoded.userId) {
+      return errorResponse(res, 401, "INVALID_PASSWORD_CHANGE_TOKEN", "Invalid password change token");
+    }
+
+    const { newPassword, confirmPassword, deviceId, deviceName } = req.body || {};
+    const user = await User.findOne({ _id: decoded.userId, role: "client" });
+    if (!user) {
+      return errorResponse(res, 401, "INVALID_PASSWORD_CHANGE_TOKEN", "Invalid password change token");
+    }
+    if (user.isActive === false) {
+      return errorResponse(res, 403, "FORBIDDEN", "User account is inactive");
+    }
+    if (user.forcePasswordChange !== true) {
+      return errorResponse(res, 409, "PASSWORD_CHANGE_ALREADY_COMPLETED", "Password change has already been completed");
+    }
+    if (Number(decoded.authVersion || 0) !== Number(user.authVersion || 0)
+      || Number(decoded.temporaryPasswordGeneration || 0) !== Number(user.temporaryPasswordGeneration || 0)) {
+      return errorResponse(res, 401, "INVALID_PASSWORD_CHANGE_TOKEN", "Invalid password change token");
+    }
+    if (isTemporaryPasswordExpired(user)) {
+      return temporaryPasswordExpiredResponse(res);
+    }
+
+    const passwordValidation = validateAppPassword(newPassword);
+    if (!passwordValidation.ok) {
+      return errorResponse(res, 400, "WEAK_PASSWORD", passwordValidation.message);
+    }
+    assertPasswordConfirmation(newPassword, confirmPassword);
+    if (await compareAppPassword(newPassword, user.passwordHash)) {
+      return errorResponse(res, 400, "PASSWORD_REUSE_FORBIDDEN", "Permanent password must be different from the temporary password");
+    }
+
+    const now = new Date();
+    user.passwordHash = await hashAppPassword(newPassword);
+    user.passwordSetAt = user.passwordSetAt || now;
+    user.passwordChangedAt = now;
+    user.authVersion = Number(user.authVersion || 0) + 1;
+    clearTemporaryPasswordState(user);
+    user.accountStatus = "active";
+    user.resetRequestedAt = null;
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = null;
+    user.authProvider = "password";
+    user.authMethods = Array.from(new Set([...(Array.isArray(user.authMethods) ? user.authMethods : []), "password"]));
+    user.lastLoginAt = now;
+    await user.save();
+    await revokeAllUserSessions(user._id);
+    await writeCustomerAuthActivityLog(user, "customer_completed_password_change", {
+      temporaryPasswordGeneration: Number(user.temporaryPasswordGeneration || 0),
+      authVersion: Number(user.authVersion || 0),
+    });
+
+    const payload = await buildTokenResponse({
+      req,
+      user,
+      status: "password_changed",
+      deviceId,
+      deviceName,
+    });
+    payload.mustChangePassword = false;
+    return res.status(200).json(payload);
   } catch (err) {
     return handleError(res, err);
   }
@@ -635,6 +795,10 @@ async function refresh(req, res) {
     const coreUser = await User.findOne({ _id: session.userId, role: "client" });
     if (!coreUser || coreUser.isActive === false) {
       return errorResponse(res, 401, "REFRESH_TOKEN_INVALID", "Refresh token is invalid");
+    }
+    if (coreUser.forcePasswordChange === true) {
+      await revokeRefreshToken(refreshToken);
+      return errorResponse(res, 403, "PASSWORD_CHANGE_REQUIRED", "Password change required");
     }
 
     const rotated = await rotateRefreshSession({ session, req });
@@ -734,10 +898,14 @@ async function resetPassword(req, res) {
     coreUser.passwordHash = await hashAppPassword(newPassword);
     coreUser.passwordSetAt = new Date();
     coreUser.passwordChangedAt = new Date();
+    coreUser.authVersion = Number(coreUser.authVersion || 0) + 1;
     coreUser.forcePasswordChange = false;
+    clearTemporaryPasswordState(coreUser);
     coreUser.authProvider = "password";
     coreUser.authMethods = Array.from(new Set([...(Array.isArray(coreUser.authMethods) ? coreUser.authMethods : []), "password"]));
     coreUser.phoneVerified = true;
+    coreUser.accountStatus = "active";
+    coreUser.resetRequestedAt = null;
     await coreUser.save();
     await ensureLinkedAppUser(coreUser);
     await revokeAllUserSessions(coreUser._id);
@@ -791,6 +959,7 @@ module.exports = {
   forgotPassword,
   resetPassword,
   changePassword,
+  completePasswordChange,
   updateDeviceToken,
   deleteDeviceToken,
 };

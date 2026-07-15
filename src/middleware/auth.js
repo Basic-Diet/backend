@@ -74,7 +74,7 @@ function authMiddleware(req, res, next) {
   }
 
   return User.findById(decoded.userId)
-    .select("_id role isActive")
+    .select("_id role isActive forcePasswordChange authVersion passwordChangedAt")
     .lean()
     .then((user) => {
       if (!user || user.role !== "client") {
@@ -82,6 +82,18 @@ function authMiddleware(req, res, next) {
       }
       if (user.isActive === false) {
         return errorResponse(res, 403, "SESSION_REVOKED", "Session has been revoked");
+      }
+      if (Number(decoded.authVersion || 0) !== Number(user.authVersion || 0)) {
+        return errorResponse(res, 401, "SESSION_REVOKED", "Session has been revoked");
+      }
+      if (user.passwordChangedAt && decoded.iat) {
+        const changedAtSec = Math.floor(new Date(user.passwordChangedAt).getTime() / 1000);
+        if (changedAtSec > decoded.iat) {
+          return errorResponse(res, 401, "SESSION_REVOKED", "Session has been revoked");
+        }
+      }
+      if (user.forcePasswordChange === true) {
+        return errorResponse(res, 403, "PASSWORD_CHANGE_REQUIRED", "Password change required");
       }
 
       req.userId = String(user._id);

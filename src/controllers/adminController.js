@@ -52,7 +52,7 @@ const {
   validateDashboardPassword,
   hashDashboardPassword,
 } = require("../services/dashboardPasswordService");
-const { validateAppPassword, hashAppPassword } = require("../services/appPasswordService");
+const { issueCustomerTemporaryPassword } = require("../services/customerTemporaryPasswordService");
 const { assertValidPhoneE164 } = require("../services/otpService");
 const SubscriptionLifecycleService = require("../services/subscription/subscriptionLifecycleService");
 const SubscriptionOperationsReadService = require("../services/subscription/subscriptionOperationsReadService");
@@ -863,6 +863,14 @@ function dedupeStringArray(values) {
 }
 
 function serializeAppUserAdmin({ coreUser, appUser, subscriptionsCount = 0, activeSubscriptionsCount = 0 }) {
+  const forcePasswordChange = Boolean(coreUser.forcePasswordChange);
+  const temporaryPasswordExpiresAt = coreUser.temporaryPasswordExpiresAt || null;
+  const authState = forcePasswordChange
+    ? temporaryPasswordExpiresAt && new Date(temporaryPasswordExpiresAt).getTime() <= Date.now()
+      ? "temporary_password_expired"
+      : "temporary_password"
+    : "active";
+
   return {
     id: String(coreUser._id),
     coreUserId: String(coreUser._id),
@@ -873,7 +881,13 @@ function serializeAppUserAdmin({ coreUser, appUser, subscriptionsCount = 0, acti
     role: "app_user",
     isActive: Boolean(coreUser.isActive),
     accountStatus: coreUser.accountStatus || "active",
-    forcePasswordChange: Boolean(coreUser.forcePasswordChange),
+    forcePasswordChange,
+    authState,
+    temporaryPasswordReason: coreUser.temporaryPasswordReason || null,
+    temporaryPasswordIssuedAt: coreUser.temporaryPasswordIssuedAt || null,
+    temporaryPasswordExpiresAt,
+    lastAdminPasswordResetAt: coreUser.lastAdminPasswordResetAt || null,
+    canResetPassword: Boolean(coreUser.isActive),
     fcmTokens: dedupeStringArray([
       ...(Array.isArray(coreUser.fcmTokens) ? coreUser.fcmTokens : []),
       ...(appUser && Array.isArray(appUser.fcmTokens) ? appUser.fcmTokens : []),
@@ -1627,11 +1641,11 @@ async function createAppUserAdmin(req, res) {
     const isActive = body.isActive === undefined ? true : Boolean(body.isActive);
     const temporaryPassword = body.password || body.temporaryPassword;
 
-    if (!temporaryPassword || String(temporaryPassword).length < 6) {
-      return errorResponse(res, 400, "INVALID", "A temporary password (minimum 6 characters) is required when creating a user");
+    const userConflictQuery = [{ phone }, { phoneE164: phone }];
+    if (email) {
+      userConflictQuery.push({ email });
     }
-
-    const existingUser = await User.findOne({ phone }).lean();
+    const existingUser = await User.findOne({ $or: userConflictQuery }).lean();
     if (existingUser) {
       return errorResponse(res, 409, "CONFLICT", "App user already exists for this phone");
     }
@@ -1645,12 +1659,10 @@ async function createAppUserAdmin(req, res) {
       return errorResponse(res, 409, "CONFLICT", "App user already exists");
     }
 
-    const now = new Date();
-    const passwordHash = await hashAppPassword(temporaryPassword);
-
-  const session = await startSafeSession();
+    const session = await startSafeSession();
     let createdCoreUser;
     let createdAppUser;
+    let issuedTemporaryCredentials;
 
     try {
       if (typeof session.startTransaction === "function") session.startTransaction();
@@ -1664,15 +1676,21 @@ async function createAppUserAdmin(req, res) {
           role: "client",
           isActive,
           accountStatus: "active",
-          passwordHash,
-          passwordSetAt: now,
-          forcePasswordChange: true,
           authProvider: "password",
           authMethods: ["password"],
           createdByAdminId: req.dashboardUserId,
         }],
         { session }
       );
+
+      issuedTemporaryCredentials = await issueCustomerTemporaryPassword({
+        user: createdCoreUser[0],
+        temporaryPassword,
+        reason: "admin_created",
+        actorId: req.dashboardUserId,
+        actorRole: req.dashboardUserRole,
+        saveOptions: { session },
+      });
 
       createdAppUser = await AppUser.create(
         [{
@@ -1685,15 +1703,6 @@ async function createAppUserAdmin(req, res) {
       );
 
       if (typeof session.commitTransaction === "function") await session.commitTransaction();
-
-      await writeActivityLogSafely({
-        entityType: "user",
-        entityId: createdCoreUser[0]._id,
-        action: "admin_created_app_user",
-        byUserId: req.dashboardUserId,
-        byRole: req.dashboardUserRole,
-        meta: { phone },
-      }, { source: "createAppUserAdmin" });
     } catch (err) {
       await session.abortTransaction();
       throw err;
@@ -1703,15 +1712,24 @@ async function createAppUserAdmin(req, res) {
 
     const coreUser = createdCoreUser[0].toObject();
     const appUser = createdAppUser[0].toObject();
+    const serializedUser = serializeAppUserAdmin({
+      coreUser,
+      appUser,
+      subscriptionsCount: 0,
+      activeSubscriptionsCount: 0,
+    });
 
     return res.status(201).json({
       status: true,
-      data: serializeAppUserAdmin({
-        coreUser,
-        appUser,
-        subscriptionsCount: 0,
-        activeSubscriptionsCount: 0,
-      }),
+      data: {
+        ...serializedUser,
+        user: serializedUser,
+        temporaryCredentials: {
+          temporaryPassword: issuedTemporaryCredentials.temporaryPassword,
+          expiresAt: issuedTemporaryCredentials.expiresAt,
+          mustChangePassword: true,
+        },
+      },
     });
   } catch (err) {
     console.error(err); if (isControlledError(err)) {
@@ -4004,12 +4022,8 @@ async function resetAppUserPassword(req, res) {
   const { reason, password, temporaryPassword } = req.body || {};
   const rawPassword = password || temporaryPassword;
 
-  if (!rawPassword || String(rawPassword).length < 6) {
-    return errorResponse(res, 400, "INVALID", "A temporary password (minimum 6 characters) is required to reset the user's password");
-  }
-
-  const user = await User.findOne({ _id: id, role: "client" });
-  if (!user) {
+  const managedUser = await findManagedAppUserById(id);
+  if (!managedUser) {
     return res.status(404).json({
       status: false,
       message: "Customer account was not found",
@@ -4017,29 +4031,24 @@ async function resetAppUserPassword(req, res) {
     });
   }
 
-  const now = new Date();
-  const newPasswordHash = await hashAppPassword(rawPassword);
-  user.passwordHash = newPasswordHash;
-  user.passwordSetAt = now;
-  user.forcePasswordChange = true;
-  user.accountStatus = "active";
-  user.resetRequestedAt = null;
-  user.failedLoginAttempts = 0;
-  user.lockedUntil = null;
-  user.authProvider = "password";
-  user.authMethods = Array.from(new Set([...(Array.isArray(user.authMethods) ? user.authMethods : []), "password"]));
-  await user.save();
+  const user = await User.findOne({ _id: managedUser.coreUser._id, role: "client" });
+  if (!user) {
+    return errorResponse(res, 404, "NOT_FOUND", "Customer account was not found");
+  }
+  if (user.isActive === false) {
+    return errorResponse(res, 403, "FORBIDDEN", "Inactive customers must be reactivated before password reset");
+  }
 
-  await writeActivityLogSafely({
-    entityType: "user",
-    entityId: user._id,
-    action: "admin_reset_app_user_password",
-    byUserId: req.dashboardUserId,
-    byRole: req.dashboardUserRole,
-    meta: {
-      reason: reason ? String(reason).slice(0, 500) : null,
-    },
-  }, { source: "resetAppUserPassword" });
+  const issuedTemporaryCredentials = await issueCustomerTemporaryPassword({
+    user,
+    temporaryPassword: rawPassword,
+    reason: "admin_reset",
+    actorId: req.dashboardUserId,
+    actorRole: req.dashboardUserRole,
+    resetReason: reason,
+    revokeSessions: true,
+    invalidateAccessTokens: true,
+  });
 
   return res.status(200).json({
     status: true,
@@ -4047,8 +4056,12 @@ async function resetAppUserPassword(req, res) {
     messageAr: "تم إعادة تعيين كلمة المرور بنجاح. سيُطلب من المستخدم تغييرها عند تسجيل الدخول التالي.",
     data: {
       userId: String(user._id),
+      phoneE164: user.phoneE164 || user.phone,
       accountStatus: user.accountStatus,
       forcePasswordChange: true,
+      temporaryPassword: issuedTemporaryCredentials.temporaryPassword,
+      temporaryPasswordExpiresAt: issuedTemporaryCredentials.expiresAt,
+      sessionsRevoked: true,
     },
   });
 }

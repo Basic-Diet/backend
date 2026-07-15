@@ -13,6 +13,7 @@ const contentController = require("../controllers/contentController");
 const zoneController = require("../controllers/zoneController");
 const dashboardHealthController = require("../controllers/dashboardHealthController");
 const { dashboardAuthMiddleware, dashboardRoleMiddleware } = require("../middleware/dashboardAuth");
+const { adminPasswordResetLimiter } = require("../middleware/rateLimit");
 const asyncHandler = require("../middleware/asyncHandler");
 const { adminImageUploadMiddleware } = require("../middleware/imageUpload");
 
@@ -22,6 +23,7 @@ router.use(dashboardAuthMiddleware);
 
 const dashboardAdminOrCashierRead = dashboardRoleMiddleware(["admin", "cashier"]);
 const dashboardAdminOrKitchen = dashboardRoleMiddleware(["admin", "kitchen"]);
+const dashboardAdminOnly = dashboardRoleMiddleware(["admin"]);
 
 router.get("/overview", dashboardAdminOrCashierRead, asyncHandler(controller.getDashboardOverview));
 router.get("/search", dashboardAdminOrCashierRead, asyncHandler(controller.searchDashboard));
@@ -42,7 +44,24 @@ router.get(
 router.get("/subscriptions/:id", dashboardAdminOrCashierRead, asyncHandler(controller.getSubscriptionAdmin));
 router.get("/users", dashboardAdminOrCashierRead, asyncHandler(controller.listAppUsers));
 router.get("/users/:id/subscriptions", dashboardAdminOrCashierRead, asyncHandler(controller.listAppUserSubscriptions));
-router.post("/users/:id/reset-password", asyncHandler(controller.resetAppUserPassword));
+/**
+ * @openapi
+ * /admin/users/{id}/reset-password:
+ *   post:
+ *     summary: Issue an admin temporary customer password
+ *     tags: [Admin Users]
+ *     description: Admin/superadmin only. Replaces the customer's password hash with a temporary-password hash, revokes refresh sessions, and invalidates old access tokens.
+ *     responses:
+ *       200:
+ *         description: Returns the new temporary password once.
+ *       400:
+ *         description: WEAK_PASSWORD
+ *       403:
+ *         description: FORBIDDEN
+ *       404:
+ *         description: Customer not found
+ */
+router.post("/users/:id/reset-password", dashboardAdminOnly, adminPasswordResetLimiter, asyncHandler(controller.resetAppUserPassword));
 router.get("/users/:id", dashboardAdminOrCashierRead, asyncHandler(controller.getAppUser));
 router.get("/orders", dashboardAdminOrCashierRead, asyncHandler(controller.listOrdersAdmin));
 router.get("/orders/:id", dashboardAdminOrCashierRead, asyncHandler(controller.getOrderAdmin));
@@ -399,9 +418,26 @@ router.put("/zones/:id", asyncHandler(zoneController.updateZoneAdmin));
 router.patch("/zones/:id/toggle", asyncHandler(zoneController.toggleZoneActiveAdmin));
 router.delete("/zones/:id", asyncHandler(zoneController.deleteZoneAdmin));
 router.get("/users", asyncHandler(controller.listAppUsers));
+/**
+ * @openapi
+ * /admin/users:
+ *   post:
+ *     summary: Create an app customer from the dashboard
+ *     tags: [Admin Users]
+ *     description: Creates linked User/AppUser records and returns a one-time temporary password. Plaintext temporary passwords are never stored or returned by read endpoints.
+ *     responses:
+ *       201:
+ *         description: Customer created with temporaryCredentials
+ *       400:
+ *         description: WEAK_PASSWORD or validation error
+ *       403:
+ *         description: FORBIDDEN
+ *       409:
+ *         description: USER_ALREADY_EXISTS or CONFLICT
+ */
 router.post("/users", asyncHandler(controller.createAppUserAdmin));
 router.get("/users/:id/subscriptions", asyncHandler(controller.listAppUserSubscriptions));
-router.post("/users/:id/reset-password", asyncHandler(controller.resetAppUserPassword));
+router.post("/users/:id/reset-password", dashboardAdminOnly, adminPasswordResetLimiter, asyncHandler(controller.resetAppUserPassword));
 router.get("/users/:id", asyncHandler(controller.getAppUser));
 router.put("/users/:id", asyncHandler(controller.updateAppUser));
 router.get("/subscriptions/summary", asyncHandler(controller.getSubscriptionsSummaryAdmin));
