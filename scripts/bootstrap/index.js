@@ -9,7 +9,7 @@ const { seedSubscriptionPlans } = require("./seed-subscription-plans");
 const { bootstrapDefaultAccounts } = require("./seed-default-accounts");
 const { seedMealBuilderConfig } = require("./seed-meal-builder");
 const { backfillPremiumUpgrades } = require("../backfill-premium-upgrades");
-
+const { resolveMongoUri } = require("../../src/utils/mongoUriResolver");
 
 function isTruthy(value) {
   return ["1", "true", "yes", "y"].includes(String(value || "").trim().toLowerCase());
@@ -24,6 +24,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     accountSync: isTruthy(process.env.ACCOUNT_BOOTSTRAP_SYNC),
     includeMealBuilder: isTruthy(process.env.MEAL_BUILDER_BOOTSTRAP),
     mealBuilderSync: argv.includes("--sync") && isTruthy(process.env.MEAL_BUILDER_BOOTSTRAP_SYNC),
+    strictPremium: isTruthy(process.env.PREMIUM_BOOTSTRAP_STRICT),
   };
 }
 
@@ -43,22 +44,20 @@ function assertResetAllowed({ reset }) {
 
 function printDryRunPlan(args, log = console) {
   log.log("[bootstrap:dry-run] No database writes will be attempted.");
-  log.log(`[bootstrap:dry-run] mode=${args.sync ? "sync" : "create-missing-only"}`);
-  log.log(`[bootstrap:dry-run] catalog/menu seed: yes${args.reset ? " with guarded reset" : ""}`);
-  log.log("[bootstrap:dry-run] subscription plans seed: yes");
+  log.log(`[bootstrap:dry-run] mode=${args.sync ? "sync-initial-rows" : "create-missing-only"}`);
+  log.log(`[bootstrap:dry-run] catalog/menu initial data: yes${args.reset ? " with guarded reset" : ""}`);
+  log.log("[bootstrap:dry-run] subscription plans: initial data only; extra dashboard-created plans are allowed");
   log.log("[bootstrap:dry-run] subscription addons/settings/pickup locations: handled by catalog seed");
-  log.log("[bootstrap:dry-run] premium upgrade configs backfill: yes");
+  log.log(`[bootstrap:dry-run] premium configs: dynamically discovered${args.strictPremium ? " (strict unresolved check)" : ""}`);
   log.log(`[bootstrap:dry-run] meal builder seed: ${args.includeMealBuilder ? "yes" : "no"}`);
   if (args.includeMealBuilder) {
     log.log(`[bootstrap:dry-run] meal builder mode=${args.mealBuilderSync ? "sync-bootstrap-owned" : "create-missing-only"}`);
   }
-  log.log(`[bootstrap:dry-run] default dashboard/mobile accounts: ${args.includeAccounts ? "yes" : "no"}`);
+  log.log(`[bootstrap:dry-run] demo/default dashboard/mobile accounts: ${args.includeAccounts ? "yes" : "no"}`);
   if (args.includeAccounts) {
     log.log(`[bootstrap:dry-run] account mode=${args.accountSync ? "sync" : "create-missing-only"}`);
   }
 }
-
-const { resolveMongoUri } = require("../../src/utils/mongoUriResolver");
 
 async function runBootstrap(options = {}) {
   const args = { ...parseArgs(options.argv), ...options };
@@ -73,26 +72,33 @@ async function runBootstrap(options = {}) {
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
   console.log("Connected to MongoDB for data bootstrap.");
   try {
+    const syncInitialRows = args.sync && isTruthy(process.env.BOOTSTRAP_SYNC);
+
     await seedCatalog({
-      sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
+      sync: syncInitialRows,
       reset: args.reset,
       includeSubscriptionPlans: false,
       skipStrictVerify: true,
     });
-    await seedSubscriptionPlans({
-      sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
-      cleanupFlatPlans: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC),
-    });
-    // Ensure AddonPlanPrice records are populated now that base plans are seeded/synced
-    const { seedSubscriptionAddons } = require("./seed-catalog");
-    await seedSubscriptionAddons(null, { sync: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC) });
 
-    console.log("Running Premium Upgrade Config backfill/reconciliation...");
-    await backfillPremiumUpgrades();
+    await seedSubscriptionPlans({
+      sync: syncInitialRows,
+      cleanupFlatPlans: false,
+    });
+
+    const { seedSubscriptionAddons } = require("./seed-catalog");
+    await seedSubscriptionAddons(null, { sync: syncInitialRows });
+
+    console.log("Running dynamic Premium Upgrade Config discovery/reconciliation...");
+    await backfillPremiumUpgrades({
+      sync: syncInitialRows,
+      failOnUnresolved: args.strictPremium,
+      log: console,
+    });
 
     if (args.includeMealBuilder) {
       await seedMealBuilderConfig({
-        sync: args.sync && isTruthy(process.env.MEAL_BUILDER_BOOTSTRAP_SYNC),
+        sync: args.mealBuilderSync,
         dryRun: false,
         log: console,
       });
@@ -101,7 +107,7 @@ async function runBootstrap(options = {}) {
     }
 
     const { verifySeedReadContracts } = require("./seed-catalog");
-    await verifySeedReadContracts({ strict: args.sync && isTruthy(process.env.BOOTSTRAP_SYNC) });
+    await verifySeedReadContracts({ strict: syncInitialRows });
   } finally {
     await mongoose.disconnect();
   }
@@ -110,12 +116,10 @@ async function runBootstrap(options = {}) {
     try {
       await bootstrapDefaultAccounts({ sync: args.accountSync });
     } finally {
-      if (mongoose.connection.readyState !== 0) {
-        await mongoose.disconnect();
-      }
+      if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
     }
   } else {
-    console.log("Default account bootstrap skipped. Set ALLOW_ACCOUNT_BOOTSTRAP=true to enable it.");
+    console.log("Demo/default account bootstrap skipped. Use bootstrap:superadmin for the production owner account.");
   }
 
   return { dryRun: false, args };
@@ -128,9 +132,7 @@ async function main() {
 if (require.main === module) {
   main().catch(async (err) => {
     console.error(`[bootstrap:data] ${err.message}`);
-    if (mongoose.connection.readyState !== 0) {
-      await mongoose.disconnect();
-    }
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
     process.exit(1);
   });
 }
