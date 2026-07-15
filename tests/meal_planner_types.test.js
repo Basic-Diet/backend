@@ -67,6 +67,8 @@ const IDS = {
   premiumProtein: "507f191e810c19729de860a2",
   secondPremiumProtein: "507f191e810c19729de860a3",
   v2ShrimpProtein: "507f191e810c19729de860a4",
+  v2SalmonProtein: "507f191e810c19729de860a5",
+  v2BeefSteakProtein: "507f191e810c19729de860a6",
   allowedSaladProtein: ALLOWED_SALAD_PROTEIN_IDS.grilled_chicken,
   forbiddenBeefSteakProtein: "507f191e810c19729de860a8",
   forbiddenMeatballsProtein: "507f191e810c19729de860a9",
@@ -82,7 +84,55 @@ const IDS = {
   sauceOne: "507f191e810c19729de860d6",
   sauceTwo: "507f191e810c19729de860d7",
   extraProteinOption: "507f191e810c19729de860d8",
+  basicMealProduct: "507f191e810c19729de861010",
+  proteinsGroup: "507f191e810c19729de861011",
+  carbsGroup: "507f191e810c19729de861012",
 };
+
+function idsEqual(left, right) {
+  return String(left || "") === String(right || "");
+}
+
+function isIdInQuery(id, query = {}) {
+  if (!query || !query._id) return true;
+  if (query._id.$in) {
+    return query._id.$in.map(String).includes(String(id));
+  }
+  return idsEqual(id, query._id);
+}
+
+function findById(collection, id) {
+  return (collection || []).find((item) => idsEqual(item && item._id, id)) || null;
+}
+
+function filterProductGroupOptions(rows, query = {}) {
+  return (rows || []).filter((row) => {
+    if (query.optionId && !idsEqual(row.optionId, query.optionId)) return false;
+    if (query.groupId && !idsEqual(row.groupId, query.groupId)) return false;
+    if (query.productId && !idsEqual(row.productId, query.productId)) return false;
+    return true;
+  });
+}
+
+function filterProductOptionGroups(rows, query = {}) {
+  return (rows || []).filter((row) => {
+    if (query.productId && !idsEqual(row.productId, query.productId)) return false;
+    if (query.groupId && !idsEqual(row.groupId, query.groupId)) return false;
+    return true;
+  });
+}
+
+function mergeCatalogMap(base = {}, override = {}) {
+  return Object.fromEntries(
+    [...new Set([...Object.keys(base || {}), ...Object.keys(override || {})])].map((key) => [
+      key,
+      {
+        ...((base || {})[key] || {}),
+        ...((override || {})[key] || {}),
+      },
+    ])
+  );
+}
 
 function buildMockPlannerCatalog() {
   return {
@@ -181,17 +231,132 @@ function buildMockPlannerCatalog() {
       { _id: IDS.sandwichMeal, isActive: true, availableForSubscription: true },
     ],
     menuGroups: {
-      proteins: null,
-      carbs: null,
+      proteins: {
+        _id: IDS.proteinsGroup,
+        key: "proteins",
+        name: { en: "Proteins" },
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: new Date(),
+        availableFor: ["subscription"],
+      },
+      carbs: {
+        _id: IDS.carbsGroup,
+        key: "carbs",
+        name: { en: "Carbs" },
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: new Date(),
+        availableFor: ["subscription"],
+      },
     },
-    menuOptions: [],
+    menuOptions: [
+      {
+        _id: IDS.v2ShrimpProtein,
+        key: "shrimp",
+        premiumKey: "shrimp",
+        groupId: IDS.proteinsGroup,
+        extraPriceHalala: 1500,
+        proteinFamilyKey: "fish",
+        displayCategoryKey: "premium",
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        availableForSubscription: true,
+        availableFor: ["subscription"],
+        publishedAt: new Date(),
+      },
+      {
+        _id: IDS.v2SalmonProtein,
+        key: "salmon",
+        premiumKey: "salmon",
+        groupId: IDS.proteinsGroup,
+        extraPriceHalala: 1800,
+        proteinFamilyKey: "fish",
+        displayCategoryKey: "premium",
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        availableForSubscription: true,
+        availableFor: ["subscription"],
+        publishedAt: new Date(),
+      },
+      {
+        _id: IDS.v2BeefSteakProtein,
+        key: "beef_steak",
+        premiumKey: "beef_steak",
+        groupId: IDS.proteinsGroup,
+        extraPriceHalala: 2000,
+        proteinFamilyKey: "beef",
+        displayCategoryKey: "premium",
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        availableForSubscription: true,
+        availableFor: ["subscription"],
+        publishedAt: new Date(),
+      },
+    ],
+    productGroupOptions: [
+      {
+        _id: "507f191e810c19729de861021",
+        productId: IDS.basicMealProduct,
+        groupId: IDS.proteinsGroup,
+        optionId: IDS.v2ShrimpProtein,
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+      },
+      {
+        _id: "507f191e810c19729de861022",
+        productId: IDS.basicMealProduct,
+        groupId: IDS.proteinsGroup,
+        optionId: IDS.v2SalmonProtein,
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+      },
+      {
+        _id: "507f191e810c19729de861023",
+        productId: IDS.basicMealProduct,
+        groupId: IDS.proteinsGroup,
+        optionId: IDS.v2BeefSteakProtein,
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+      },
+    ],
+    productOptionGroups: [
+      {
+        _id: "507f191e810c19729de861031",
+        productId: IDS.basicMealProduct,
+        groupId: IDS.proteinsGroup,
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+      },
+    ],
     premiumUpgradeConfigs: [
-      { _id: IDS.premiumProtein, premiumKey: 'shrimp', upgradeDeltaHalala: 1500, currency: 'SAR', status: 'active', isEnabled: true, isVisible: true },
-      { _id: IDS.secondPremiumProtein, premiumKey: 'salmon', upgradeDeltaHalala: 1800, currency: 'SAR', status: 'active', isEnabled: true, isVisible: true },
-      { _id: IDS.forbiddenBeefSteakProtein, premiumKey: 'beef_steak', upgradeDeltaHalala: 2000, currency: 'SAR', status: 'active', isEnabled: true, isVisible: true },
-      { _id: '507f191e810c19729de861003', premiumKey: 'premium_large_salad', upgradeDeltaHalala: 3100, currency: 'SAR', status: 'active', isEnabled: true, isVisible: true },
+      { _id: IDS.premiumProtein, premiumKey: 'shrimp', upgradeDeltaHalala: 1500, currency: 'SAR', status: 'active', isEnabled: true, isVisible: true, selectionType: 'premium_meal' },
+      { _id: IDS.secondPremiumProtein, premiumKey: 'salmon', upgradeDeltaHalala: 1800, currency: 'SAR', status: 'active', isEnabled: true, isVisible: true, selectionType: 'premium_meal' },
+      { _id: IDS.forbiddenBeefSteakProtein, premiumKey: 'beef_steak', upgradeDeltaHalala: 2000, currency: 'SAR', status: 'active', isEnabled: true, isVisible: true, selectionType: 'premium_meal' },
+      { _id: '507f191e810c19729de861003', premiumKey: 'premium_large_salad', upgradeDeltaHalala: 3100, currency: 'SAR', status: 'active', isEnabled: true, isVisible: true, selectionType: 'premium_large_salad' },
     ],
     menuProducts: {
+      basic_meal: {
+        _id: IDS.basicMealProduct,
+        key: "basic_meal",
+        name: { en: "Basic Meal", ar: "وجبة بيسك" },
+        priceHalala: 0,
+        currency: "SAR",
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: new Date(),
+        availableFor: ["subscription"],
+      },
       premium_large_salad: {
         _id: "507f191e810c19729de860f1",
         key: "premium_large_salad",
@@ -220,48 +385,99 @@ function buildMockPlannerCatalog() {
   };
 }
 
+function withSourceLinkedPremiumConfigs(catalog) {
+  const proteinGroup = (catalog.menuGroups || {}).proteins || null;
+  const basicMeal = (catalog.menuProducts || {}).basic_meal || null;
+  const premiumSalad = (catalog.menuProducts || {}).premium_large_salad || null;
+  const optionsByPremiumKey = new Map((catalog.menuOptions || []).map((option) => [option.premiumKey || option.key, option]));
+
+  return (catalog.premiumUpgradeConfigs || []).map((config) => {
+    if (!config || !config.premiumKey) return config;
+    if (config.sourceType && config.sourceId) return config;
+
+    if (config.premiumKey === "premium_large_salad") {
+      return {
+        ...config,
+        sourceType: "menu_product",
+        sourceId: premiumSalad ? premiumSalad._id : config.sourceId,
+        sourceProductId: premiumSalad ? premiumSalad._id : config.sourceProductId,
+        selectionType: "premium_large_salad",
+      };
+    }
+
+    const option = optionsByPremiumKey.get(config.premiumKey);
+    return {
+      ...config,
+      sourceType: "menu_option",
+      sourceId: option ? option._id : config.sourceId,
+      sourceProductId: basicMeal ? basicMeal._id : config.sourceProductId,
+      sourceGroupId: option ? option.groupId : (proteinGroup ? proteinGroup._id : config.sourceGroupId),
+      selectionType: "premium_meal",
+    };
+  });
+}
+
 async function withMockedPlannerCatalog(overrides, fn) {
   const originalProteinFind = BuilderProtein.find;
   const originalCarbFind = BuilderCarb.find;
   const originalMenuOptionFind = MenuOption.find;
+  const originalMenuOptionFindById = MenuOption.findById;
   const originalMenuOptionGroupFind = MenuOptionGroup.find;
   const originalMenuOptionGroupFindOne = MenuOptionGroup.findOne;
+  const originalMenuOptionGroupFindById = MenuOptionGroup.findById;
   const originalMenuCategoryFindOne = MenuCategory.findOne;
   const originalMenuProductFind = MenuProduct.find;
   const originalMenuProductFindOne = MenuProduct.findOne;
+  const originalMenuProductFindById = MenuProduct.findById;
   const originalProductGroupOptionFind = ProductGroupOption.find;
   const originalProductOptionGroupFind = ProductOptionGroup.find;
+  const originalProductOptionGroupFindOne = ProductOptionGroup.findOne;
   const originalMealCategoryFindOne = MealCategory.findOne;
   const originalMealFind = Meal.find;
   const originalSaladIngredientFind = SaladIngredient.find;
   const originalSandwichFind = Sandwich.find;
   const originalPremiumUpgradeConfigFind = PremiumUpgradeConfig.find;
   const originalPremiumUpgradeConfigFindOne = PremiumUpgradeConfig.findOne;
+  const originalPremiumUpgradeConfigFindById = PremiumUpgradeConfig.findById;
 
+  const baseCatalog = buildMockPlannerCatalog();
   const catalog = {
-    ...buildMockPlannerCatalog(),
+    ...baseCatalog,
     ...(overrides || {}),
+    menuGroups: mergeCatalogMap(baseCatalog.menuGroups, (overrides || {}).menuGroups),
+    menuProducts: mergeCatalogMap(baseCatalog.menuProducts, (overrides || {}).menuProducts),
   };
+  catalog.premiumUpgradeConfigs = withSourceLinkedPremiumConfigs(catalog);
+  const menuGroupRows = Object.values(catalog.menuGroups || {}).filter(Boolean);
+  const menuProductRows = [
+    ...Object.values(catalog.menuProducts || {}).filter(Boolean),
+    ...(catalog.sandwichProducts || []),
+  ];
 
   BuilderProtein.find = () => mockQuery(catalog.proteins || []);
   BuilderCarb.find = () => mockQuery(catalog.carbs || []);
-  MenuOption.find = () => mockQuery(catalog.menuOptions || []);
-  MenuOptionGroup.find = () => mockQuery(Object.values(catalog.menuGroups || {}).filter(Boolean));
+  MenuOption.find = (query = {}) => mockQuery((catalog.menuOptions || []).filter((option) => isIdInQuery(option._id, query)));
+  MenuOption.findById = (id) => mockQuery(findById(catalog.menuOptions || [], id));
+  MenuOptionGroup.find = () => mockQuery(menuGroupRows);
   MenuOptionGroup.findOne = (query = {}) => mockQuery((catalog.menuGroups || {})[query.key] || null);
+  MenuOptionGroup.findById = (id) => mockQuery(findById(menuGroupRows, id));
   MenuCategory.findOne = (query = {}) => mockQuery((catalog.menuCategories || {})[query.key] || null);
-  MenuProduct.find = () => mockQuery(catalog.sandwichProducts || []);
+  MenuProduct.find = (query = {}) => mockQuery(menuProductRows.filter((product) => isIdInQuery(product._id, query)));
   MenuProduct.findOne = (query = {}) => {
     const key = query && query.key;
     return mockQuery((catalog.menuProducts || {})[key] || null);
   };
+  MenuProduct.findById = (id) => mockQuery(findById(menuProductRows, id));
   ProductOptionGroup.find = () => mockQuery(catalog.productOptionGroups || []);
-  ProductGroupOption.find = () => mockQuery(catalog.productGroupOptions || []);
+  ProductOptionGroup.findOne = (query = {}) => mockQuery(filterProductOptionGroups(catalog.productOptionGroups || [], query)[0] || null);
+  ProductGroupOption.find = (query = {}) => mockQuery(filterProductGroupOptions(catalog.productGroupOptions || [], query));
   MealCategory.findOne = () => mockQuery(catalog.sandwichCategory || null);
   Meal.find = () => mockQuery(catalog.sandwiches || []);
   SaladIngredient.find = () => mockQuery(catalog.saladIngredients || []);
   Sandwich.find = () => mockQuery(catalog.catalogSandwiches || []);
   PremiumUpgradeConfig.find = () => mockQuery(catalog.premiumUpgradeConfigs || []);
   PremiumUpgradeConfig.findOne = (query = {}) => mockQuery((catalog.premiumUpgradeConfigs || []).find(c => c.premiumKey === query.premiumKey) || null);
+  PremiumUpgradeConfig.findById = (id) => mockQuery(findById(catalog.premiumUpgradeConfigs || [], id));
 
   try {
     return await fn(catalog);
@@ -269,19 +485,24 @@ async function withMockedPlannerCatalog(overrides, fn) {
     BuilderProtein.find = originalProteinFind;
     BuilderCarb.find = originalCarbFind;
     MenuOption.find = originalMenuOptionFind;
+    MenuOption.findById = originalMenuOptionFindById;
     MenuOptionGroup.find = originalMenuOptionGroupFind;
     MenuOptionGroup.findOne = originalMenuOptionGroupFindOne;
+    MenuOptionGroup.findById = originalMenuOptionGroupFindById;
     MenuCategory.findOne = originalMenuCategoryFindOne;
     MenuProduct.find = originalMenuProductFind;
     MenuProduct.findOne = originalMenuProductFindOne;
+    MenuProduct.findById = originalMenuProductFindById;
     ProductGroupOption.find = originalProductGroupOptionFind;
     ProductOptionGroup.find = originalProductOptionGroupFind;
+    ProductOptionGroup.findOne = originalProductOptionGroupFindOne;
     MealCategory.findOne = originalMealCategoryFindOne;
     Meal.find = originalMealFind;
     SaladIngredient.find = originalSaladIngredientFind;
     Sandwich.find = originalSandwichFind;
     PremiumUpgradeConfig.find = originalPremiumUpgradeConfigFind;
     PremiumUpgradeConfig.findOne = originalPremiumUpgradeConfigFindOne;
+    PremiumUpgradeConfig.findById = originalPremiumUpgradeConfigFindById;
   }
 }
 
@@ -912,6 +1133,7 @@ async function runTests() {
           _id: IDS.v2ShrimpProtein,
           key: 'shrimp',
           premiumKey: 'shrimp',
+          groupId: IDS.proteinsGroup,
           extraPriceHalala: 0,
           proteinFamilyKey: 'fish',
           displayCategoryKey: 'premium',
@@ -920,6 +1142,7 @@ async function runTests() {
           isAvailable: true,
           availableForSubscription: true,
           availableFor: ['subscription'],
+          publishedAt: new Date(),
         },
       ],
     }, async () => {
@@ -937,7 +1160,7 @@ async function runTests() {
         mealsPerDayLimit: 1,
         subscription: { premiumBalance: [] },
       });
-      expectTrue(result.valid, 'draft valid');
+      expectTrue(result.valid, `draft valid (${result.errorCode || 'no error code'})`);
       expectEqual(result.processedSlots[0].proteinId, IDS.premiumProtein, 'canonical legacy protein id selected');
       expectEqual(result.processedSlots[0].premiumKey, 'shrimp', 'canonical premium key');
     });
