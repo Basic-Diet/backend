@@ -83,8 +83,6 @@ function subscriptionFixture() {
 function run() {
   const subscription = subscriptionFixture();
 
-  // Reproduction: meal must be a first-class category and must never resolve
-  // through the historical snack/dessert mapping.
   assert.strictEqual(normalizeSubscriptionAddonCategory("meal"), "meal");
   assert.strictEqual(resolveAddonCategoryForMenuProduct({ itemType: "meal" }, "desserts"), "meal");
   assert.strictEqual(resolveAddonCategoryForMenuProduct({ itemType: "snack" }, "snacks"), "snack");
@@ -92,10 +90,10 @@ function run() {
 
   const eligibility = buildAddonEntitlementEligibility(subscription);
   assert.strictEqual(isAddonChoiceEligibleForAllowance(eligibility, "meal", MEAL_PRODUCT_ID), true);
-  assert.strictEqual(isAddonChoiceEligibleForAllowance(eligibility, "snack", MEAL_PRODUCT_ID), true);
-  assert.strictEqual(isAddonChoiceEligibleForAllowance(eligibility, "snack", objectId(799)), false);
+  assert.strictEqual(isAddonChoiceEligibleForAllowance(eligibility, "snack", MEAL_PRODUCT_ID), false);
+  assert.strictEqual(isAddonChoiceEligibleForAllowance(eligibility, "snack", SNACK_PRODUCT_ID), true);
+  assert.strictEqual(isAddonChoiceEligibleForAllowance(eligibility, "juice", JUICE_PRODUCT_ID), true);
 
-  // Snapshot ownership remains valid without consulting a live Addon document.
   assert.strictEqual(isAddonEntitlementEligibleForProduct(
     subscription.addonSubscriptions[0],
     { productId: MEAL_PRODUCT_ID, category: "meal", addonPlanId: MEAL_PLAN_ID }
@@ -106,7 +104,6 @@ function run() {
     { productId: MEAL_PRODUCT_ID, category: "snack", addonPlanId: MEAL_PLAN_ID }
   ), false);
 
-  // Multi-category isolation: an id match is not enough when category differs.
   assert.strictEqual(findAddonBalanceBucket(subscription, {
     addonPlanId: MEAL_PLAN_ID,
     addonId: MEAL_PLAN_ID,
@@ -129,7 +126,6 @@ function run() {
     category: "juice",
   }).category, "juice");
 
-  // validate-style lookups are read-only.
   const before = JSON.stringify(subscription.addonBalance);
   findAddonBalanceBucket(subscription, {
     addonPlanId: MEAL_PLAN_ID,
