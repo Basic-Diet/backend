@@ -223,6 +223,20 @@ function findAddonBalanceBucketIndex(addonBalance, bucketId) {
     : -1;
 }
 
+function normalizeAddonReleaseCurrency(currency) {
+  return String(currency || "").trim().toUpperCase();
+}
+
+function hasOwnValue(source, key) {
+  return Boolean(source && Object.prototype.hasOwnProperty.call(source, key));
+}
+
+function normalizeOptionalAddonUnitPrice(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const numberValue = Number(value);
+  return Number.isInteger(numberValue) && numberValue >= 0 ? numberValue : NaN;
+}
+
 function buildAddonBalanceReleaseIdentity(bucket, quantity = 1) {
   const identity = {
     _id: bucket._id,
@@ -235,6 +249,80 @@ function buildAddonBalanceReleaseIdentity(bucket, quantity = 1) {
   };
 
   return identity;
+}
+
+function bucketIdentityMatches(expectedBucket, actualBucket) {
+  if (!expectedBucket || !actualBucket) return false;
+  const expectedPlanId = String(expectedBucket.addonPlanId || expectedBucket.addonId || "");
+  const actualPlanId = String(actualBucket.addonPlanId || actualBucket.addonId || "");
+  return String(actualBucket._id || "") === String(expectedBucket._id || "")
+    && String(actualBucket.addonId || "") === String(expectedBucket.addonId || "")
+    && actualPlanId === expectedPlanId
+    && String(actualBucket.category || "") === String(expectedBucket.category || "")
+    && Number(actualBucket.unitPriceHalala || 0) === Number(expectedBucket.unitPriceHalala || 0)
+    && normalizeAddonReleaseCurrency(actualBucket.currency || "SAR") === normalizeAddonReleaseCurrency(expectedBucket.currency || "SAR");
+}
+
+function suppliedAddonReleaseIdentityMatchesBucket(bucket, {
+  addonId = null,
+  addonPlanId = null,
+  category = null,
+  unitPriceHalala = null,
+  currency = null,
+} = {}) {
+  if (!bucket) return false;
+  const normalizedPlanId = String(addonPlanId || "");
+  const normalizedAddonId = String(addonId || "");
+  const bucketPlanId = String(bucket.addonPlanId || bucket.addonId || "");
+  const bucketAddonId = String(bucket.addonId || "");
+
+  if (normalizedPlanId && bucketPlanId !== normalizedPlanId) return false;
+  if (!normalizedPlanId && normalizedAddonId && bucketAddonId !== normalizedAddonId && bucketPlanId !== normalizedAddonId) return false;
+  if (category !== null && category !== undefined && String(bucket.category || "") !== String(category || "")) return false;
+
+  const normalizedUnitPriceHalala = normalizeOptionalAddonUnitPrice(unitPriceHalala);
+  if (Number.isNaN(normalizedUnitPriceHalala)) return false;
+  if (normalizedUnitPriceHalala !== null && Number(bucket.unitPriceHalala || 0) !== normalizedUnitPriceHalala) return false;
+
+  const suppliedCurrency = normalizeAddonReleaseCurrency(currency);
+  if (suppliedCurrency && normalizeAddonReleaseCurrency(bucket.currency || "SAR") !== suppliedCurrency) return false;
+
+  return true;
+}
+
+async function diagnoseAddonReleaseFailure({ subscriptionId, bucket, quantity, session }) {
+  const latest = await Subscription.findOne(
+    {
+      _id: subscriptionId,
+      "addonBalance._id": bucket && bucket._id,
+    },
+    { "addonBalance.$": 1 }
+  ).session(session);
+  const latestBucket = latest && Array.isArray(latest.addonBalance) ? latest.addonBalance[0] : null;
+
+  if (!latestBucket) return "bucket_not_found";
+  if (!bucketIdentityMatches(bucket, latestBucket)) return "bucket_identity_mismatch";
+  if (Number(latestBucket.consumedQty || 0) < quantity) return "no_consumed_balance";
+  return "atomic_release_failed";
+}
+
+function isAddonReleaseIdempotentResult(result) {
+  return Boolean(result && (result.released === true || result.reason === "no_consumed_balance"));
+}
+
+function assertAddonBalanceReleaseSucceeded(result, context = {}) {
+  if (isAddonReleaseIdempotentResult(result)) return;
+  const reason = String(result && result.reason || "atomic_release_failed");
+  const err = new Error(`Add-on balance release failed: ${reason}`);
+  err.code = "ADDON_BALANCE_RELEASE_FAILED";
+  err.status = 409;
+  err.reason = reason;
+  err.details = {
+    addonId: context.addonId ? String(context.addonId) : null,
+    addonPlanId: context.addonPlanId ? String(context.addonPlanId) : null,
+    category: context.category || null,
+  };
+  throw err;
 }
 
 async function releaseAddonBalanceAtomically({ subscription, addonId, addonPlanId = null, category = null, unitPriceHalala, currency = null, session }) {
@@ -252,6 +340,9 @@ async function releaseAddonBalanceAtomically({ subscription, addonId, addonPlanI
   const bucketIndex = bucket ? findAddonBalanceBucketIndex(subscription.addonBalance, bucket._id) : -1;
 
   if (bucketIndex < 0) return { released: false, reason: "bucket_not_found" };
+  if (!suppliedAddonReleaseIdentityMatchesBucket(bucket, { addonId, addonPlanId, category, unitPriceHalala, currency })) {
+    return { released: false, reason: "bucket_identity_mismatch" };
+  }
 
   const atomicResult = await Subscription.findOneAndUpdate(
     {
@@ -270,7 +361,13 @@ async function releaseAddonBalanceAtomically({ subscription, addonId, addonPlanI
   );
 
   if (!atomicResult) {
-    return { released: false, reason: "no_consumed_balance" };
+    const reason = await diagnoseAddonReleaseFailure({
+      subscriptionId: subscription._id,
+      bucket,
+      quantity: releaseQuantity,
+      session,
+    });
+    return { released: false, reason };
   }
 
   // Keep the in-memory Mongoose document synchronized with the atomic
@@ -890,15 +987,16 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
       // Release survivors (addons that were using subscription balance but are now removed)
       for (const list of existingAddonWalletMap.values()) {
          for (const sel of list) {
-            await releaseAddonBalanceAtomically({
+            const releaseResult = await releaseAddonBalanceAtomically({
                subscription: subInSession,
                addonId: sel.addonId,
                addonPlanId: sel.addonPlanId || null,
                category: sel.category || null,
-               unitPriceHalala: sel.unitPriceHalala || 0,
+               unitPriceHalala: hasOwnValue(sel, "unitPriceHalala") ? sel.unitPriceHalala : null,
                currency: sel.currency || null,
                session
             });
+            assertAddonBalanceReleaseSucceeded(releaseResult, sel);
          }
       }
     }
@@ -1336,6 +1434,7 @@ module.exports = {
   performDayPlanningConfirmation,
   consumeAddonBalanceAtomically,
   releaseAddonBalanceAtomically,
+  assertAddonBalanceReleaseSucceeded,
   resolveMealSlotPlanningLimits,
   buildPlanningDraftSubscriptionView,
   preservePersistedValidationTimestamps,

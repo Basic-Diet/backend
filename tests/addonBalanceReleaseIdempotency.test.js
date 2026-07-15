@@ -1,7 +1,9 @@
 process.env.NODE_ENV = "test";
 
 const assert = require("assert");
+const fs = require("fs");
 const mongoose = require("mongoose");
+const path = require("path");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
 const Subscription = require("../src/models/Subscription");
@@ -91,6 +93,8 @@ async function run() {
   });
   const uri = mongo.getUri(`addon_release_idempotency_${Date.now()}`);
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
+  await Subscription.createCollection();
+  await Subscription.init();
 
   try {
     const addonId = oid(100);
@@ -284,6 +288,109 @@ async function run() {
         await sub.save({ session });
       });
       await assertBucket(subscription._id, mealBucket, { remainingQty: 0, consumedQty: 1 }, "category-only release");
+    }
+
+    {
+      const subscription = await createSubscription([
+        balance({ bucketId: mealBucket, addonId, addonPlanId: planA, category: "meal", remainingQty: 0, consumedQty: 1, unitPriceHalala: 1200, currency: "SAR" }),
+      ]);
+
+      await withTransaction(async (session) => {
+        const sub = await Subscription.findById(subscription._id).session(session);
+        const released = await releaseAddonBalanceAtomically({
+          subscription: sub,
+          addonId,
+          addonPlanId: planA,
+          category: "meal",
+          unitPriceHalala: 1300,
+          session,
+        });
+        assert.strictEqual(released.released, false);
+        assert.strictEqual(released.reason, "bucket_identity_mismatch");
+      });
+      await assertBucket(subscription._id, mealBucket, { remainingQty: 0, consumedQty: 1 }, "price mismatch");
+
+      await withTransaction(async (session) => {
+        const sub = await Subscription.findById(subscription._id).session(session);
+        const released = await releaseAddonBalanceAtomically({
+          subscription: sub,
+          addonId,
+          addonPlanId: planA,
+          category: "meal",
+          currency: "USD",
+          session,
+        });
+        assert.strictEqual(released.released, false);
+        assert.strictEqual(released.reason, "bucket_identity_mismatch");
+      });
+      await assertBucket(subscription._id, mealBucket, { remainingQty: 0, consumedQty: 1 }, "currency mismatch");
+    }
+
+    {
+      const subscription = await createSubscription([
+        balance({ bucketId: mealBucket, addonId, addonPlanId: planA, category: "meal", remainingQty: 0, consumedQty: 1 }),
+      ]);
+      const staleSub = await Subscription.findById(subscription._id);
+      await Subscription.updateOne(
+        { _id: subscription._id, "addonBalance._id": mealBucket },
+        { $set: { "addonBalance.$.category": "snack" } }
+      );
+
+      await withTransaction(async (session) => {
+        const released = await releaseAddonBalanceAtomically({
+          subscription: staleSub,
+          addonId,
+          addonPlanId: planA,
+          category: "meal",
+          session,
+        });
+        assert.strictEqual(released.released, false);
+        assert.strictEqual(released.reason, "bucket_identity_mismatch");
+      });
+      const updated = await Subscription.findById(subscription._id).lean();
+      const bucket = getBucket(updated, mealBucket);
+      assert.strictEqual(bucket.category, "snack");
+      assert.strictEqual(Number(bucket.remainingQty || 0), 0);
+      assert.strictEqual(Number(bucket.consumedQty || 0), 1);
+    }
+
+    {
+      const subscription = await createSubscription([
+        balance({ bucketId: mealBucket, addonId, addonPlanId: planA, category: "meal", remainingQty: 0, consumedQty: 1 }),
+      ]);
+      const staleSub = await Subscription.findById(subscription._id);
+      await Subscription.updateOne({ _id: subscription._id }, { $set: { addonBalance: [] } });
+
+      await withTransaction(async (session) => {
+        const released = await releaseAddonBalanceAtomically({
+          subscription: staleSub,
+          addonId,
+          addonPlanId: planA,
+          category: "meal",
+          session,
+        });
+        assert.strictEqual(released.released, false);
+        assert.strictEqual(released.reason, "bucket_not_found");
+      });
+    }
+
+    {
+      const releaseCallers = [
+        "src/services/dashboard/opsTransitionService.js",
+        "src/services/subscription/subscriptionCancellationService.js",
+        "src/services/subscription/subscriptionSelectionService.js",
+      ];
+      for (const relativePath of releaseCallers) {
+        const source = fs.readFileSync(path.resolve(__dirname, "..", relativePath), "utf8");
+        const releaseCalls = (source.match(/releaseAddonBalanceAtomically\(/g) || []).length;
+        const helperCalls = (source.match(/assertAddonBalanceReleaseSucceeded\(/g) || []).length;
+        const exportedDefinitionCount = relativePath.endsWith("subscriptionSelectionService.js") ? 1 : 0;
+        assert.strictEqual(
+          helperCalls - exportedDefinitionCount,
+          releaseCalls - exportedDefinitionCount,
+          `${relativePath} must inspect every releaseAddonBalanceAtomically result`
+        );
+      }
     }
 
     console.log("Add-on balance release idempotency tests passed");

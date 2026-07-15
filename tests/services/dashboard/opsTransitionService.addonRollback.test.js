@@ -185,6 +185,53 @@ describe("Add-on Rollback via opsTransitionService", () => {
     expect(bucket.consumedQty).toBe(0);
   });
 
+  it("should fail cancellation and not mark credits released when addon bucket is missing", async () => {
+    await Subscription.updateOne({ _id: subId }, { $set: { addonBalance: [] } });
+
+    await expect(executeAction("cancel", {
+      entityId: dayId,
+      entityType: "subscription",
+      userId: new mongoose.Types.ObjectId(),
+      role: "admin",
+      payload: { reason: "missing bucket" }
+    })).rejects.toMatchObject({
+      code: "ADDON_BALANCE_RELEASE_FAILED",
+      reason: "bucket_not_found",
+    });
+
+    const day = await SubscriptionDay.findById(dayId);
+    expect(day.status).toBe("open");
+    expect(day.addonCreditsReleased).toBe(false);
+    expect(day.addonSelections[0].source).toBe("subscription");
+  });
+
+  it("should fail cancellation and not mark credits released on addon bucket identity mismatch", async () => {
+    await Subscription.updateOne(
+      { _id: subId },
+      { $set: { "addonSelections.0.currency": "USD" } }
+    );
+    await SubscriptionDay.updateOne(
+      { _id: dayId },
+      { $set: { "addonSelections.0.currency": "USD" } }
+    );
+
+    await expect(executeAction("cancel", {
+      entityId: dayId,
+      entityType: "subscription",
+      userId: new mongoose.Types.ObjectId(),
+      role: "admin",
+      payload: { reason: "identity mismatch" }
+    })).rejects.toMatchObject({
+      code: "ADDON_BALANCE_RELEASE_FAILED",
+      reason: "bucket_identity_mismatch",
+    });
+
+    const day = await SubscriptionDay.findById(dayId);
+    expect(day.status).toBe("open");
+    expect(day.addonCreditsReleased).toBe(false);
+    expect(day.addonSelections[0].source).toBe("subscription");
+  });
+
   it("should not release pending_payment addons", async () => {
     // Only the first addon (source="subscription") should be released.
     // The second one is pending_payment.
