@@ -62,7 +62,7 @@
     "clean:premium-catalog": "ALLOW_PREMIUM_CATALOG_CLEANUP=true node scripts/clean-premium-catalog.js",
     "create:dashboard-user": "node scripts/create-dashboard-user.js",
     "bootstrap:accounts": "node scripts/create_default_accounts.js",
-    "seed:dashboard-users": "node scripts/create-dashboard-users.js",
+    "seed:dashboard-users": "node scripts/seed-dashboard-users.js",
     "seed:legal-content": "node scripts/seed-legal-content.js",
     "catalog:check": "node scripts/checkCatalogHealth.js",
     "audit:premium-salad-protein": "node scripts/audit-premium-salad-protein-eligibility.js",
