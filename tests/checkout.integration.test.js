@@ -119,6 +119,19 @@ function assertInclusiveVatBreakdown(breakdown, msg) {
   assertEqual(subtotalHalala + vatHalala, totalHalala, `${msg} customerPays equals displayed total`);
 }
 
+async function retireActiveSubscriptionsForTest(reason) {
+  await Subscription.updateMany(
+    { userId: testUser._id, status: 'active' },
+    {
+      $set: {
+        status: 'ended',
+        endedAt: new Date(),
+        testRetiredReason: reason,
+      },
+    }
+  );
+}
+
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -743,6 +756,7 @@ async function runTests() {
     assertEqual(statusRes.body.data?.deliveryWindow?.window, TEST_DELIVERY_WINDOW, 'day 2 fulfillment delivery window value');
     assertEqual(statusRes.body.data?.deliverySlot?.slotId, TEST_DELIVERY_SLOT_ID, 'day 2 fulfillment delivery slotId');
     assertEqual(statusRes.body.data?.lockedReason, null, 'day 2 fulfillment is not locked for missing window');
+    await retireActiveSubscriptionsForTest('same-day delivery scenario complete');
   });
 
   await test('future home delivery starts as delivery without first-day pickup override', async () => {
@@ -779,6 +793,7 @@ async function runTests() {
     assertEqual(day1StatusRes.body.data?.effectiveFulfillmentMode, 'delivery', 'future day 1 remains delivery');
     assertEqual(day1StatusRes.body.data?.fulfillmentModeOverride, null, 'future day 1 has no pickup override');
     assertEqual(day1StatusRes.body.data?.firstDayFulfillmentOverride, false, 'future day 1 first-day override flag false');
+    await retireActiveSubscriptionsForTest('future delivery scenario complete');
   });
 
   await test('POST /api/subscriptions/quote rejects invalid delivery slot with 422', async () => {
@@ -1132,6 +1147,8 @@ async function runTests() {
     const uniqueKeys = new Set(keys);
     assertEqual(keys.length, uniqueKeys.size, 'no duplicates');
   });
+
+  await retireActiveSubscriptionsForTest('premium overview scenario complete');
 
   console.log('\n--- D) Premium Large Salad Checkout Contract ---\n');
 
