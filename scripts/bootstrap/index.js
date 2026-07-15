@@ -8,6 +8,7 @@ const { seedCatalog } = require("./seed-catalog");
 const { seedSubscriptionPlans } = require("./seed-subscription-plans");
 const { bootstrapDefaultAccounts } = require("./seed-default-accounts");
 const { seedMealBuilderConfig } = require("./seed-meal-builder");
+const { seedNewMenu } = require("./seed-new-menu");
 const { backfillPremiumUpgrades } = require("../backfill-premium-upgrades");
 const { resolveMongoUri } = require("../../src/utils/mongoUriResolver");
 
@@ -46,6 +47,7 @@ function printDryRunPlan(args, log = console) {
   log.log("[bootstrap:dry-run] No database writes will be attempted.");
   log.log(`[bootstrap:dry-run] mode=${args.sync ? "sync-initial-rows" : "create-missing-only"}`);
   log.log(`[bootstrap:dry-run] catalog/menu initial data: yes${args.reset ? " with guarded reset" : ""}`);
+  log.log("[bootstrap:dry-run] workbook menu: 4 categories, 49 initial products, and canonical option relations");
   log.log("[bootstrap:dry-run] subscription plans: initial data only; extra dashboard-created plans are allowed");
   log.log("[bootstrap:dry-run] subscription addons/settings/pickup locations: handled by catalog seed");
   log.log(`[bootstrap:dry-run] premium configs: dynamically discovered${args.strictPremium ? " (strict unresolved check)" : ""}`);
@@ -80,6 +82,8 @@ async function runBootstrap(options = {}) {
       includeSubscriptionPlans: false,
       skipStrictVerify: true,
     });
+
+    await seedNewMenu({ sync: syncInitialRows, log: console });
 
     await seedSubscriptionPlans({
       sync: syncInitialRows,
