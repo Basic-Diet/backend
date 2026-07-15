@@ -203,8 +203,11 @@ function findAddonBalanceBucket(subscription, {
     const bucketAddonId = String(bucket.addonId || "");
 
     if (normalizedCategory && bucketCategory !== normalizedCategory) return false;
-    if (normalizedPlanId && bucketPlanId !== normalizedPlanId) return false;
-    if (normalizedAddonId && bucketAddonId !== normalizedAddonId && bucketPlanId !== normalizedAddonId) return false;
+    if (normalizedPlanId) {
+      if (bucketPlanId !== normalizedPlanId) return false;
+    } else if (normalizedAddonId && bucketAddonId !== normalizedAddonId && bucketPlanId !== normalizedAddonId) {
+      return false;
+    }
     if (unitPriceHalala !== null && Number(bucket.unitPriceHalala || 0) !== Number(unitPriceHalala || 0)) return false;
     return Boolean(normalizedCategory || normalizedPlanId || normalizedAddonId || unitPriceHalala !== null);
   }) || null;

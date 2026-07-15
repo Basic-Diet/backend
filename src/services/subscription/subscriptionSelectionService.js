@@ -217,62 +217,82 @@ async function consumeAddonBalanceAtomically({ subscription, dayId, date, addonI
   };
 }
 
-async function releaseAddonBalanceAtomically({ subscription, addonId, addonPlanId = null, category = null, unitPriceHalala, session }) {
+function findAddonBalanceBucketIndex(addonBalance, bucketId) {
+  return Array.isArray(addonBalance)
+    ? addonBalance.findIndex((b) => b && b._id && bucketId && String(b._id) === String(bucketId))
+    : -1;
+}
+
+function buildAddonBalanceReleaseIdentity(bucket, quantity = 1) {
+  const identity = {
+    _id: bucket._id,
+    addonId: bucket.addonId,
+    addonPlanId: bucket.addonPlanId || null,
+    category: bucket.category || "",
+    unitPriceHalala: Number(bucket.unitPriceHalala || 0),
+    currency: bucket.currency || "SAR",
+    consumedQty: { $gte: quantity },
+  };
+
+  return identity;
+}
+
+async function releaseAddonBalanceAtomically({ subscription, addonId, addonPlanId = null, category = null, unitPriceHalala, currency = null, session }) {
   if (!session) throw new Error("releaseAddonBalanceAtomically requires a session");
   if (!subscription || !Array.isArray(subscription.addonBalance)) return { released: false };
 
-  const bucket = findAddonBalanceBucket(subscription, { addonId, addonPlanId, category, unitPriceHalala });
-  const bucketIndex = bucket
-    ? subscription.addonBalance.findIndex((b) => b._id && bucket._id && String(b._id) === String(bucket._id))
-    : -1;
+  const hasStrongIdentifier = Boolean(addonPlanId || addonId);
+  if (!hasStrongIdentifier) return { released: false, reason: "bucket_not_found" };
 
-  if (bucketIndex < 0) return { released: false };
+  // The current persisted selection model records one row per covered add-on
+  // credit. Keep release as a single-credit operation unless consume is changed
+  // to reserve multiple credits per selection.
+  const releaseQuantity = 1;
+  const bucket = findAddonBalanceBucket(subscription, { addonId, addonPlanId, category });
+  const bucketIndex = bucket ? findAddonBalanceBucketIndex(subscription.addonBalance, bucket._id) : -1;
 
-  let atomicResult = await Subscription.findOneAndUpdate(
+  if (bucketIndex < 0) return { released: false, reason: "bucket_not_found" };
+
+  const atomicResult = await Subscription.findOneAndUpdate(
     {
       _id: subscription._id,
-      "addonBalance._id": bucket._id,
-      "addonBalance.consumedQty": { $gt: 0 },
+      addonBalance: {
+        $elemMatch: buildAddonBalanceReleaseIdentity(bucket, releaseQuantity),
+      },
     },
     {
-      $inc: { "addonBalance.$.remainingQty": 1, "addonBalance.$.consumedQty": -1 },
+      $inc: {
+        "addonBalance.$.remainingQty": releaseQuantity,
+        "addonBalance.$.consumedQty": -releaseQuantity,
+      },
     },
     { session, new: true }
   );
 
-  let releasedWithDecrement = true;
   if (!atomicResult) {
-    releasedWithDecrement = false;
-    atomicResult = await Subscription.findOneAndUpdate(
-      {
-        _id: subscription._id,
-        "addonBalance._id": bucket._id,
-      },
-      {
-        $inc: { "addonBalance.$.remainingQty": 1 },
-      },
-      { session, new: true }
-    );
+    return { released: false, reason: "no_consumed_balance" };
   }
-
-  if (!atomicResult) return { released: false };
 
   // Keep the in-memory Mongoose document synchronized with the atomic
   // addon balance updates performed via findOneAndUpdate(). Without this,
   // the subsequent subscription.save({ session }) could overwrite the
   // atomically updated addonBalance with stale in-memory values.
   const inMemoryBucket = subscription.addonBalance[bucketIndex];
+  const updatedBucketIndex = findAddonBalanceBucketIndex(atomicResult.addonBalance, bucket._id);
+  const updatedBucket = updatedBucketIndex >= 0 ? atomicResult.addonBalance[updatedBucketIndex] : null;
   if (inMemoryBucket) {
-    inMemoryBucket.remainingQty = (inMemoryBucket.remainingQty || 0) + 1;
-    if (releasedWithDecrement) {
-      inMemoryBucket.consumedQty = Math.max(0, (inMemoryBucket.consumedQty || 0) - 1);
-    }
+    inMemoryBucket.remainingQty = Number(updatedBucket && updatedBucket.remainingQty || 0);
+    inMemoryBucket.consumedQty = Number(updatedBucket && updatedBucket.consumedQty || 0);
     if (typeof subscription.markModified === "function") {
       subscription.markModified("addonBalance");
     }
   }
 
-  return { released: true };
+  return {
+    released: true,
+    remainingQty: Number(updatedBucket && updatedBucket.remainingQty || 0),
+    consumedQty: Number(updatedBucket && updatedBucket.consumedQty || 0),
+  };
 }
 
 function reconcilePremiumBalanceForDay(subscription, existingDay, newPremiumUpgradeSelections, { dayId, date } = {}) {
@@ -876,6 +896,7 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
                addonPlanId: sel.addonPlanId || null,
                category: sel.category || null,
                unitPriceHalala: sel.unitPriceHalala || 0,
+               currency: sel.currency || null,
                session
             });
          }

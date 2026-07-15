@@ -781,6 +781,7 @@ async function handleCancel({ entityId, entityType, payload, userId, role, sessi
                 addonPlanId: sel.addonPlanId,
                 category: sel.category,
                 unitPriceHalala: sel.unitPriceHalala || 0,
+                currency: sel.currency || null,
                 session,
               });
               // Mark as pending_payment to prevent double-release if reopened

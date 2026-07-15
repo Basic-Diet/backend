@@ -154,9 +154,35 @@ describe("Add-on Rollback via opsTransitionService", () => {
     const sub = await Subscription.findById(subId);
     const bucket = sub.addonBalance.id(addonBucketId);
     expect(bucket.remainingQty).toBe(6); // still 6
+    expect(bucket.consumedQty).toBe(1); // still 1
 
     const premiumBucket = sub.premiumBalance.find(b => b.premiumKey === "custom_premium_salad");
     expect(premiumBucket.remainingQty).toBe(6); // still 6
+  });
+
+  it("should not mint addon balance when cancel sees stale subscription source with no consumed quantity", async () => {
+    await Subscription.updateOne(
+      { _id: subId, "addonBalance._id": addonBucketId },
+      {
+        $set: {
+          "addonBalance.$.remainingQty": 5,
+          "addonBalance.$.consumedQty": 0,
+        },
+      }
+    );
+
+    await executeAction("cancel", {
+      entityId: dayId,
+      entityType: "subscription",
+      userId: new mongoose.Types.ObjectId(),
+      role: "admin",
+      payload: { reason: "stale cancel" }
+    });
+
+    const sub = await Subscription.findById(subId);
+    const bucket = sub.addonBalance.id(addonBucketId);
+    expect(bucket.remainingQty).toBe(5);
+    expect(bucket.consumedQty).toBe(0);
   });
 
   it("should not release pending_payment addons", async () => {

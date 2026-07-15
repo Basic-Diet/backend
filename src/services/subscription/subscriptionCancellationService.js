@@ -149,6 +149,7 @@ async function cancelSubscriptionDomain({
                 addonPlanId: sel.addonPlanId,
                 category: sel.category,
                 unitPriceHalala: sel.unitPriceHalala || 0,
+                currency: sel.currency || null,
                 session,
               });
             }
