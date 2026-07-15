@@ -1111,21 +1111,33 @@ async function resolveCheckoutQuoteOrThrow(
       err.code = "INVALID_PREMIUM_ITEM";
       throw err;
     }
+    const snapshot = upgrade.snapshot || {};
 
     resolvedPremiumItems.push({
       protein: doc,
       qty: item.qty,
       unitExtraFeeHalala,
+      totalHalala: Number(item.qty || 0) * unitExtraFeeHalala,
       currency: SYSTEM_CURRENCY,
-      premiumKey,
+      configId: snapshot.configId || upgrade.configId || null,
+      revision: Number(snapshot.revision || upgrade.revision || 0),
+      premiumKey: snapshot.premiumKey || premiumKey,
       canonicalProteinId: resolved.canonicalProteinId,
-      name: resolved.name,
-      nameI18n: localizedNameObject((doc && doc.name) || {}),
-      imageUrl: String((doc && doc.imageUrl) || ""),
-      sourceModel: doc && doc._sourceModel ? doc._sourceModel : doc ? "BuilderProtein" : null,
-      sourceId: doc && doc._id ? doc._id : null,
-      entityType: premiumKey === "premium_large_salad" ? "premium_large_salad" : "premium_meal",
-      catalogVersion: doc && doc.updatedAt ? doc.updatedAt : null,
+      kind: snapshot.kind || "",
+      entityType: snapshot.entityType || (premiumKey === "premium_large_salad" ? "premium_large_salad" : "premium_meal"),
+      selectionType: snapshot.selectionType || upgrade.selectionType || "",
+      sourceType: snapshot.sourceType || upgrade.sourceType || "",
+      sourceModel: snapshot.sourceModel || (doc && doc._sourceModel ? doc._sourceModel : doc ? "BuilderProtein" : null),
+      sourceId: snapshot.sourceId || (doc && doc._id ? doc._id : null),
+      sourceProductId: snapshot.sourceProductId || upgrade.sourceProductId || "",
+      sourceGroupId: snapshot.sourceGroupId || upgrade.sourceGroupId || "",
+      sourceGroupKey: snapshot.sourceGroupKey || "",
+      sourceKey: snapshot.sourceKey || "",
+      name: snapshot.name || resolved.name,
+      nameI18n: snapshot.nameI18n || localizedNameObject((doc && doc.name) || {}),
+      imageUrl: String(snapshot.imageUrl || (doc && doc.imageUrl) || ""),
+      catalogVersion: snapshot.catalogVersion || (doc && doc.updatedAt ? doc.updatedAt : null),
+      purchasedAt: snapshot.purchasedAt || new Date(),
       priceSource,
     });
   }

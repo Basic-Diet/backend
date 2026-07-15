@@ -9,8 +9,11 @@ const router = Router();
 router.use(dashboardAuthMiddleware, dashboardRoleMiddleware(["admin", "superadmin"]));
 
 router.get("/", asyncHandler(controller.getMealBuilder));
+router.get("/published", asyncHandler(controller.getPublished));
+router.get("/draft", asyncHandler(controller.openDraft));
 router.get("/draft/hydrated", asyncHandler(controller.getHydratedDraft));
 router.post("/draft", asyncHandler(controller.createDraft));
+router.post("/draft/reset", asyncHandler(controller.resetDraft));
 router.put("/draft", asyncHandler(controller.updateDraft));
 router.get("/pickers/:sectionKey", asyncHandler(controller.getPicker));
 router.post("/validate", asyncHandler(controller.validateDraft));

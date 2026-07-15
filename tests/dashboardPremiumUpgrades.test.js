@@ -15,6 +15,7 @@ const { seedCatalog } = require("../scripts/bootstrap/seed-catalog");
 const MenuOption = require("../src/models/MenuOption");
 const MenuOptionGroup = require("../src/models/MenuOptionGroup");
 const MenuProduct = require("../src/models/MenuProduct");
+const MealBuilderConfig = require("../src/models/MealBuilderConfig");
 const ProductGroupOption = require("../src/models/ProductGroupOption");
 const ProductOptionGroup = require("../src/models/ProductOptionGroup");
 const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
@@ -369,6 +370,40 @@ async function main() {
     for (const premiumKey of ["beef_steak", "shrimp", "salmon", "premium_large_salad"]) {
       assert(allCandidates.some((candidate) => candidate.premiumKey === premiumKey), `candidate generated for ${premiumKey}`);
     }
+    res = await api.get("/api/dashboard/meal-builder").set(headers);
+    expectStatus(res, 200, "dashboard meal builder exposes automatic premium section");
+    assert.strictEqual(res.body.data.premiumSection.automatic, true);
+    assert.strictEqual(res.body.data.premiumSection.source, "premium_upgrade_configs");
+    for (const premiumKey of ["beef_steak", "shrimp", "salmon", "premium_large_salad"]) {
+      const item = res.body.data.premiumSection.items.find((row) => row.premiumKey === premiumKey);
+      assert(item, `automatic premium section includes ${premiumKey}`);
+      assert.strictEqual(item.health, "ready");
+    }
+
+    await MealBuilderConfig.deleteMany({ status: "draft" });
+    res = await api.get("/api/dashboard/meal-builder/published").set(headers);
+    expectStatus(res, 200, "latest published meal builder");
+    const publishedVersionId = res.body.data.config.versionId;
+    const publishedSectionCount = res.body.data.config.sections.length;
+    assert(publishedSectionCount > 0, "published menu has sections");
+    res = await api.get("/api/dashboard/meal-builder/draft").set(headers);
+    expectStatus(res, 200, "open working draft clones published");
+    assert.strictEqual(res.body.data.mode, "draft");
+    assert.strictEqual(res.body.data.basedOnPublishedVersionId, publishedVersionId);
+    assert.strictEqual(res.body.data.sections.length, publishedSectionCount, "draft clone starts from latest published sections");
+    res = await api.put("/api/dashboard/meal-builder/draft").set(headers).send({ sections: [] });
+    expectStatus(res, 200, "invalid empty draft can be saved as working draft");
+    res = await api.post("/api/dashboard/meal-builder/publish").set(headers).send({});
+    expectStatus(res, 422, "failed publish rejects invalid draft");
+    res = await api.get("/api/dashboard/meal-builder/published").set(headers);
+    expectStatus(res, 200, "published unchanged after failed publish");
+    assert.strictEqual(res.body.data.config.versionId, publishedVersionId);
+    res = await api.post("/api/dashboard/meal-builder/draft/reset").set(headers).send({});
+    expectStatus(res, 200, "reset draft to latest published");
+    assert.strictEqual(res.body.data.reset, true);
+    assert.strictEqual(res.body.data.basedOnPublishedVersionId, publishedVersionId);
+    assert.strictEqual(res.body.data.draft.sections.length, publishedSectionCount, "reset draft restores published sections");
+
     res = await api.get("/api/dashboard/premium-upgrades/candidates").set(headers);
     assert(!res.body.data.some((candidate) => ["beef_steak", "shrimp", "salmon", "premium_large_salad"].includes(candidate.premiumKey)));
 
@@ -527,6 +562,9 @@ async function main() {
     expectStatus(res, 200, "planner after archived salad");
     const saladSection = res.body.data.plannerCatalog.sections.find((section) => section.key === "premium_large_salad");
     assert(!saladSection || saladSection.products.length === 0, "archived premium salad is hidden from client planner");
+    res = await api.get("/api/dashboard/meal-builder").set(headers);
+    expectStatus(res, 200, "dashboard automatic section after archived salad");
+    assert(!res.body.data.premiumSection.items.some((row) => row.premiumKey === "premium_large_salad"), "archived premium salad excluded from automatic section");
 
     assert(await MenuProduct.exists({ _id: premiumSalad._id }), "archive does not delete MenuProduct");
     assert(await MenuOption.exists({ _id: beef._id }), "state changes do not delete MenuOption");

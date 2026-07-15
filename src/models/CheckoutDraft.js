@@ -6,11 +6,20 @@ const {
 } = require("../constants/phase1Contract");
 const DraftPremiumItemSchema = new mongoose.Schema(
   {
+    configId: { type: mongoose.Schema.Types.ObjectId, ref: "PremiumUpgradeConfig", default: null },
+    revision: { type: Number, min: 0, default: 0 },
     proteinId: { type: mongoose.Schema.Types.ObjectId, ref: "BuilderProtein", default: null },
     premiumKey: { type: String, required: true, trim: true },
+    kind: { type: String, trim: true, default: "" },
     entityType: { type: String, trim: true, default: "premium_meal" },
+    selectionType: { type: String, trim: true, default: "" },
+    sourceType: { type: String, trim: true, default: "" },
     sourceModel: { type: String, trim: true, default: "" },
     sourceId: { type: String, trim: true, default: "" },
+    sourceProductId: { type: String, trim: true, default: "" },
+    sourceGroupId: { type: String, trim: true, default: "" },
+    sourceGroupKey: { type: String, trim: true, default: "" },
+    sourceKey: { type: String, trim: true, default: "" },
     name: { type: String, default: "" },
     nameI18n: {
       ar: { type: String, default: "" },
@@ -19,8 +28,10 @@ const DraftPremiumItemSchema = new mongoose.Schema(
     imageUrl: { type: String, default: "" },
     qty: { type: Number, min: 1, required: true },
     unitExtraFeeHalala: { type: Number, min: 0, required: true },
+    totalHalala: { type: Number, min: 0, default: 0 },
     currency: { type: String, default: "SAR" },
     catalogVersion: { type: mongoose.Schema.Types.Mixed, default: null },
+    purchasedAt: { type: Date, default: Date.now },
     priceSource: { type: String, trim: true, default: "" },
   },
   { _id: false }

@@ -120,11 +120,20 @@ function buildPhase1SubscriptionContract({ payload = {}, resolvedQuote, actorCon
     const rawProteinId = item.canonicalProteinId ? String(item.canonicalProteinId) : (item.protein && item.protein._id ? String(item.protein._id) : (item.proteinId ? String(item.proteinId) : null));
     const proteinId = (rawProteinId && String(rawProteinId).trim()) ? String(rawProteinId).trim() : null;
     return {
+      configId: item.configId ? String(item.configId) : null,
+      revision: Number(item.revision || 0),
       proteinId,
       premiumKey: item.premiumKey || null,
+      kind: item.kind || "",
       entityType: item.entityType || (item.premiumKey === "premium_large_salad" ? "premium_large_salad" : "premium_meal"),
+      selectionType: item.selectionType || "",
+      sourceType: item.sourceType || "",
       sourceModel: item.sourceModel || null,
       sourceId: item.sourceId ? String(item.sourceId) : proteinId,
+      sourceProductId: item.sourceProductId ? String(item.sourceProductId) : "",
+      sourceGroupId: item.sourceGroupId ? String(item.sourceGroupId) : "",
+      sourceGroupKey: String(item.sourceGroupKey || ""),
+      sourceKey: String(item.sourceKey || ""),
       name: item.name || "",
       nameI18n: {
         ar: String(item.nameI18n && item.nameI18n.ar || ""),
@@ -133,8 +142,10 @@ function buildPhase1SubscriptionContract({ payload = {}, resolvedQuote, actorCon
       imageUrl: String(item.imageUrl || ""),
       qty: Number(item.qty || 0),
       unitExtraFeeHalala: Number(item.unitExtraFeeHalala || 0),
+      totalHalala: Number(item.totalHalala || (Number(item.qty || 0) * Number(item.unitExtraFeeHalala || 0))),
       currency: String(item.currency || "SAR"),
       catalogVersion: item.catalogVersion || null,
+      purchasedAt: item.purchasedAt || new Date(now).toISOString(),
       priceSource: item.priceSource || null,
     };
   });

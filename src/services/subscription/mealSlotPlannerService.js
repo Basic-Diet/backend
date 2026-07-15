@@ -631,10 +631,32 @@ function projectMaterializedAndLegacyFromSlots({ processedSlots, now }) {
         selections.push(saladProteinId);
         premiumSelections.push({
           premiumKey: CANONICAL_PREMIUM_SALAD_KEY,
+          configId: slot.configId || null,
+          revision: Number(slot.revision || 0),
+          kind: slot.kind || "",
+          entityType: slot.entityType || NEW_TYPES.PREMIUM_LARGE_SALAD,
+          selectionType: NEW_TYPES.PREMIUM_LARGE_SALAD,
+          sourceType: slot.sourceType || "",
+          sourceModel: slot.sourceModel || "",
+          sourceId: slot.sourceId || "",
+          sourceProductId: slot.sourceProductId || "",
+          sourceGroupId: slot.sourceGroupId || "",
+          sourceGroupKey: slot.sourceGroupKey || "",
+          sourceKey: slot.sourceKey || "",
+          name: slot.name || "",
+          nameI18n: slot.nameI18n || undefined,
+          imageUrl: slot.imageUrl || "",
           proteinId: saladProteinId,
           baseSlotKey: slot.slotKey,
+          quantity: Number(slot.quantity || 1),
+          coveredQty: Number(slot.coveredQty || (slot.premiumSource === "balance" ? 1 : 0)),
+          paidQty: Number(slot.paidQty || (slot.premiumSource === "balance" ? 0 : 1)),
           unitExtraFeeHalala: Number(slot.premiumExtraFeeHalala || 0),
+          payableTotalHalala: Number(slot.payableTotalHalala || (slot.premiumSource === "balance" ? 0 : slot.premiumExtraFeeHalala || 0)),
           currency: SYSTEM_CURRENCY,
+          balanceBucketId: slot.balanceBucketId || null,
+          premiumWalletRowId: slot.premiumWalletRowId || null,
+          source: slot.source || (slot.premiumSource === "balance" ? "subscription" : slot.premiumSource === "pending_payment" ? "pending_payment" : "paid"),
           premiumSource: slot.premiumSource || "paid",
         });
         baseMealSlots.push({
@@ -681,10 +703,32 @@ function projectMaterializedAndLegacyFromSlots({ processedSlots, now }) {
     if (materialized.isPremium) {
       premiumSelections.push({
         premiumKey: slot.premiumKey || null,
+        configId: slot.configId || null,
+        revision: Number(slot.revision || 0),
+        kind: slot.kind || "",
+        entityType: slot.entityType || NEW_TYPES.PREMIUM_MEAL,
+        selectionType,
+        sourceType: slot.sourceType || "",
+        sourceModel: slot.sourceModel || "",
+        sourceId: slot.sourceId || "",
+        sourceProductId: slot.sourceProductId || "",
+        sourceGroupId: slot.sourceGroupId || "",
+        sourceGroupKey: slot.sourceGroupKey || "",
+        sourceKey: slot.sourceKey || "",
+        name: slot.name || "",
+        nameI18n: slot.nameI18n || undefined,
+        imageUrl: slot.imageUrl || "",
         proteinId: slot.proteinId,
         baseSlotKey: slot.slotKey,
+        quantity: Number(slot.quantity || 1),
+        coveredQty: Number(slot.coveredQty || (slot.premiumSource === "balance" ? 1 : 0)),
+        paidQty: Number(slot.paidQty || (slot.premiumSource === "balance" ? 0 : 1)),
         unitExtraFeeHalala: Number(slot.premiumExtraFeeHalala || 0),
+        payableTotalHalala: Number(slot.payableTotalHalala || (slot.premiumSource === "balance" ? 0 : slot.premiumExtraFeeHalala || 0)),
         currency: SYSTEM_CURRENCY,
+        balanceBucketId: slot.balanceBucketId || null,
+        premiumWalletRowId: slot.premiumWalletRowId || null,
+        source: slot.source || (slot.premiumSource === "balance" ? "subscription" : slot.premiumSource === "pending_payment" ? "pending_payment" : "paid"),
         premiumSource: slot.premiumSource || "paid",
       });
     }
@@ -949,12 +993,14 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
   }));
 
   const upgradeDeltaHalalaByKey = new Map();
+  const upgradeSnapshotByKey = new Map();
   const upgradeErrorsByKey = new Map();
   for (const result of resolvedUpgrades || []) {
     if (result.error) {
       upgradeErrorsByKey.set(result.premiumKey, result.error);
     } else if (result.upgrade) {
       upgradeDeltaHalalaByKey.set(result.premiumKey, result.upgrade.priceHalala);
+      if (result.upgrade.snapshot) upgradeSnapshotByKey.set(result.premiumKey, result.upgrade.snapshot);
     }
   }
 
@@ -1141,6 +1187,30 @@ async function buildMealSlotDraft({ mealSlots, mealsPerDayLimit, maxSlotCount = 
         plannerMeta.premiumPendingPaymentCount += 1;
         plannerMeta.premiumTotalHalala += processedSlot.premiumExtraFeeHalala;
       }
+      const premiumSnapshot = upgradeSnapshotByKey.get(key) || null;
+      processedSlot.configId = premiumSnapshot?.configId || null;
+      processedSlot.revision = Number(premiumSnapshot?.revision || 0);
+      processedSlot.kind = premiumSnapshot?.kind || "";
+      processedSlot.entityType = premiumSnapshot?.entityType || processedSlot.selectionType;
+      processedSlot.sourceType = premiumSnapshot?.sourceType || "";
+      processedSlot.sourceModel = premiumSnapshot?.sourceModel || "";
+      processedSlot.sourceId = premiumSnapshot?.sourceId || "";
+      processedSlot.sourceProductId = premiumSnapshot?.sourceProductId || "";
+      processedSlot.sourceGroupId = premiumSnapshot?.sourceGroupId || "";
+      processedSlot.sourceGroupKey = premiumSnapshot?.sourceGroupKey || "";
+      processedSlot.sourceKey = premiumSnapshot?.sourceKey || "";
+      processedSlot.name = premiumSnapshot?.name || "";
+      processedSlot.nameI18n = premiumSnapshot?.nameI18n || undefined;
+      processedSlot.imageUrl = premiumSnapshot?.imageUrl || "";
+      processedSlot.quantity = 1;
+      processedSlot.coveredQty = processedSlot.premiumSource === "balance" ? 1 : 0;
+      processedSlot.paidQty = processedSlot.premiumSource === "balance" ? 0 : 1;
+      processedSlot.payableTotalHalala = processedSlot.premiumSource === "balance" ? 0 : Number(processedSlot.premiumExtraFeeHalala || 0);
+      processedSlot.source = processedSlot.premiumSource === "balance"
+        ? "subscription"
+        : processedSlot.premiumSource === "pending_payment"
+          ? "pending_payment"
+          : "paid";
       plannerMeta.premiumSlotCount += 1;
     }
 

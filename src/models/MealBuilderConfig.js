@@ -57,6 +57,8 @@ const MealBuilderConfigSchema = new mongoose.Schema(
     },
     isCurrent: { type: Boolean, default: false, index: true },
     contractVersion: { type: String, default: "subscription_meal_builder.v1" },
+    versionNumber: { type: Number, min: 0, default: 0 },
+    basedOnPublishedVersionId: { type: mongoose.Schema.Types.ObjectId, ref: "MealBuilderConfig", default: null },
     revisionHash: { type: String, default: "", index: true },
     source: {
       type: String,

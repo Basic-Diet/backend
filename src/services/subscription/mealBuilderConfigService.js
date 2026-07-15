@@ -29,6 +29,7 @@ const {
 } = require("../catalog/catalogAvailabilityService");
 const {
   loadClientPremiumUpgradeConfigState,
+  listActiveReadyPremiumUpgradeConfigs,
   resolvePremiumUpgrade,
   resolveSubscriptionPremiumUpgradePricing,
 } = require("./premiumUpgradeConfigService");
@@ -612,11 +613,17 @@ async function getDashboardState({ lang = "en" } = {}) {
     }
   }
 
+  const automaticPremiumSection = await buildAutomaticPremiumSection({ lang });
   return {
     draft: draft ? serializeConfig(draft) : null,
     published: serializedPublished,
     preview: published ? publicContract(await buildPublishedContract({ config: published, lang, includeUnavailable: true })) : null,
     plannerCatalog: plannerCatalog || { sections: [] },
+    premiumSection: {
+      automatic: true,
+      source: "premium_upgrade_configs",
+      items: automaticPremiumSection.dashboardItems || [],
+    },
     validation: {
       draft: draftValidation,
       published: publishedValidation,
@@ -630,8 +637,14 @@ function publicContract(contract = {}) {
 }
 
 function serializeConfig(config) {
+  const mode = config.status === "published" ? "published" : "draft";
   return {
     id: String(config._id),
+    mode,
+    versionId: String(config._id),
+    versionNumber: config.versionNumber || null,
+    basedOnPublishedVersionId: config.basedOnPublishedVersionId ? String(config.basedOnPublishedVersionId) : null,
+    hasUnpublishedChanges: mode === "draft",
     status: config.status,
     isCurrent: config.isCurrent === true,
     contractVersion: config.contractVersion || CONTRACT_VERSION,
@@ -645,6 +658,141 @@ function serializeConfig(config) {
     sections: normalizeSections(config.sections || []).map(serializeSection),
     createdAt: config.createdAt,
     updatedAt: config.updatedAt,
+  };
+}
+
+function automaticPremiumDashboardItem({ config, sourceDoc, health }) {
+  const name = sourceDoc?.name || config.sourceSnapshot?.name || {};
+  return {
+    configId: String(config._id),
+    revision: Number(config.revision || 0),
+    premiumKey: config.premiumKey || "",
+    name: localized(name),
+    kind: config.sourceType === "menu_product" ? "product" : "option",
+    sourceType: config.sourceType,
+    sourceId: config.sourceId ? String(config.sourceId) : null,
+    sourceProductId: config.sourceProductId ? String(config.sourceProductId) : null,
+    sourceGroupId: config.sourceGroupId ? String(config.sourceGroupId) : null,
+    sourceGroupKey: config.sourceSnapshot?.context?.groupKey || null,
+    selectionType: config.selectionType || "",
+    priceHalala: Number(config.upgradeDeltaHalala || 0),
+    upgradeDeltaHalala: Number(config.upgradeDeltaHalala || 0),
+    currency: config.currency || SYSTEM_CURRENCY,
+    status: config.status || "active",
+    health: health?.status || "ready",
+    sortOrder: Number(config.sortOrder || 0),
+  };
+}
+
+async function buildAutomaticPremiumSection({ lang = "en" } = {}) {
+  const readyRows = await listActiveReadyPremiumUpgradeConfigs();
+  const items = readyRows.map(({ config, sourceDoc }) => {
+    const name = sourceDoc?.name || config.sourceSnapshot?.name || {};
+    const premiumKey = config.premiumKey || "";
+    const common = {
+      id: String(config.sourceId || config._id),
+      key: sourceKeyForLocal(sourceDoc, premiumKey),
+      type: config.sourceType === "menu_product" ? "product" : "option",
+      name: pickLang(name, lang),
+      nameI18n: localized(name),
+      imageUrl: sourceDoc?.imageUrl || "",
+      selectionType: config.selectionType || "",
+      isPremium: true,
+      premiumKey,
+      premiumKind: config.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD ? "premium_large_salad" : "premium_protein",
+      priceHalala: Number(config.upgradeDeltaHalala || 0),
+      premiumPriceHalala: Number(config.upgradeDeltaHalala || 0),
+      extraFeeHalala: Number(config.upgradeDeltaHalala || 0),
+      requiresPremiumBalance: true,
+      configId: String(config._id),
+      revision: Number(config.revision || 0),
+      sourceType: config.sourceType,
+      sourceId: config.sourceId ? String(config.sourceId) : null,
+      sourceProductId: config.sourceProductId ? String(config.sourceProductId) : null,
+      sourceGroupId: config.sourceGroupId ? String(config.sourceGroupId) : null,
+      sourceGroupKey: config.sourceSnapshot?.context?.groupKey || null,
+      currency: config.currency || SYSTEM_CURRENCY,
+      available: true,
+      sortOrder: Number(config.sortOrder || sourceDoc?.sortOrder || 0),
+    };
+    if (config.sourceType === "menu_option") {
+      return {
+        ...common,
+        groupId: config.sourceGroupId ? String(config.sourceGroupId) : null,
+        productId: config.sourceProductId ? String(config.sourceProductId) : null,
+        action: { type: "open_builder", requiresBuilder: true },
+      };
+    }
+    return {
+      ...common,
+      productId: config.sourceId ? String(config.sourceId) : null,
+      action: {
+        type: config.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD ? "open_builder" : "direct_add",
+        requiresBuilder: config.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD,
+      },
+    };
+  }).sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+
+  return {
+    automatic: true,
+    source: "premium_upgrade_configs",
+    items,
+    dashboardItems: readyRows.map(automaticPremiumDashboardItem),
+  };
+}
+
+function sourceKeyForLocal(sourceDoc, fallback) {
+  return String(sourceDoc?.premiumKey || sourceDoc?.key || fallback || "").trim().toLowerCase();
+}
+
+function mergeAutomaticPremiumIntoContract(contract, automaticSection) {
+  const autoItems = Array.isArray(automaticSection?.items) ? automaticSection.items : [];
+  if (!autoItems.length) {
+    return {
+      ...contract,
+      premiumSection: automaticSection || { automatic: true, source: "premium_upgrade_configs", items: [] },
+    };
+  }
+  const sections = Array.isArray(contract.sections) ? [...contract.sections] : [];
+  let premiumSection = sections.find((section) => section && section.key === "premium");
+  if (!premiumSection) {
+    premiumSection = {
+      id: "section:premium:auto",
+      key: "premium",
+      type: "mixed",
+      source: { kind: "premium_mixed" },
+      sectionType: "option_group",
+      sourceKind: "premium_visual",
+      title: pickLang(PREMIUM_SECTION_TITLE, "en"),
+      titleI18n: PREMIUM_SECTION_TITLE,
+      sortOrder: CANONICAL_SECTION_SORT_ORDER.premium,
+      required: false,
+      minSelections: 0,
+      maxSelections: null,
+      multiSelect: false,
+      selectionType: MEAL_SELECTION_TYPES.PREMIUM_MEAL,
+      metadata: {},
+      rules: {},
+      items: [],
+      automatic: true,
+    };
+    sections.push(premiumSection);
+  }
+  const byPremiumKey = new Map((premiumSection.items || []).map((item) => [String(item.premiumKey || item.key || ""), item]));
+  for (const item of autoItems) {
+    const key = String(item.premiumKey || item.key || "");
+    if (!byPremiumKey.has(key)) byPremiumKey.set(key, item);
+  }
+  premiumSection.items = [...byPremiumKey.values()].sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+  premiumSection.premiumSection = {
+    automatic: true,
+    source: "premium_upgrade_configs",
+    items: automaticSection.dashboardItems || [],
+  };
+  return {
+    ...contract,
+    sections: sections.sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0)),
+    premiumSection: premiumSection.premiumSection,
   };
 }
 
@@ -1710,10 +1858,15 @@ async function buildPremiumPicker({ sectionKey, section, context, lang, q, pagin
 
 async function createDraft({ sections, actor = {}, notes = "" } = {}) {
   let normalizedSections;
+  let basedOnPublishedVersionId = null;
   if (sections) {
     normalizedSections = await normalizeSectionsForWrite(sections);
   } else {
-    normalizedSections = await buildDefaultVisualTemplateSections();
+    const published = await getCurrentPublishedConfig({ allowVirtualFallback: true });
+    basedOnPublishedVersionId = published ? published._id : null;
+    normalizedSections = published
+      ? normalizeSections(published.sections || [])
+      : await buildDefaultVisualTemplateSections();
   }
 
   await MealBuilderConfig.updateMany({ status: "draft", isCurrent: true }, { $set: { isCurrent: false } });
@@ -1721,6 +1874,7 @@ async function createDraft({ sections, actor = {}, notes = "" } = {}) {
     status: "draft",
     isCurrent: true,
     contractVersion: CONTRACT_VERSION,
+    basedOnPublishedVersionId,
     source: "dashboard",
     createdBySystem: false,
     bootstrapKey: "",
@@ -1730,6 +1884,39 @@ async function createDraft({ sections, actor = {}, notes = "" } = {}) {
     updatedBy: actor.userId || null,
   });
   return serializeConfig(draft.toObject());
+}
+
+async function openWorkingDraft({ actor = {} } = {}) {
+  const existing = await MealBuilderConfig.findOne({ status: "draft", isCurrent: true }).sort({ updatedAt: -1 }).lean();
+  if (existing) return serializeConfig(existing);
+  return createDraft({ actor });
+}
+
+async function resetDraftToPublished({ actor = {} } = {}) {
+  const published = await getCurrentPublishedConfig({ allowVirtualFallback: true });
+  if (!published) {
+    throw new MealBuilderError("No published Meal Builder config exists", "MEAL_BUILDER_NOT_PUBLISHED", 404);
+  }
+  await MealBuilderConfig.updateMany({ status: "draft", isCurrent: true }, { $set: { isCurrent: false } });
+  const draft = await MealBuilderConfig.create({
+    status: "draft",
+    isCurrent: true,
+    contractVersion: CONTRACT_VERSION,
+    basedOnPublishedVersionId: published._id,
+    source: "dashboard",
+    createdBySystem: false,
+    bootstrapKey: "",
+    sections: normalizeSections(published.sections || []),
+    notes: published.notes || "",
+    createdBy: actor.userId || null,
+    updatedBy: actor.userId || null,
+  });
+  return {
+    reset: true,
+    draftVersionId: String(draft._id),
+    basedOnPublishedVersionId: String(published._id),
+    draft: serializeConfig(draft.toObject()),
+  };
 }
 
 async function updateDraft({ sections, actor = {}, notes } = {}) {
@@ -1762,12 +1949,19 @@ async function publishDraft({ actor = {}, notes = "" } = {}) {
   if (!validation.ready) {
     throw new MealBuilderError("Meal Builder draft is not publishable", "MEAL_BUILDER_VALIDATION_FAILED", 422, validation);
   }
+  const automaticPremiumSection = await buildAutomaticPremiumSection({ lang: "en" });
 
   const now = new Date();
+  const latestPublished = await MealBuilderConfig.findOne({ status: { $in: ["published", "archived"] } })
+    .sort({ versionNumber: -1, publishedAt: -1, createdAt: -1 })
+    .lean();
+  const nextVersionNumber = Number(latestPublished?.versionNumber || 0) + 1;
   const publishedPayload = {
     status: "published",
     isCurrent: true,
     contractVersion: CONTRACT_VERSION,
+    versionNumber: nextVersionNumber,
+    basedOnPublishedVersionId: draft.basedOnPublishedVersionId || null,
     sections: normalizeSections(draft.sections || []),
     notes: String(notes || draft.notes || ""),
     source: draft.source || "dashboard",
@@ -1785,6 +1979,11 @@ async function publishDraft({ actor = {}, notes = "" } = {}) {
   return {
     config: serializeConfig(published.toObject()),
     validation,
+    premiumSection: {
+      automatic: true,
+      source: "premium_upgrade_configs",
+      items: automaticPremiumSection.dashboardItems || [],
+    },
     contract: await buildPublishedContract({ config: published.toObject(), lang: "en" }),
   };
 }
@@ -2449,27 +2648,9 @@ async function validateConfigObject(configOrPayload = {}) {
         }
       }
       if (section.key === "premium") {
-        const exposedPremiumKeys = new Set(
-          optionRows
-            .map(({ option }) => optionIdentity(option))
-            .filter(Boolean)
-        );
-        for (const premiumKey of PREMIUM_MEAL_PROTEIN_KEYS) {
-          if (!exposedPremiumKeys.has(premiumKey)) {
-            addCheck(errors, "error", "MEAL_BUILDER_PREMIUM_OPTION_MISSING", "Premium visual section is missing a required premium option", {
-              sectionKey: section.key,
-              optionKey: premiumKey,
-            });
-          }
-        }
         const premiumProducts = (section.selectedProductIds || [])
           .map((id) => docs.productsById.get(String(id)))
           .filter(Boolean);
-        if (!premiumProducts.some((product) => product.key === "premium_large_salad")) {
-          addCheck(errors, "error", "MEAL_BUILDER_PREMIUM_LARGE_SALAD_MISSING", "Premium visual section must include premium_large_salad", {
-            sectionKey: section.key,
-          });
-        }
         for (const premiumProduct of premiumProducts) {
           validateProductForBuilder(premiumProduct, docs.catalogItemsById, errors, { sectionType: section.sectionType, sectionKey: section.key });
           if (premiumProduct.key === "premium_large_salad") {
@@ -2748,10 +2929,10 @@ async function buildPublishedContract({ config = null, lang = "en", includeUnava
   const premiumConfigState = await loadClientPremiumUpgradeConfigState();
   const premiumLargeSaladUpgrade = await resolveSubscriptionPremiumUpgradePricing(PREMIUM_LARGE_SALAD_PREMIUM_KEY).catch(() => null);
   const premiumLargeSaladPricing = {
-    priceHalala: premiumLargeSaladUpgrade?.priceHalala || 2900,
-    extraFeeHalala: premiumLargeSaladUpgrade?.priceHalala || 2900,
+    priceHalala: premiumLargeSaladUpgrade?.priceHalala || 0,
+    extraFeeHalala: premiumLargeSaladUpgrade?.priceHalala || 0,
     currency: premiumLargeSaladUpgrade?.currency || SYSTEM_CURRENCY,
-    source: premiumLargeSaladUpgrade?.priceSource || "legacy_fallback",
+    source: premiumLargeSaladUpgrade?.priceSource || "unavailable",
     isCatalogUnavailable: !premiumLargeSaladUpgrade,
   };
   const payloadSections = [];
@@ -2774,11 +2955,13 @@ async function buildPublishedContract({ config = null, lang = "en", includeUnava
     sections: payloadSections,
   };
   const revisionHash = published.revisionHash || stableHash(stablePayload);
-  return {
+  const contract = {
     ...stablePayload,
     revisionHash,
     membership,
   };
+  const automaticPremiumSection = await buildAutomaticPremiumSection({ lang });
+  return mergeAutomaticPremiumIntoContract(contract, automaticPremiumSection);
 }
 
 function createEmptyMembership() {
@@ -3148,6 +3331,12 @@ function plannerOptionFromBuilderItem(item = {}) {
     isPremium: item.isPremium === true,
     premiumKey: item.premiumKey || undefined,
     premiumKind: item.premiumKind || undefined,
+    configId: item.configId || undefined,
+    revision: item.revision || undefined,
+    sourceType: item.sourceType || undefined,
+    sourceId: item.sourceId || undefined,
+    sourceProductId: item.sourceProductId || undefined,
+    sourceGroupId: item.sourceGroupId || undefined,
     extraPriceHalala: Number(item.priceHalala || item.extraPriceHalala || 0),
     extraFeeHalala: Number(item.premiumPriceHalala || item.extraFeeHalala || 0),
     sortOrder: Number(item.sortOrder || 0),
@@ -3204,6 +3393,12 @@ function plannerProductFromBuilderProduct(item = {}) {
     selectionType: item.selectionType || "",
     premiumKey: item.premiumKey || undefined,
     premiumKind: item.premiumKind || undefined,
+    configId: item.configId || undefined,
+    revision: item.revision || undefined,
+    sourceType: item.sourceType || undefined,
+    sourceId: item.sourceId || undefined,
+    sourceProductId: item.sourceProductId || undefined,
+    sourceGroupId: item.sourceGroupId || undefined,
     pricing: {
       priceHalala: Number(item.priceHalala || 0),
       extraFeeHalala: Number(item.premiumPriceHalala || 0),
@@ -3394,7 +3589,10 @@ module.exports = {
   isOptionIncluded,
   isProductIncluded,
   normalizeSections,
+  openWorkingDraft,
   publishDraft,
+  resetDraftToPublished,
+  serializeConfig,
   updateDraft,
   validateConfigObject,
   validatePayload,

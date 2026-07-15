@@ -343,8 +343,16 @@ function premiumUpgradePricing(upgrade) {
     extraFeeHalala: configuredDelta,
     priceHalala: configuredDelta,
     currency: upgrade.currency,
+    snapshot: upgrade.snapshot || null,
     source: upgrade.priceSource || "resolvePremiumUpgrade",
   };
+}
+
+function premiumSelectionSourceFromPremiumSource(premiumSource) {
+  if (premiumSource === "balance") return "subscription";
+  if (premiumSource === "paid" || premiumSource === "paid_extra") return "paid";
+  if (premiumSource === "pending_payment") return "pending_payment";
+  return "";
 }
 
 async function validateCanonicalMealSlots({
@@ -998,6 +1006,7 @@ async function validateCanonicalMealSlots({
     let isPremium = false;
     let premiumSource = "none";
     let premiumExtraFeeHalala = 0;
+    let premiumSnapshot = null;
 
     if (selectionType === MEAL_SELECTION_TYPES.PREMIUM_MEAL && proteinSelection) {
       isPremium = true;
@@ -1007,10 +1016,12 @@ async function validateCanonicalMealSlots({
         session,
       });
       premiumExtraFeeHalala = upgrade.priceHalala;
+      premiumSnapshot = upgrade.snapshot || null;
     } else if (selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD) {
       isPremium = true;
       premiumKey = PREMIUM_LARGE_SALAD_PREMIUM_KEY;
       premiumExtraFeeHalala = Number(premiumLargeSaladPricing?.extraFeeHalala || 0);
+      premiumSnapshot = premiumLargeSaladPricing?.snapshot || null;
     }
 
     if (isPremium) {
@@ -1066,6 +1077,25 @@ async function validateCanonicalMealSlots({
       } : null,
       isPremium,
       premiumKey,
+      configId: premiumSnapshot?.configId || null,
+      revision: Number(premiumSnapshot?.revision || 0),
+      kind: premiumSnapshot?.kind || "",
+      entityType: premiumSnapshot?.entityType || selectionType,
+      sourceType: premiumSnapshot?.sourceType || "",
+      sourceModel: premiumSnapshot?.sourceModel || "",
+      sourceId: premiumSnapshot?.sourceId || "",
+      sourceProductId: premiumSnapshot?.sourceProductId || "",
+      sourceGroupId: premiumSnapshot?.sourceGroupId || "",
+      sourceGroupKey: premiumSnapshot?.sourceGroupKey || "",
+      sourceKey: premiumSnapshot?.sourceKey || "",
+      name: premiumSnapshot?.name || "",
+      nameI18n: premiumSnapshot?.nameI18n || undefined,
+      imageUrl: premiumSnapshot?.imageUrl || "",
+      quantity: 1,
+      coveredQty: premiumSource === "balance" ? 1 : 0,
+      paidQty: premiumSource === "balance" ? 0 : 1,
+      payableTotalHalala: premiumSource === "balance" ? 0 : Number(premiumExtraFeeHalala || 0),
+      source: premiumSelectionSourceFromPremiumSource(premiumSource),
       premiumSource,
       premiumExtraFeeHalala,
       updatedAt: new Date(),

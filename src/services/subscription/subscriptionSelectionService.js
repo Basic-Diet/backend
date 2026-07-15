@@ -48,6 +48,47 @@ const {
 } = require("./subscriptionDayLockService");
 const { resolveSubscriptionAddonBalanceWithAudit, buildClientAddonBalance } = require("./subscriptionAddonBalanceService");
 
+function normalizePremiumKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function objectIdString(value) {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function findExactPremiumBalanceBucket(subscription, { balanceBucketId = null, configId = null, revision = null, premiumKey = null } = {}) {
+  const rows = Array.isArray(subscription && subscription.premiumBalance) ? subscription.premiumBalance : [];
+  if (!rows.length) return { bucket: null, bucketIndex: -1, reason: "no_balance_array" };
+  if (balanceBucketId) {
+    const bucketIndex = rows.findIndex((row) => objectIdString(row._id) === objectIdString(balanceBucketId));
+    return bucketIndex >= 0 ? { bucket: rows[bucketIndex], bucketIndex } : { bucket: null, bucketIndex: -1, reason: "bucket_not_found" };
+  }
+  if (configId && revision !== undefined && revision !== null && revision !== "") {
+    const normalizedRevision = Number(revision);
+    const matches = rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => objectIdString(row.configId) === objectIdString(configId) && Number(row.revision || 0) === normalizedRevision);
+    if (matches.length === 1) return { bucket: matches[0].row, bucketIndex: matches[0].index };
+    if (matches.length > 1) return { bucket: null, bucketIndex: -1, reason: "ambiguous_balance_bucket" };
+  }
+  const key = normalizePremiumKey(premiumKey);
+  if (key) {
+    const matches = rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => normalizePremiumKey(row.premiumKey) === key);
+    if (matches.length === 1) return { bucket: matches[0].row, bucketIndex: matches[0].index };
+    return { bucket: null, bucketIndex: -1, reason: matches.length ? "ambiguous_balance_bucket" : "bucket_not_found" };
+  }
+  return { bucket: null, bucketIndex: -1, reason: "no_premium_key" };
+}
+
+function premiumSelectionSourceFromPremiumSource(premiumSource) {
+  if (premiumSource === "balance") return "subscription";
+  if (premiumSource === "paid" || premiumSource === "paid_extra") return "paid";
+  if (premiumSource === "pending_payment") return "pending_payment";
+  return "";
+}
+
 async function resolvePlanningSubscriptionForOperation(subscription, session = null) {
   let resolvedSubscription = subscription;
   let resolvedSubscriptionId = subscription && subscription._id ? subscription._id : null;
@@ -80,7 +121,7 @@ async function resolvePlanningSubscriptionForOperation(subscription, session = n
   };
 }
 
-async function consumePremiumBalanceAtomically({ subscription, dayId, date, premiumKey, session, unitExtraFeeHalala }) {
+async function consumePremiumBalanceAtomically({ subscription, dayId, date, premiumKey, session, unitExtraFeeHalala, balanceBucketId = null, configId = null, revision = null }) {
   if (!session) {
     throw new Error("consumePremiumBalanceAtomically requires a session");
   }
@@ -95,25 +136,34 @@ async function consumePremiumBalanceAtomically({ subscription, dayId, date, prem
     return { consumed: false, reason: "no_balance_array", premiumSource: "pending_payment", premiumExtraFeeHalala: resolvedUnitExtraFeeHalala };
   }
 
-  const bucketIndex = subscription.premiumBalance.findIndex(
-    (b) => b.premiumKey === premiumKey && Number(b.remainingQty || 0) > 0
-  );
+  const { bucket, bucketIndex, reason } = findExactPremiumBalanceBucket(subscription, {
+    balanceBucketId,
+    configId,
+    revision,
+    premiumKey,
+  });
 
-  if (bucketIndex < 0) {
-    return { consumed: false, reason: "no_remaining_balance", premiumSource: "pending_payment", premiumExtraFeeHalala: unitExtraFeeHalala };
+  if (bucketIndex < 0 || !bucket) {
+    return { consumed: false, reason: reason || "bucket_not_found", premiumSource: "pending_payment", premiumExtraFeeHalala: resolvedUnitExtraFeeHalala };
   }
 
-  const bucket = subscription.premiumBalance[bucketIndex];
+  if (Number(bucket.remainingQty || 0) <= 0) {
+    return { consumed: false, reason: "no_remaining_balance", premiumSource: "pending_payment", premiumExtraFeeHalala: resolvedUnitExtraFeeHalala };
+  }
   const bucketId = subscription._id;
 
   const atomicResult = await Subscription.findOneAndUpdate(
     {
       _id: bucketId,
-      "premiumBalance._id": bucket._id,
-      "premiumBalance.remainingQty": { $gt: 0 },
+      premiumBalance: {
+        $elemMatch: {
+          _id: bucket._id,
+          remainingQty: { $gt: 0 },
+        },
+      },
     },
     {
-      $inc: { "premiumBalance.$.remainingQty": -1 },
+      $inc: { "premiumBalance.$.remainingQty": -1, "premiumBalance.$.consumedQty": 1 },
     },
     { session, new: true }
   );
@@ -128,10 +178,14 @@ async function consumePremiumBalanceAtomically({ subscription, dayId, date, prem
     premiumSource: "balance",
     premiumKey: bucket.premiumKey,
     proteinId: bucket.proteinId,
+    balanceBucketId: bucket._id,
+    configId: bucket.configId || null,
+    revision: bucket.revision || 0,
+    bucket,
   };
 }
 
-async function releasePremiumBalanceAtomically({ subscription, dayId, date, premiumKey, session }) {
+async function releasePremiumBalanceAtomically({ subscription, dayId, date, premiumKey, session, balanceBucketId = null, configId = null, revision = null }) {
   if (!session) {
     throw new Error("releasePremiumBalanceAtomically requires a session");
   }
@@ -140,26 +194,41 @@ async function releasePremiumBalanceAtomically({ subscription, dayId, date, prem
     return { released: false, reason: "no_balance_array" };
   }
 
-  if (!premiumKey) {
+  if (!premiumKey && !balanceBucketId && !configId) {
     return { released: false, reason: "no_premium_key" };
   }
 
-  const bucketIndex = subscription.premiumBalance.findIndex((b) => b.premiumKey === premiumKey);
-
-  if (bucketIndex < 0) {
-    return { released: false, reason: "bucket_not_found" };
+  const { bucket, bucketIndex, reason } = findExactPremiumBalanceBucket(subscription, {
+    balanceBucketId,
+    configId,
+    revision,
+    premiumKey,
+  });
+  if (bucketIndex < 0 || !bucket) {
+    return { released: false, reason: reason || "bucket_not_found" };
   }
 
-  const bucket = subscription.premiumBalance[bucketIndex];
   const bucketId = subscription._id;
+  const hasTrackedConsumedQty = Number(bucket.consumedQty || 0) > 0;
+  const releaseInc = hasTrackedConsumedQty
+    ? { "premiumBalance.$.remainingQty": 1, "premiumBalance.$.consumedQty": -1 }
+    : { "premiumBalance.$.remainingQty": 1 };
 
   const atomicResult = await Subscription.findOneAndUpdate(
     {
       _id: bucketId,
-      "premiumBalance._id": bucket._id,
+      premiumBalance: {
+        $elemMatch: {
+          _id: bucket._id,
+          $or: [
+            { consumedQty: { $gt: 0 } },
+            { remainingQty: { $lt: Number(bucket.purchasedQty || 0) } },
+          ],
+        },
+      },
     },
     {
-      $inc: { "premiumBalance.$.remainingQty": 1 },
+      $inc: releaseInc,
     },
     { session, new: true }
   );
@@ -168,7 +237,7 @@ async function releasePremiumBalanceAtomically({ subscription, dayId, date, prem
     return { released: false, reason: "atomic_failed" };
   }
 
-  return { released: true, remainingQty: atomicResult.premiumBalance[bucketIndex]?.remainingQty || 0 };
+  return { released: true, remainingQty: atomicResult.premiumBalance[bucketIndex]?.remainingQty || 0, balanceBucketId: bucket._id };
 }
 
 async function consumeAddonBalanceAtomically({ subscription, dayId, date, addonId, addonPlanId = null, category = null, balanceBucketId = null, session }) {
@@ -933,7 +1002,20 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
 
           const upgrade = await resolveSubscriptionPremiumUpgradePricing(sel.premiumKey, { session, fallbackPriceHalala: sel.unitExtraFeeHalala });
           if (existingClaim) {
-             processedPremiumSelections.push({ ...sel, premiumSource: "balance", unitExtraFeeHalala: upgrade.priceHalala });
+             processedPremiumSelections.push({
+               ...sel,
+               configId: sel.configId || existingClaim.configId || null,
+               revision: Number(sel.revision || existingClaim.revision || 0),
+               balanceBucketId: sel.balanceBucketId || existingClaim.balanceBucketId || existingClaim.premiumWalletRowId || null,
+               premiumWalletRowId: sel.premiumWalletRowId || existingClaim.premiumWalletRowId || existingClaim.balanceBucketId || null,
+               premiumSource: "balance",
+               source: "subscription",
+               quantity: Number(sel.quantity || 1),
+               coveredQty: Number(sel.coveredQty || 1),
+               paidQty: 0,
+               unitExtraFeeHalala: upgrade.priceHalala,
+               payableTotalHalala: 0,
+             });
              existingBalanceMap.delete(mapKey);
              continue;
           }
@@ -945,20 +1027,27 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
             premiumKey: sel.premiumKey || null,
             proteinId: sel.proteinId,
             unitExtraFeeHalala: upgrade.priceHalala,
+            balanceBucketId: sel.balanceBucketId || sel.premiumWalletRowId || null,
+            configId: sel.configId || upgrade.configId || null,
+            revision: sel.revision != null ? sel.revision : upgrade.revision,
             session,
           });
-          if (balanceResult.consumed && Array.isArray(subInSession.premiumBalance)) {
-            const balanceRow = subInSession.premiumBalance.find((row) => row.premiumKey === (sel.premiumKey || null));
-            if (balanceRow && Number(balanceRow.remainingQty || 0) > 0) {
-              balanceRow.remainingQty -= 1;
-            }
-            subInSession.markModified("premiumBalance");
-          }
 
+          const covered = balanceResult.consumed ? 1 : 0;
+          const paid = balanceResult.consumed ? 0 : 1;
           processedPremiumSelections.push({
             ...sel,
+            configId: sel.configId || balanceResult.configId || upgrade.configId || null,
+            revision: Number(sel.revision || balanceResult.revision || upgrade.revision || 0),
+            balanceBucketId: balanceResult.balanceBucketId || sel.balanceBucketId || null,
+            premiumWalletRowId: balanceResult.balanceBucketId || sel.premiumWalletRowId || null,
             premiumSource: balanceResult.consumed ? "balance" : "pending_payment",
-            unitExtraFeeHalala: balanceResult.consumed ? 0 : upgrade.priceHalala
+            source: balanceResult.consumed ? "subscription" : "pending_payment",
+            quantity: Number(sel.quantity || 1),
+            coveredQty: covered,
+            paidQty: paid,
+            unitExtraFeeHalala: upgrade.priceHalala,
+            payableTotalHalala: paid * upgrade.priceHalala,
           });
         } else {
           processedPremiumSelections.push(sel);
@@ -968,14 +1057,14 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
     }
 
     for (const sel of existingBalanceMap.values()) {
-      await releasePremiumBalanceAtomically({ subscription: subInSession, premiumKey: sel.premiumKey, session });
-      if (Array.isArray(subInSession.premiumBalance)) {
-        const balanceRow = subInSession.premiumBalance.find((row) => row.premiumKey === sel.premiumKey);
-        if (balanceRow) {
-          balanceRow.remainingQty = Number(balanceRow.remainingQty || 0) + 1;
-        }
-        subInSession.markModified("premiumBalance");
-      }
+      await releasePremiumBalanceAtomically({
+        subscription: subInSession,
+        premiumKey: sel.premiumKey,
+        balanceBucketId: sel.balanceBucketId || sel.premiumWalletRowId || null,
+        configId: sel.configId || null,
+        revision: sel.revision || null,
+        session,
+      });
     }
 
     // ATOMIC: Addon balance sync
@@ -1126,8 +1215,41 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
     if (Array.isArray(subInSession.premiumSelections)) {
        subInSession.premiumSelections = subInSession.premiumSelections.filter(s => s.date !== date);
        for (const sel of day.premiumUpgradeSelections) {
-         if (sel.premiumSource === "balance" || sel.premiumSource === "pending_payment" || sel.premiumSource === "paid") {
-           subInSession.premiumSelections.push({ dayId: day._id, date: day.date, baseSlotKey: sel.baseSlotKey, premiumKey: sel.premiumKey, proteinId: sel.proteinId, unitExtraFeeHalala: sel.unitExtraFeeHalala, currency: sel.currency });
+         if (sel.premiumSource === "balance" || sel.premiumSource === "pending_payment" || sel.premiumSource === "paid" || sel.premiumSource === "paid_extra") {
+           subInSession.premiumSelections.push({
+             dayId: day._id,
+             date: day.date,
+             baseSlotKey: sel.baseSlotKey,
+             premiumKey: sel.premiumKey,
+             configId: sel.configId || null,
+             revision: Number(sel.revision || 0),
+             kind: sel.kind || "",
+             entityType: sel.entityType || "",
+             selectionType: sel.selectionType || "",
+             sourceType: sel.sourceType || "",
+             sourceModel: sel.sourceModel || "",
+             sourceId: sel.sourceId || "",
+             sourceProductId: sel.sourceProductId || "",
+             sourceGroupId: sel.sourceGroupId || "",
+             sourceGroupKey: sel.sourceGroupKey || "",
+             sourceKey: sel.sourceKey || "",
+             name: sel.name || "",
+             nameI18n: sel.nameI18n || undefined,
+             imageUrl: sel.imageUrl || "",
+             proteinId: sel.proteinId,
+             quantity: Number(sel.quantity || 1),
+             coveredQty: Number(sel.coveredQty || (sel.source === "subscription" ? 1 : 0)),
+             paidQty: Number(sel.paidQty || (sel.source === "subscription" ? 0 : 1)),
+             unitExtraFeeHalala: sel.unitExtraFeeHalala,
+             payableTotalHalala: Number(sel.payableTotalHalala || 0),
+             currency: sel.currency,
+             balanceBucketId: sel.balanceBucketId || null,
+             premiumWalletRowId: sel.premiumWalletRowId || sel.balanceBucketId || null,
+             source: sel.source || premiumSelectionSourceFromPremiumSource(sel.premiumSource),
+             paymentId: sel.paymentId || null,
+             consumedAt: sel.consumedAt || new Date(),
+             paidAt: sel.paidAt || null,
+           });
          }
        }
        subInSession.markModified("premiumSelections");

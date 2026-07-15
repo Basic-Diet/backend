@@ -66,6 +66,39 @@ function hasImmutablePremiumSnapshot(item = {}) {
   );
 }
 
+function premiumBalanceRowFromSnapshot(item = {}, qty, purchasedAt = new Date()) {
+  const purchasedQty = Number(qty || item.qty || item.purchasedQty || 0);
+  const unitExtraFeeHalala = Number(item.unitExtraFeeHalala || 0);
+  return {
+    configId: normalizeOptionalObjectId(item.configId),
+    revision: Number(item.revision || 0),
+    proteinId: normalizeOptionalObjectId(item.proteinId),
+    premiumKey: item.premiumKey,
+    kind: item.kind || "",
+    entityType: item.entityType || "premium_meal",
+    selectionType: item.selectionType || "",
+    sourceType: item.sourceType || "",
+    sourceModel: item.sourceModel || "",
+    sourceId: item.sourceId || "",
+    sourceProductId: item.sourceProductId || "",
+    sourceGroupId: item.sourceGroupId || "",
+    sourceGroupKey: item.sourceGroupKey || "",
+    sourceKey: item.sourceKey || "",
+    name: premiumSnapshotName(item),
+    nameI18n: item.nameI18n || undefined,
+    imageUrl: item.imageUrl || "",
+    purchasedQty,
+    consumedQty: 0,
+    reservedQty: 0,
+    remainingQty: purchasedQty,
+    unitExtraFeeHalala,
+    totalHalala: Number(item.totalHalala || purchasedQty * unitExtraFeeHalala),
+    currency: item.currency || SYSTEM_CURRENCY,
+    catalogVersion: item.catalogVersion || null,
+    purchasedAt: item.purchasedAt ? new Date(item.purchasedAt) : purchasedAt,
+  };
+}
+
 // Removed isCanonicalCheckoutDraft as the system now assumes a single unified contract model.
 
 
@@ -74,22 +107,7 @@ async function toCanonicalPremiumBalanceRows(draft) {
   const rows = [];
   for (const item of (draft.premiumItems || [])) {
     if (hasImmutablePremiumSnapshot(item)) {
-      rows.push({
-        proteinId: normalizeOptionalObjectId(item.proteinId),
-        premiumKey: item.premiumKey,
-        name: premiumSnapshotName(item),
-        nameI18n: item.nameI18n || undefined,
-        imageUrl: item.imageUrl || "",
-        purchasedQty: Number(item.qty || 0),
-        remainingQty: Number(item.qty || 0),
-        unitExtraFeeHalala: Number(item.unitExtraFeeHalala || 0),
-        currency: item.currency || SYSTEM_CURRENCY,
-        sourceModel: item.sourceModel || "",
-        sourceId: item.sourceId || "",
-        entityType: item.entityType || "premium_meal",
-        catalogVersion: item.catalogVersion || null,
-        purchasedAt: new Date(),
-      });
+      rows.push(premiumBalanceRowFromSnapshot(item, Number(item.qty || 0)));
       continue;
     }
 
@@ -150,8 +168,11 @@ async function toCanonicalPremiumBalanceRows(draft) {
       premiumKey: resolved.premiumKey,
       name: getPremiumDisplayName({ premiumKey: resolved.premiumKey, name: resolved.name || item.name, lang: "en" }),
       purchasedQty: Number(item.qty || 0),
+      consumedQty: 0,
+      reservedQty: 0,
       remainingQty: Number(item.qty || 0),
       unitExtraFeeHalala: resolved.unitExtraFeeHalala || item.unitExtraFeeHalala || 0,
+      totalHalala: Number(item.qty || 0) * Number(resolved.unitExtraFeeHalala || item.unitExtraFeeHalala || 0),
       currency: item.currency || SYSTEM_CURRENCY,
       purchasedAt: new Date(),
     });
@@ -172,12 +193,15 @@ function normalizeProteinIdForPremiumBalance(proteinId) {
 }
 
 function premiumBalanceRowSignature(row) {
+  const key = String(row && row.premiumKey != null ? row.premiumKey : "");
+  const configId = String(row && row.configId != null ? row.configId : "");
+  const revision = Number(row && row.revision != null ? row.revision : 0);
   const pid = String(row && row.proteinId != null ? row.proteinId : "");
   const pq = Number(row && row.purchasedQty != null ? row.purchasedQty : 0);
   const rq = Number(row && row.remainingQty != null ? row.remainingQty : 0);
   const unit = Number(row && row.unitExtraFeeHalala != null ? row.unitExtraFeeHalala : 0);
   const cur = String(row && row.currency != null ? row.currency : SYSTEM_CURRENCY);
-  return `${pid}|${pq}|${rq}|${unit}|${cur}`;
+  return `${key}|${configId}|${revision}|${pid}|${pq}|${rq}|${unit}|${cur}`;
 }
 
 function premiumBalanceRowsAreEquivalent(a, b) {
@@ -206,22 +230,7 @@ async function toPremiumBalanceRowsFromContractEntitlements(contractSnapshot, la
     }
 
     if (hasImmutablePremiumSnapshot(item)) {
-      rows.push({
-        proteinId: normalizeOptionalObjectId(item.proteinId),
-        premiumKey: item.premiumKey,
-        name: premiumSnapshotName(item),
-        nameI18n: item.nameI18n || undefined,
-        imageUrl: item.imageUrl || "",
-        purchasedQty: qty,
-        remainingQty: qty,
-        unitExtraFeeHalala: Number(item.unitExtraFeeHalala || 0),
-        currency: String(item.currency || SYSTEM_CURRENCY),
-        sourceModel: item.sourceModel || "",
-        sourceId: item.sourceId || "",
-        entityType: item.entityType || "premium_meal",
-        catalogVersion: item.catalogVersion || null,
-        purchasedAt: new Date(),
-      });
+      rows.push(premiumBalanceRowFromSnapshot(item, qty));
       continue;
     }
 
@@ -282,8 +291,11 @@ async function toPremiumBalanceRowsFromContractEntitlements(contractSnapshot, la
       premiumKey: resolved.premiumKey,
       name: getPremiumDisplayName({ premiumKey: resolved.premiumKey, name: resolved.name || item.name, lang: "en" }),
       purchasedQty: qty,
+      consumedQty: 0,
+      reservedQty: 0,
       remainingQty: qty,
       unitExtraFeeHalala: resolved.unitExtraFeeHalala || item.unitExtraFeeHalala || 0,
+      totalHalala: qty * Number(resolved.unitExtraFeeHalala || item.unitExtraFeeHalala || 0),
       currency: String(item.currency || SYSTEM_CURRENCY),
       purchasedAt: new Date(),
     });

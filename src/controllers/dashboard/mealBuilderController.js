@@ -51,6 +51,26 @@ const getHydratedDraft = wrap(async (req, res) => {
   return send(res, await mealBuilderService.getHydratedDraft({ lang }));
 });
 
+const getPublished = wrap(async (req, res) => {
+  const lang = getRequestLang(req);
+  const published = await mealBuilderService.getCurrentPublishedConfig({ allowVirtualFallback: true });
+  if (!published) return send(res, null);
+  return send(res, {
+    config: mealBuilderService.serializeConfig
+      ? mealBuilderService.serializeConfig(published)
+      : published,
+    contract: await mealBuilderService.buildPublishedContract({ config: published, lang }),
+  });
+});
+
+const openDraft = wrap(async (req, res) => send(res, await mealBuilderService.openWorkingDraft({
+  actor: actorFromRequest(req),
+})));
+
+const resetDraft = wrap(async (req, res) => send(res, await mealBuilderService.resetDraftToPublished({
+  actor: actorFromRequest(req),
+})));
+
 const createDraft = wrap(async (req, res) => send(res, await mealBuilderService.createDraft({
   sections: req.body && req.body.sections,
   notes: req.body && req.body.notes,
@@ -101,9 +121,12 @@ module.exports = {
   createDraft,
   getHydratedDraft,
   getMealBuilder,
+  getPublished,
   getPicker,
   getReadiness,
+  openDraft,
   publishDraft,
+  resetDraft,
   updateDraft,
   validateDraft,
 };

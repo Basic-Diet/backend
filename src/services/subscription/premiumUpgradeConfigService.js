@@ -81,9 +81,54 @@ function localizedName(value) {
   return { ar: "", en: "" };
 }
 
+function sourceModelForSourceType(sourceType) {
+  if (sourceType === "menu_product") return "MenuProduct";
+  if (sourceType === "menu_option") return "MenuOption";
+  if (sourceType === "builder_protein") return "BuilderProtein";
+  return "";
+}
+
 function sourceKeyFor(doc) {
   return normalizePremiumKey(doc?.premiumKey || doc?.key)
     || normalizeSlug(doc?.name?.en || doc?.name?.ar || (doc?._id ? String(doc._id) : ""));
+}
+
+function configName(config = {}, sourceDoc = null) {
+  return localizedName(sourceDoc?.name || config.sourceSnapshot?.name || {});
+}
+
+function buildPremiumUpgradeSnapshot(config, sourceDoc = null, { quantity = 1, catalogVersion = null, purchasedAt = new Date() } = {}) {
+  if (!config) return null;
+  const qty = Math.max(0, Math.floor(Number(quantity || 0)));
+  const unitExtraFeeHalala = Number(config.upgradeDeltaHalala || 0);
+  const nameI18n = configName(config, sourceDoc);
+  const sourceType = String(config.sourceType || "");
+  const sourceId = config.sourceId || sourceDoc?._id || null;
+  return {
+    configId: config._id || null,
+    revision: Number(config.revision || 0),
+    premiumKey: normalizePremiumKey(config.premiumKey),
+    kind: SOURCE_TYPE_TO_ADMIN_KIND[sourceType] || "",
+    entityType: config.selectionType || (sourceType === "menu_product" ? "premium_large_salad" : "premium_meal"),
+    selectionType: config.selectionType || "",
+    sourceType,
+    sourceModel: sourceModelForSourceType(sourceType),
+    sourceId: sourceId ? String(sourceId) : "",
+    sourceProductId: config.sourceProductId ? String(config.sourceProductId) : "",
+    sourceGroupId: config.sourceGroupId ? String(config.sourceGroupId) : "",
+    sourceGroupKey: String(config.sourceSnapshot?.context?.groupKey || ""),
+    sourceKey: sourceKeyFor(sourceDoc) || config.sourceSnapshot?.key || normalizePremiumKey(config.premiumKey),
+    name: nameI18n.en || nameI18n.ar || normalizePremiumKey(config.premiumKey),
+    nameI18n,
+    imageUrl: String(sourceDoc?.imageUrl || config.sourceSnapshot?.context?.imageUrl || ""),
+    purchasedQty: qty,
+    qty,
+    unitExtraFeeHalala,
+    totalHalala: qty * unitExtraFeeHalala,
+    currency: String(config.currency || SYSTEM_PREMIUM_CURRENCY).toUpperCase(),
+    catalogVersion: catalogVersion || sourceDoc?.updatedAt || config.updatedAt || null,
+    purchasedAt,
+  };
 }
 
 function normalizeAdminKind(data = {}) {
@@ -193,6 +238,25 @@ async function loadClientPremiumUpgradeConfigState({ session = null } = {}) {
       return false;
     },
   };
+}
+
+async function listActiveReadyPremiumUpgradeConfigs({ session = null } = {}) {
+  let query = PremiumUpgradeConfig.find({
+    status: "active",
+    isEnabled: true,
+    isVisible: true,
+  }).sort({ sortOrder: 1, createdAt: 1 });
+  if (session && typeof query.session === "function") query = query.session(session);
+  const configs = await query.lean();
+  const sourceMap = await fetchSourcesForConfigs(configs);
+  const readyRows = [];
+  for (const config of configs) {
+    const sourceDoc = sourceMap.get(`${config.sourceType}_${config.sourceId}`) || null;
+    const health = await resolveConfigHealth(config, { sourceDoc, session });
+    if (health.status !== HEALTH_READY) continue;
+    readyRows.push({ config, sourceDoc, health });
+  }
+  return readyRows;
 }
 
 /**
@@ -1300,6 +1364,23 @@ async function resolveSubscriptionPremiumUpgradePricing(premiumKey, { fallbackPr
   // 1. Active PremiumUpgradeConfig if available.
   try {
     const upgrade = await resolvePremiumUpgrade(normalizedKey, { session });
+    let sourceDoc = null;
+    if (upgrade.sourceType === "menu_option") {
+      sourceDoc = optionDoc || null;
+      if (!sourceDoc && upgrade.sourceId) {
+        let sourceQuery = MenuOption.findById(upgrade.sourceId);
+        if (session && typeof sourceQuery.session === "function") sourceQuery = sourceQuery.session(session);
+        sourceDoc = await sourceQuery.lean();
+      }
+    } else if (upgrade.sourceType === "menu_product" && upgrade.sourceId) {
+      let sourceQuery = MenuProduct.findById(upgrade.sourceId);
+      if (session && typeof sourceQuery.session === "function") sourceQuery = sourceQuery.session(session);
+      sourceDoc = await sourceQuery.lean();
+    }
+    let configQuery = PremiumUpgradeConfig.findById(upgrade.configId);
+    if (session && typeof configQuery.session === "function") configQuery = configQuery.session(session);
+    const config = await configQuery.lean();
+    const snapshot = buildPremiumUpgradeSnapshot(config, sourceDoc, { quantity: 1 });
     return {
       premiumKey: normalizedKey,
       priceHalala: upgrade.priceHalala,
@@ -1312,6 +1393,7 @@ async function resolveSubscriptionPremiumUpgradePricing(premiumKey, { fallbackPr
       sourceGroupId: upgrade.sourceGroupId,
       configId: upgrade.configId,
       revision: upgrade.revision,
+      snapshot,
       priceSource: "resolvePremiumUpgrade",
       isConfigured: true,
     };
@@ -1402,6 +1484,8 @@ module.exports = {
   resolvePremiumUpgrade,
   resolveSubscriptionPremiumUpgradePricing,
   loadClientPremiumUpgradeConfigState,
+  listActiveReadyPremiumUpgradeConfigs,
+  buildPremiumUpgradeSnapshot,
   getConfigs,
   getSources,
   getConfigDetail,
