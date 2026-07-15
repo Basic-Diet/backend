@@ -2,6 +2,7 @@ const { Router } = require("express");
 
 const authRoutes = require("./auth");
 const dashboardAuthRoutes = require("./dashboardAuth");
+const dashboardStaffUserRoutes = require("./dashboardStaffUsers");
 const appAuthRoutes = require("./appAuth");
 const planRoutes = require("./plans");
 const popularPackageRoutes = require("./popularPackages");
@@ -47,6 +48,7 @@ router.use("/payments", paymentRoutes.apiRouter);
 router.use("/account-deletion", accountDeletionRoutes);
 router.use("/auth", authRoutes);
 router.use("/dashboard/auth", dashboardAuthRoutes);
+router.use("/dashboard/staff-users", dashboardStaffUserRoutes);
 router.use("/app", appAuthRoutes);
 router.use("/plans", planRoutes);
 router.use("/popular_packages", popularPackageRoutes);
@@ -73,17 +75,12 @@ router.use("/dashboard/accounting", dashboardAccountingRoutes);
 router.use("/dashboard/orders", dashboardOrderRoutes);
 router.use("/dashboard", dashboardBoardRoutes);
 router.use("/dashboard", adminRoutes);
-router.use("/dashboard/menu-identities-audit", dashboardMenuIdentityRoutes); // For internal audit
+router.use("/dashboard/menu-identities-audit", dashboardMenuIdentityRoutes);
 router.use("/dashboard", dashboardMenuIdentityRoutes);
 router.use("/admin", adminRoutes);
 router.use("/health", healthRoutes);
 router.use("/client", clientRoutes);
 
-
-/**
- * DEPRECATED: Standard Kitchen/Courier operational routes.
- * Replaced by the Unified Dashboard Ops API (/api/dashboard/ops).
- */
 router.use("/courier", courierRoutes);
 router.use("/kitchen", kitchenRoutes);
 router.get("/categories-with-meals", asyncHandler(listCategoriesWithMeals));
