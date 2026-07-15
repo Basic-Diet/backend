@@ -4,13 +4,12 @@ const mongoose = require("mongoose");
 const Plan = require("../src/models/Plan");
 const { resolvePlanCatalogEntry } = require("../src/utils/subscription/subscriptionCatalog");
 const {
-  EXPECTED_NESTED_PRICE_POINTS,
-  EXPECTED_PLAN_COUNT,
+  assertSubscriptionPlanRows,
   countNestedPricePoints,
   subscriptionPlanKeys,
   subscriptionPlanRows,
   wrongFlatPlanKeys,
-} = require("../scripts/seed-subscription-plans");
+} = require("../scripts/bootstrap/seed-subscription-plans");
 
 function findMealOption(plan, grams, mealsPerDay) {
   const gramsOption = (plan.gramsOptions || []).find((option) => option.grams === grams);
@@ -22,7 +21,7 @@ function findMealOption(plan, grams, mealsPerDay) {
 
 function planForDuration(durationDays) {
   const plan = subscriptionPlanRows.find((row) => row.durationDays === durationDays);
-  assert.ok(plan, `missing ${durationDays}-day plan`);
+  assert.ok(plan, `missing initial ${durationDays}-day demo plan`);
   return plan;
 }
 
@@ -35,24 +34,21 @@ function withId(plan) {
   return { ...plan, _id: new mongoose.Types.ObjectId() };
 }
 
-assert.strictEqual(subscriptionPlanRows.length, EXPECTED_PLAN_COUNT);
-assert.deepStrictEqual(subscriptionPlanKeys, [
-  "subscription_7_days",
-  "subscription_26_days",
-  "subscription_30_days",
-]);
-assert.strictEqual(countNestedPricePoints(), EXPECTED_NESTED_PRICE_POINTS);
+const shape = assertSubscriptionPlanRows(subscriptionPlanRows);
+assert.strictEqual(shape.planCount, subscriptionPlanRows.length);
+assert.strictEqual(shape.nestedPricePoints, countNestedPricePoints());
+assert.strictEqual(new Set(subscriptionPlanKeys).size, subscriptionPlanKeys.length);
+assert.ok(subscriptionPlanRows.length > 0, "initial plan data is not empty");
 
 for (const plan of subscriptionPlanRows) {
-  assert.strictEqual(plan.gramsOptions.length, 3, `${plan.key} should have 3 gram options`);
-  assert.deepStrictEqual(plan.gramsOptions.map((option) => option.grams), [100, 150, 200]);
-
+  assert.ok(Array.isArray(plan.gramsOptions) && plan.gramsOptions.length > 0, `${plan.key} has initial gram options`);
   for (const gramsOption of plan.gramsOptions) {
-    assert.strictEqual(gramsOption.mealsOptions.length, 5, `${plan.key}/${gramsOption.grams}g should have 5 meal options`);
-    assert.deepStrictEqual(gramsOption.mealsOptions.map((option) => option.mealsPerDay), [1, 2, 3, 4, 5]);
+    assert.ok(Array.isArray(gramsOption.mealsOptions) && gramsOption.mealsOptions.length > 0, `${plan.key}/${gramsOption.grams}g has initial meal options`);
   }
 }
 
+// These assertions verify the current demo fixture values only. They are not
+// platform rules and may be changed or removed with the initial data.
 assertPrice(7, 100, 1, 13800);
 assertPrice(7, 200, 5, 105000);
 assertPrice(26, 150, 4, 230900);
@@ -61,13 +57,15 @@ assertPrice(30, 150, 3, 194300);
 assertPrice(30, 200, 5, 379800);
 
 const serializedPlans = subscriptionPlanRows.map((plan) => resolvePlanCatalogEntry(withId(plan), "en"));
-assert.strictEqual(serializedPlans.length, 3);
-for (const plan of serializedPlans) {
-  assert.strictEqual(plan.gramsOptions.length, 3);
-  assert.strictEqual(plan.weightOptions.length, 3);
-  for (const gramsOption of plan.weightOptions) {
-    assert.strictEqual(gramsOption.mealsOptions.length, 5);
-    assert.strictEqual(gramsOption.mealOptions.length, 5);
+assert.strictEqual(serializedPlans.length, subscriptionPlanRows.length);
+for (const [index, plan] of serializedPlans.entries()) {
+  const source = subscriptionPlanRows[index];
+  assert.strictEqual(plan.gramsOptions.length, source.gramsOptions.length);
+  assert.strictEqual(plan.weightOptions.length, source.gramsOptions.length);
+  for (const [gramsIndex, gramsOption] of plan.weightOptions.entries()) {
+    const sourceMeals = source.gramsOptions[gramsIndex].mealsOptions;
+    assert.strictEqual(gramsOption.mealsOptions.length, sourceMeals.length);
+    assert.strictEqual(gramsOption.mealOptions.length, sourceMeals.length);
   }
 }
 
@@ -78,19 +76,17 @@ const wrongFlatPlans = wrongFlatPlanKeys.map((key) => ({
   daysCount: 7,
   durationDays: 7,
   isActive: false,
-  gramsOptions: [
-    {
-      grams: 100,
-      mealsOptions: [{ mealsPerDay: 1, priceHalala: 1, compareAtHalala: 1 }],
-    },
-  ],
+  gramsOptions: [{
+    grams: 100,
+    mealsOptions: [{ mealsPerDay: 1, priceHalala: 1, compareAtHalala: 1 }],
+  }],
 }));
 
 const visibleCatalog = [...subscriptionPlanRows.map(withId), ...wrongFlatPlans]
   .filter((plan) => plan.isActive !== false && Plan.isViable(plan))
   .map((plan) => resolvePlanCatalogEntry(plan, "en"));
 
-assert.strictEqual(visibleCatalog.length, 3);
+assert.strictEqual(visibleCatalog.length, subscriptionPlanRows.length);
 assert.ok(!visibleCatalog.some((plan) => wrongFlatPlanKeys.includes(plan.key)));
 
 console.log("seedSubscriptionPlans.test.js passed");
