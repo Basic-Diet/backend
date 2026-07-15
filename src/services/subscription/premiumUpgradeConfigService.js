@@ -39,11 +39,17 @@ function createError(message, code, status = 400) {
 }
 
 const IMMUTABLE_PATCH_FIELDS = [
-  "sourceProductId",
-  "sourceGroupId",
   "selectionType",
   "premiumKey",
 ];
+const RELINK_ONLY_FIELDS = [
+  "sourceProductId",
+  "sourceGroupId",
+];
+
+const PREMIUM_COMPATIBILITY_ALIASES = Object.freeze({
+  premium_large_salad: ["custom_premium_salad"],
+});
 
 function normalizePremiumKey(value) {
   return String(value || "").trim().toLowerCase();
@@ -79,6 +85,24 @@ function localizedName(value) {
     };
   }
   return { ar: "", en: "" };
+}
+
+function compatibilityKeysForPremiumKey(premiumKey) {
+  const normalized = normalizePremiumKey(premiumKey);
+  return [...new Set([
+    normalized,
+    ...(PREMIUM_COMPATIBILITY_ALIASES[normalized] || []).map(normalizePremiumKey),
+  ].filter(Boolean))];
+}
+
+function relationIdFor({ sourceType, sourceId, sourceProductId = null, sourceGroupId = null }) {
+  if (sourceType === "menu_option") {
+    return `menu_option:${String(sourceId)}:${String(sourceProductId || "")}:${String(sourceGroupId || "")}`;
+  }
+  if (sourceType === "menu_product") {
+    return `menu_product:${String(sourceId)}`;
+  }
+  return `${String(sourceType || "")}:${String(sourceId || "")}`;
 }
 
 function sourceModelForSourceType(sourceType) {
@@ -329,9 +353,10 @@ function buildHealth(status, code = null) {
   };
 }
 
-async function resolveOptionRelationContext(config, optionDoc, { session = null } = {}) {
+async function resolveOptionRelationContext(config, optionDoc, { session = null, requireExact = false } = {}) {
   const groupId = config.sourceGroupId || optionDoc.groupId || null;
   if (!groupId) return { valid: false, code: "SOURCE_RELATION_INVALID" };
+  const productId = config.sourceProductId || null;
 
   let groupQuery = MenuOptionGroup.findById(groupId);
   if (session && typeof groupQuery.session === "function") groupQuery = groupQuery.session(session);
@@ -341,11 +366,15 @@ async function resolveOptionRelationContext(config, optionDoc, { session = null 
   const relationFilter = {
     optionId: optionDoc._id,
     groupId,
-    ...(config.sourceProductId ? { productId: config.sourceProductId } : {}),
+    ...(productId ? { productId } : {}),
   };
-  let relationQuery = ProductGroupOption.findOne(relationFilter);
+  let relationQuery = ProductGroupOption.find(relationFilter).sort({ createdAt: 1 });
   if (session && typeof relationQuery.session === "function") relationQuery = relationQuery.session(session);
-  const optionRelation = await relationQuery.lean();
+  const optionRelations = await relationQuery.lean();
+  if (!productId && optionRelations.filter(isActiveAvailableRelation).length > 1) {
+    return { valid: false, code: "SOURCE_RELATION_INVALID", group, ambiguous: true };
+  }
+  const optionRelation = optionRelations[0] || null;
   if (!isActiveAvailableRelation(optionRelation)) {
     return { valid: false, code: "SOURCE_RELATION_INVALID", group, optionRelation };
   }
@@ -363,6 +392,9 @@ async function resolveOptionRelationContext(config, optionDoc, { session = null 
   }
 
   if (!idsEqual(optionDoc.groupId, group._id)) {
+    return { valid: false, code: "SOURCE_RELATION_INVALID", group, optionRelation, product, productGroup };
+  }
+  if (requireExact && (!idsEqual(config.sourceProductId, product._id) || !idsEqual(config.sourceGroupId, group._id))) {
     return { valid: false, code: "SOURCE_RELATION_INVALID", group, optionRelation, product, productGroup };
   }
 
@@ -486,6 +518,41 @@ async function mapConfigToDetailDTO(config, sourceDoc = null) {
   const health = await resolveConfigHealth(config, { sourceDoc });
   const sourceName = sourceDoc?.name || config.sourceSnapshot?.name || {};
   const sourceKey = sourceKeyFor(sourceDoc) || config.sourceSnapshot?.key || config.premiumKey;
+  let repairDiagnostics = null;
+  if (health.status === HEALTH_BROKEN) {
+    const { candidates } = await loadEligiblePremiumCandidates();
+    const expectedKind = SOURCE_TYPE_TO_ADMIN_KIND[config.sourceType] || null;
+    const compatibilityKeys = compatibilityKeysForPremiumKey(config.premiumKey);
+    const compatibleSuggestions = candidates
+      .filter((candidate) => (
+        candidate.sourceType === config.sourceType
+        && compatibilityKeys.some((key) => (candidate.compatibilityKeys || candidate.premiumCompatibilityKeys || []).includes(key))
+      ))
+      .map((candidate) => ({
+        id: candidate.sourceId,
+        sourceId: candidate.sourceId,
+        kind: SOURCE_TYPE_TO_ADMIN_KIND[candidate.sourceType],
+        sourceProductId: candidate.sourceProductId || null,
+        sourceGroupId: candidate.sourceGroupId || null,
+        sourceProductKey: candidate.sourceProductKey || null,
+        sourceGroupKey: candidate.sourceGroupKey || null,
+        relationId: candidate.relationId || relationIdFor(candidate),
+        key: candidate.key || candidate.premiumKey || "",
+        name: localizedName(candidate.name),
+        compatibilityKeys: candidate.compatibilityKeys || candidate.premiumCompatibilityKeys || [],
+        selectable: true,
+      }))
+      .slice(0, 10);
+    repairDiagnostics = {
+      currentPremiumKey: normalizePremiumKey(config.premiumKey),
+      missingSourceId: health.code === "SOURCE_NOT_FOUND" && config.sourceId ? String(config.sourceId) : null,
+      expectedKind,
+      compatibleReplacementCount: compatibleSuggestions.length,
+      compatibleSourceSuggestions: compatibleSuggestions,
+      canRelink: compatibleSuggestions.length > 0,
+      blockingIssueCode: health.code || null,
+    };
+  }
   return {
     id: config._id.toString(),
     revision: config.revision,
@@ -514,6 +581,7 @@ async function mapConfigToDetailDTO(config, sourceDoc = null) {
       consumesMealSlot: true,
     },
     health,
+    repair: repairDiagnostics,
     compatibility: mapConfigToCompatibilityDTO(config, sourceDoc),
   };
 }
@@ -543,7 +611,7 @@ async function fetchSourcesForConfigs(configs) {
  * Gets configs based on query filters
  */
 async function getConfigs(query) {
-  const { status, isEnabled, isVisible, sourceType, selectionType, q, page = 1, limit = 20 } = query;
+  const { status, isEnabled, isVisible, sourceType, selectionType, q, health, page = 1, limit = 20 } = query;
   const filter = {};
   
   if (status === "archived") filter.status = "archived";
@@ -577,25 +645,29 @@ async function getConfigs(query) {
     ];
   }
 
-  const skip = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
-  const limitNum = parseInt(limit, 10);
+  const pageNum = Math.max(1, parseInt(page, 10));
+  const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+  const requestedHealth = health ? String(health).trim().toLowerCase() : "";
+  if (requestedHealth && ![HEALTH_READY, HEALTH_BROKEN].includes(requestedHealth)) {
+    throw createError("Invalid health filter", "PREMIUM_UPGRADE_INVALID_HEALTH", 400);
+  }
 
-  const [configs, total] = await Promise.all([
-    PremiumUpgradeConfig.find(filter)
-      .sort({ sortOrder: 1, createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum),
-    PremiumUpgradeConfig.countDocuments(filter)
-  ]);
-
+  const configs = await PremiumUpgradeConfig.find(filter)
+    .sort({ sortOrder: 1, createdAt: -1 });
   const sourceMap = await fetchSourcesForConfigs(configs);
-  const data = await Promise.all(configs.map(c => mapConfigToCompactDTO(c, sourceMap.get(`${c.sourceType}_${c.sourceId}`))));
+  let data = await Promise.all(configs.map(c => mapConfigToCompactDTO(c, sourceMap.get(`${c.sourceType}_${c.sourceId}`))));
+  if (requestedHealth) {
+    data = data.filter((row) => row.health === requestedHealth);
+  }
+  const total = data.length;
+  const skip = (pageNum - 1) * limitNum;
+  data = data.slice(skip, skip + limitNum);
 
   return {
     data,
     meta: {
       total,
-      page: parseInt(page, 10),
+      page: pageNum,
       limit: limitNum
     },
     status: true,
@@ -611,9 +683,17 @@ async function getConfigDetail(id) {
 }
 
 function mapCandidateToSource(candidate) {
+  const linkedConfigId = candidate.linkedConfigId || null;
+  const linked = Boolean(linkedConfigId);
   return {
     id: candidate.sourceId,
+    sourceId: candidate.sourceId,
     kind: SOURCE_TYPE_TO_ADMIN_KIND[candidate.sourceType],
+    sourceProductId: candidate.sourceProductId || null,
+    sourceGroupId: candidate.sourceGroupId || null,
+    sourceProductKey: candidate.sourceProductKey || null,
+    sourceGroupKey: candidate.sourceGroupKey || null,
+    relationId: candidate.relationId || relationIdFor(candidate),
     key: candidate.key || candidate.premiumKey || "",
     name: localizedName(candidate.name),
     imageUrl: candidate.imageUrl || "",
@@ -621,7 +701,13 @@ function mapCandidateToSource(candidate) {
       id: candidate.sourceGroupId || null,
       key: candidate.sourceGroupKey || (candidate.sourceType === "menu_product" ? "premium" : null),
     },
+    supportedSelectionType: candidate.supportedSelectionType || candidate.selectionType || null,
+    premiumCompatibilityKeys: candidate.premiumCompatibilityKeys || compatibilityKeysForCandidate(candidate),
+    compatibilityKeys: candidate.compatibilityKeys || compatibilityKeysForCandidate(candidate),
     selectable: true,
+    linked,
+    linkedConfigId,
+    conflictReason: linked ? "SOURCE_ALREADY_LINKED" : null,
   };
 }
 
@@ -634,12 +720,27 @@ async function getSources(query = {}) {
   const pageNum = Math.max(1, parseInt(query.page || 1, 10));
   const limitNum = Math.max(1, Math.min(100, parseInt(query.limit || 20, 10)));
   const search = String(query.q || "").trim().toLowerCase();
+  const excludeConfigId = query.excludeConfigId && isValidObjectId(query.excludeConfigId)
+    ? String(query.excludeConfigId)
+    : null;
+
+  const applySelfConflictExclusion = (row) => {
+    if (excludeConfigId && row.linkedConfigId && String(row.linkedConfigId) === excludeConfigId) {
+      return {
+        ...row,
+        linked: false,
+        conflictReason: null,
+      };
+    }
+    return row;
+  };
 
   if (status === "active") {
     const { candidates } = await loadEligiblePremiumCandidates();
     let rows = candidates
       .filter((candidate) => candidate.sourceType === ADMIN_KIND_TO_SOURCE_TYPE[kind])
-      .map(mapCandidateToSource);
+      .map(mapCandidateToSource)
+      .map(applySelfConflictExclusion);
     if (search) {
       rows = rows.filter((row) => (
         row.key.includes(search)
@@ -660,15 +761,29 @@ async function getSources(query = {}) {
   if (kind === "product") {
     const filter = rx ? { $or: [{ key: rx }, { "name.en": rx }, { "name.ar": rx }] } : {};
     const products = await MenuProduct.find(filter).sort({ sortOrder: 1, createdAt: -1 }).lean();
-    const rows = products.map((product) => ({
-      id: String(product._id),
-      kind,
-      key: sourceKeyFor(product),
-      name: localizedName(product.name),
-      imageUrl: product.imageUrl || "",
-      group: { id: null, key: "premium" },
-      selectable: isSelectableProduct(product),
-    }));
+    const rows = products
+      .filter(isEligiblePremiumProductSource)
+      .map((product) => applySelfConflictExclusion({
+        id: String(product._id),
+        sourceId: String(product._id),
+        kind,
+        sourceProductId: String(product._id),
+        sourceGroupId: null,
+        sourceProductKey: product.key || null,
+        sourceGroupKey: null,
+        relationId: relationIdFor({ sourceType: "menu_product", sourceId: product._id }),
+        key: PREMIUM_LARGE_SALAD_PREMIUM_KEY,
+        name: localizedName(product.name),
+        imageUrl: product.imageUrl || "",
+        group: { id: null, key: "premium" },
+        supportedSelectionType: "premium_large_salad",
+        premiumCompatibilityKeys: compatibilityKeysForPremiumKey(PREMIUM_LARGE_SALAD_PREMIUM_KEY),
+        compatibilityKeys: compatibilityKeysForPremiumKey(PREMIUM_LARGE_SALAD_PREMIUM_KEY),
+        selectable: true,
+        linked: false,
+        linkedConfigId: null,
+        conflictReason: null,
+      }));
     const total = rows.length;
     const skip = (pageNum - 1) * limitNum;
     return {
@@ -685,8 +800,10 @@ async function getSources(query = {}) {
   const groupById = new Map(groups.map((group) => [String(group._id), group]));
   const rows = options.map((option) => {
     const group = groupById.get(String(option.groupId));
-    return {
+    const premiumKey = sourceKeyFor(option);
+    return applySelfConflictExclusion({
       id: String(option._id),
+      sourceId: String(option._id),
       kind,
       key: sourceKeyFor(option),
       name: localizedName(option.name),
@@ -695,8 +812,18 @@ async function getSources(query = {}) {
         id: group ? String(group._id) : (option.groupId ? String(option.groupId) : null),
         key: group?.key || null,
       },
+      sourceProductId: null,
+      sourceGroupId: group ? String(group._id) : (option.groupId ? String(option.groupId) : null),
+      sourceProductKey: null,
+      sourceGroupKey: group?.key || null,
+      relationId: null,
+      compatibilityKeys: compatibilityKeysForPremiumKey(premiumKey),
+      premiumCompatibilityKeys: compatibilityKeysForPremiumKey(premiumKey),
       selectable: isSelectableOption(option),
-    };
+      linked: false,
+      linkedConfigId: null,
+      conflictReason: null,
+    });
   });
   const total = rows.length;
   const skip = (pageNum - 1) * limitNum;
@@ -716,8 +843,29 @@ function isAddonProduct(product) {
   return itemType === "addon" || cardVariant === "addon" || cardVariant === "addon_card";
 }
 
-function relationIdentity({ sourceType, sourceId, sourceProductId }) {
-  return `${sourceType}:${String(sourceId)}:${sourceProductId ? String(sourceProductId) : ""}`;
+function isEligiblePremiumProductSource(product) {
+  if (!isSelectableProduct(product)) return false;
+  const key = normalizePremiumKey(product?.key);
+  const itemType = normalizePremiumKey(product?.itemType);
+  const cardVariant = normalizePremiumKey(product?.ui?.cardVariant);
+  const selectionType = normalizePremiumKey(product?.selectionType);
+  const ruleTags = Array.isArray(product?.ruleTags) ? product.ruleTags.map(normalizePremiumKey) : [];
+  if (itemType === PREMIUM_LARGE_SALAD_PREMIUM_KEY) return true;
+  if (selectionType === PREMIUM_LARGE_SALAD_PREMIUM_KEY) return true;
+  if (cardVariant === "large_salad") return true;
+  if (ruleTags.includes("premium_product") || ruleTags.includes(PREMIUM_LARGE_SALAD_PREMIUM_KEY)) return true;
+  return key === PREMIUM_LARGE_SALAD_PREMIUM_KEY;
+}
+
+function compatibilityKeysForCandidate(candidate) {
+  if (candidate.sourceType === "menu_product" && candidate.selectionType === "premium_large_salad") {
+    return compatibilityKeysForPremiumKey(PREMIUM_LARGE_SALAD_PREMIUM_KEY);
+  }
+  return compatibilityKeysForPremiumKey(candidate.premiumKey || candidate.key);
+}
+
+function relationIdentity(identity) {
+  return relationIdFor(identity);
 }
 
 /**
@@ -760,8 +908,18 @@ async function loadEligiblePremiumCandidates() {
     if (!optionRelationsByOptionId.has(key)) optionRelationsByOptionId.set(key, []);
     optionRelationsByOptionId.get(key).push(relation);
   }
-  const linkedKeys = new Set(configs.map((config) => normalizePremiumKey(config.premiumKey)));
-  const linkedRelations = new Set(configs.map(relationIdentity));
+  const linkedKeys = new Set(configs
+    .filter((config) => config.status === "active")
+    .map((config) => normalizePremiumKey(config.premiumKey)));
+  const linkedConfigByKey = new Map();
+  for (const config of configs.filter((item) => item.status === "active")) {
+    const key = normalizePremiumKey(config.premiumKey);
+    if (key && !linkedConfigByKey.has(key)) linkedConfigByKey.set(key, config);
+  }
+  const linkedConfigByRelation = new Map();
+  for (const config of configs.filter((item) => item.status === "active")) {
+    linkedConfigByRelation.set(relationIdentity(config), config);
+  }
   const candidates = [];
 
   for (const option of options) {
@@ -798,8 +956,14 @@ async function loadEligiblePremiumCandidates() {
         continue;
       }
       validContextCount++;
-      const identity = relationIdentity({ sourceType: "menu_option", sourceId: option._id, sourceProductId: product._id });
-      const relationLinked = linkedRelations.has(identity);
+      const identity = relationIdentity({
+        sourceType: "menu_option",
+        sourceId: option._id,
+        sourceProductId: product._id,
+        sourceGroupId: group._id,
+      });
+      const linkedConfig = linkedConfigByRelation.get(identity) || linkedConfigByKey.get(premiumKey) || null;
+      const premiumCompatibilityKeys = compatibilityKeysForPremiumKey(premiumKey);
       candidates.push({
         id: String(option._id),
         sourceId: String(option._id),
@@ -809,15 +973,18 @@ async function loadEligiblePremiumCandidates() {
         sourceGroupId: String(group._id),
         sourceProductKey: product.key || null,
         sourceGroupKey: group.key || null,
+        relationId: identity,
         key: premiumKey,
         premiumKey,
+        premiumCompatibilityKeys,
+        compatibilityKeys: premiumCompatibilityKeys,
         name: { ar: option.name?.ar || null, en: option.name?.en || null },
         imageUrl: option.imageUrl || "",
         selectionType: "premium_meal",
         upgradeDeltaHalala: Number(relation.extraPriceHalala ?? option.extraFeeHalala ?? option.extraPriceHalala ?? 0),
         currency: "SAR",
-        isLinked: relationLinked || linkedKeys.has(premiumKey),
-        _relationLinked: relationLinked,
+        isLinked: Boolean(linkedConfig) || linkedKeys.has(premiumKey),
+        linkedConfigId: linkedConfig ? String(linkedConfig._id) : null,
         eligibilityDiagnostics: { eligible: true, issues: [] },
       });
     }
@@ -840,8 +1007,14 @@ async function loadEligiblePremiumCandidates() {
       diagnostics.excludedAddons++;
       continue;
     }
+    if (!isEligiblePremiumProductSource(product)) {
+      diagnostics.excludedUnsupportedProductScope++;
+      continue;
+    }
     const identity = relationIdentity({ sourceType: "menu_product", sourceId: product._id, sourceProductId: product._id });
-    const premiumKey = sourceKeyFor(product);
+    const premiumKey = PREMIUM_LARGE_SALAD_PREMIUM_KEY;
+    const linkedConfig = linkedConfigByRelation.get(identity) || linkedConfigByKey.get(premiumKey) || null;
+    const premiumCompatibilityKeys = compatibilityKeysForPremiumKey(premiumKey);
     candidates.push({
       id: String(product._id),
       sourceId: String(product._id),
@@ -851,36 +1024,37 @@ async function loadEligiblePremiumCandidates() {
       sourceGroupId: null,
       sourceProductKey: product.key,
       sourceGroupKey: null,
+      relationId: identity,
       key: premiumKey,
       premiumKey,
+      premiumCompatibilityKeys,
+      compatibilityKeys: premiumCompatibilityKeys,
+      supportedSelectionType: "premium_large_salad",
       name: { ar: product.name?.ar || null, en: product.name?.en || null },
       imageUrl: product.imageUrl || "",
       selectionType: SOURCE_TYPE_TO_SELECTION_TYPE.menu_product,
       upgradeDeltaHalala: Number(product.priceHalala || 0),
       currency: "SAR",
-      isLinked: linkedRelations.has(identity) || linkedKeys.has(premiumKey),
+      isLinked: Boolean(linkedConfig) || linkedKeys.has(premiumKey),
+      linkedConfigId: linkedConfig ? String(linkedConfig._id) : null,
       eligibilityDiagnostics: { eligible: true, issues: [] },
     });
   }
 
-  // A menu option can be reused by more than one product relation, while a
-  // premium config links the option as one source. Prefer its already-linked
-  // context, then the canonical basic meal context, to avoid duplicate picker
-  // rows that share the same source and premium key.
-  const deduped = new Map();
-  for (const candidate of candidates) {
-    if (candidate.sourceType !== "menu_option") {
-      deduped.set(`${candidate.sourceType}:${candidate.sourceId}`, candidate);
-      continue;
-    }
-    const key = `${candidate.sourceType}:${candidate.sourceId}`;
-    const current = deduped.get(key);
-    const shouldReplace = !current
-      || (!current._relationLinked && candidate._relationLinked)
-      || (!current._relationLinked && !candidate._relationLinked && current.sourceProductKey !== "basic_meal" && candidate.sourceProductKey === "basic_meal");
-    if (shouldReplace) deduped.set(key, candidate);
-  }
-  const eligibleCandidates = [...deduped.values()].map(({ _relationLinked, ...candidate }) => candidate);
+  const priorityKeys = new Map([
+    [PREMIUM_LARGE_SALAD_PREMIUM_KEY, 0],
+    ["beef_steak", 1],
+    ["shrimp", 2],
+    ["salmon", 3],
+  ]);
+  const eligibleCandidates = candidates.sort((left, right) => {
+    const leftPriority = priorityKeys.has(left.premiumKey) ? priorityKeys.get(left.premiumKey) : 100;
+    const rightPriority = priorityKeys.has(right.premiumKey) ? priorityKeys.get(right.premiumKey) : 100;
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    if (left.sourceType !== right.sourceType) return left.sourceType === "menu_product" ? -1 : 1;
+    return String(left.key || "").localeCompare(String(right.key || ""))
+      || String(left.sourceProductKey || "").localeCompare(String(right.sourceProductKey || ""));
+  });
   diagnostics.excludedAlreadyLinked = eligibleCandidates.filter((candidate) => candidate.isLinked).length;
   diagnostics.finalEligibleUnlinkedCount = eligibleCandidates.filter((candidate) => !candidate.isLinked).length;
   diagnostics.finalLinkedCount = eligibleCandidates.filter((candidate) => candidate.isLinked).length;
@@ -972,6 +1146,7 @@ async function getReadiness() {
       issues: candidateByKey.has(premiumKey) ? [] : ["Eligible subscription catalog source or relation not found"],
     })),
     unresolvedSourceKeys,
+    brokenConfigs: [],
   };
 
   const legacyProteins = await BuilderProtein.find({});
@@ -980,6 +1155,37 @@ async function getReadiness() {
 
   const keyCounts = new Map();
   for (const config of configs) {
+    const configHealth = await resolveConfigHealth(config, {
+      sourceDoc: sourceMap.get(`${config.sourceType}_${config.sourceId}`),
+    });
+    if (configHealth.status === HEALTH_BROKEN) {
+      const compatibilityKeys = compatibilityKeysForPremiumKey(config.premiumKey);
+      const compatibleSuggestions = candidates
+        .filter((candidate) => (
+          candidate.sourceType === config.sourceType
+          && compatibilityKeys.some((key) => (candidate.compatibilityKeys || candidate.premiumCompatibilityKeys || []).includes(key))
+        ))
+        .slice(0, 10)
+        .map((candidate) => ({
+          sourceId: candidate.sourceId,
+          kind: SOURCE_TYPE_TO_ADMIN_KIND[candidate.sourceType],
+          sourceProductId: candidate.sourceProductId || null,
+          sourceGroupId: candidate.sourceGroupId || null,
+          relationId: candidate.relationId || relationIdFor(candidate),
+          key: candidate.key || candidate.premiumKey || "",
+          name: localizedName(candidate.name),
+        }));
+      diagnostics.brokenConfigs.push({
+        id: String(config._id),
+        currentPremiumKey: normalizePremiumKey(config.premiumKey),
+        missingSourceId: configHealth.code === "SOURCE_NOT_FOUND" && config.sourceId ? String(config.sourceId) : null,
+        expectedKind: SOURCE_TYPE_TO_ADMIN_KIND[config.sourceType] || null,
+        compatibleReplacementCount: compatibleSuggestions.length,
+        compatibleSourceSuggestions: compatibleSuggestions,
+        canRelink: compatibleSuggestions.length > 0,
+        blockingIssueCode: configHealth.code || null,
+      });
+    }
     const key = normalizePremiumKey(config.premiumKey);
     keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
   }
@@ -1056,7 +1262,7 @@ async function assertSourceCollectionMatch(kind, sourceId) {
   }
 }
 
-async function resolvePremiumSourceIdentity(data = {}) {
+async function resolvePremiumSourceIdentity(data = {}, { requireExactOptionRelation = false } = {}) {
   const kind = normalizeAdminKind(data);
   const sourceType = ADMIN_KIND_TO_SOURCE_TYPE[kind];
   const sourceId = data.sourceId;
@@ -1068,7 +1274,10 @@ async function resolvePremiumSourceIdentity(data = {}) {
     if (!isSelectableProduct(product)) {
       throw createError("Premium source is not selectable", "PREMIUM_SOURCE_NOT_SELECTABLE", 400);
     }
-    const premiumKey = sourceKeyFor(product);
+    if (!isEligiblePremiumProductSource(product)) {
+      throw createError("Premium product source is not supported", "PREMIUM_RELINK_KEY_MISMATCH", 400);
+    }
+    const premiumKey = PREMIUM_LARGE_SALAD_PREMIUM_KEY;
     if (!premiumKey) throw createError("Premium source has no key", "PREMIUM_SOURCE_NOT_SELECTABLE", 400);
     return {
       kind,
@@ -1096,7 +1305,7 @@ async function resolvePremiumSourceIdentity(data = {}) {
     sourceProductId: data.sourceProductId || null,
     sourceGroupId: data.sourceGroupId || option.groupId || null,
   };
-  const relation = await resolveOptionRelationContext(probeConfig, option);
+  const relation = await resolveOptionRelationContext(probeConfig, option, { requireExact: requireExactOptionRelation });
   if (!relation.valid) {
     throw createError("Premium source relation is invalid", "PREMIUM_SOURCE_RELATION_INVALID", 400);
   }
@@ -1123,6 +1332,8 @@ async function assertNoActiveConflicts(identity, { excludeId = null } = {}) {
     status: "active",
     sourceType: identity.sourceType,
     sourceId: identity.sourceId,
+    sourceProductId: identity.sourceProductId || null,
+    sourceGroupId: identity.sourceGroupId || null,
   }).lean();
   if (sourceConflict) {
     throw createError("Duplicate premium source", "PREMIUM_SOURCE_CONFLICT", 409);
@@ -1136,6 +1347,28 @@ async function assertNoActiveConflicts(identity, { excludeId = null } = {}) {
   if (keyConflict) {
     throw createError("Duplicate premiumKey", "PREMIUM_KEY_CONFLICT", 409);
   }
+}
+
+function assertRelinkCompatible(config, identity) {
+  const existingKey = normalizePremiumKey(config.premiumKey);
+  const compatibilityKeys = compatibilityKeysForPremiumKey(existingKey);
+  if (identity.sourceType === "menu_product") {
+    if (existingKey !== PREMIUM_LARGE_SALAD_PREMIUM_KEY || identity.selectionType !== "premium_large_salad") {
+      throw createError("Premium source is not compatible with this config", "PREMIUM_RELINK_KEY_MISMATCH", 409);
+    }
+    return;
+  }
+
+  if (identity.sourceType === "menu_option") {
+    const sourceKeys = compatibilityKeysForPremiumKey(identity.premiumKey);
+    const matches = sourceKeys.some((key) => compatibilityKeys.includes(key));
+    if (!matches) {
+      throw createError("Premium source is not compatible with this config", "PREMIUM_RELINK_KEY_MISMATCH", 409);
+    }
+    return;
+  }
+
+  throw createError("Premium source is not compatible with this config", "PREMIUM_RELINK_KEY_MISMATCH", 409);
 }
 
 function normalizePremiumWriteFields(data = {}) {
@@ -1193,9 +1426,16 @@ async function createConfig(data, adminId) {
  */
 async function updateConfig(id, data, adminId) {
   const { expectedRevision, upgradeDeltaHalala, sortOrder, metadata, isActive, isEnabled, isVisible, currency } = data;
+  const isRelink = Object.prototype.hasOwnProperty.call(data || {}, "kind")
+    || Object.prototype.hasOwnProperty.call(data || {}, "sourceId")
+    || Object.prototype.hasOwnProperty.call(data || {}, "sourceType");
   const immutableField = IMMUTABLE_PATCH_FIELDS.find((field) => Object.prototype.hasOwnProperty.call(data || {}, field));
   if (immutableField) {
     throw createError(`${immutableField} cannot be changed`, "PREMIUM_UPGRADE_IMMUTABLE_FIELD", 400);
+  }
+  const relinkOnlyField = RELINK_ONLY_FIELDS.find((field) => Object.prototype.hasOwnProperty.call(data || {}, field));
+  if (relinkOnlyField && !isRelink) {
+    throw createError(`${relinkOnlyField} can only be changed during relink`, "PREMIUM_UPGRADE_IMMUTABLE_FIELD", 400);
   }
   
   const config = await PremiumUpgradeConfig.findById(id);
@@ -1209,16 +1449,16 @@ async function updateConfig(id, data, adminId) {
     throw createError("Cannot update archived config", "PREMIUM_UPGRADE_ARCHIVED", 400);
   }
 
-  const isRelink = Object.prototype.hasOwnProperty.call(data || {}, "kind")
-    || Object.prototype.hasOwnProperty.call(data || {}, "sourceId")
-    || Object.prototype.hasOwnProperty.call(data || {}, "sourceType");
   let relinkSourceDoc = null;
   if (isRelink) {
     const identity = await resolvePremiumSourceIdentity({
       ...data,
       kind: data.kind || SOURCE_TYPE_TO_ADMIN_KIND[config.sourceType],
       sourceId: data.sourceId || config.sourceId,
-    });
+      sourceProductId: data.sourceProductId || config.sourceProductId,
+      sourceGroupId: data.sourceGroupId || config.sourceGroupId,
+    }, { requireExactOptionRelation: true });
+    assertRelinkCompatible(config, identity);
     await assertNoActiveConflicts(identity, { excludeId: config._id });
     const previousSources = Array.isArray(config.metadata?.previousSources)
       ? config.metadata.previousSources
@@ -1242,7 +1482,6 @@ async function updateConfig(id, data, adminId) {
     config.sourceProductId = identity.sourceProductId || null;
     config.sourceGroupId = identity.sourceGroupId || null;
     config.selectionType = identity.selectionType;
-    config.premiumKey = identity.premiumKey;
     config.displayGroupKey = "premium";
     config.sourceSnapshot = {
       key: identity.sourceDoc.key,

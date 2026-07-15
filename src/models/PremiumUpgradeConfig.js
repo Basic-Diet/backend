@@ -96,7 +96,7 @@ const PremiumUpgradeConfigSchema = new mongoose.Schema(
 );
 
 PremiumUpgradeConfigSchema.index(
-  { sourceType: 1, sourceId: 1, sourceProductId: 1 },
+  { sourceType: 1, sourceId: 1, sourceProductId: 1, sourceGroupId: 1 },
   { unique: true }
 );
 

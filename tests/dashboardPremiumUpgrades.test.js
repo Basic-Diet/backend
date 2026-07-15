@@ -72,6 +72,7 @@ async function main() {
     const app = createApp();
     const api = request(app);
     const { headers } = await dashboardAuth("admin", "premium-upgrades");
+    const { headers: kitchenHeaders } = await dashboardAuth("kitchen", "premium-upgrades");
 
     const [basicMeal, premiumSalad, proteinsGroup, beef, shrimp, salmon] = await Promise.all([
       MenuProduct.findOne({ key: "basic_meal" }).lean(),
@@ -109,7 +110,10 @@ async function main() {
     res = await api.get("/api/dashboard/premium-upgrades/candidates?selectionType=premium_meal&includeLinked=true&limit=100").set(headers);
     expectStatus(res, 200, "premium meal candidates");
     const knownPremiumCandidates = res.body.data.filter((candidate) => ["beef_steak", "shrimp", "salmon"].includes(candidate.premiumKey));
-    assert.strictEqual(knownPremiumCandidates.length, 3, "all known non-salad premium options appear as candidates");
+    assert(knownPremiumCandidates.length >= 3, "all known non-salad premium option relations appear as candidates");
+    for (const premiumKey of ["beef_steak", "shrimp", "salmon"]) {
+      assert(knownPremiumCandidates.some((candidate) => candidate.premiumKey === premiumKey), `${premiumKey} appears as an option relation`);
+    }
     for (const candidate of knownPremiumCandidates) {
       for (const field of [
         "id", "sourceId", "sourceType", "type", "sourceProductId", "sourceGroupId",
@@ -117,9 +121,13 @@ async function main() {
         "upgradeDeltaHalala", "currency", "isLinked", "eligibilityDiagnostics",
       ]) assert(Object.prototype.hasOwnProperty.call(candidate, field), `candidate includes ${field}`);
       assert.strictEqual(candidate.sourceType, "menu_option");
-      assert.strictEqual(candidate.sourceProductKey, "basic_meal");
       assert.strictEqual(candidate.sourceGroupKey, "proteins");
-      assert.strictEqual(candidate.upgradeDeltaHalala, 2000);
+      assert(candidate.relationId.startsWith(`menu_option:${candidate.sourceId}:${candidate.sourceProductId}:${candidate.sourceGroupId}`));
+      if (candidate.sourceProductKey === "basic_meal") {
+        assert.strictEqual(candidate.upgradeDeltaHalala, 2000);
+      } else {
+        assert(Number.isSafeInteger(candidate.upgradeDeltaHalala), "relation exposes a numeric premium delta");
+      }
       assert.strictEqual(candidate.eligibilityDiagnostics.eligible, true);
     }
 
@@ -134,8 +142,17 @@ async function main() {
     const beefSource = res.body.data.find((source) => source.key === "beef_steak");
     assert(beefSource, "source picker includes beef option");
     assert.strictEqual(beefSource.kind, "option");
+    assert.strictEqual(beefSource.sourceId, String(beef._id));
+    assert.strictEqual(beefSource.sourceProductId, String(basicMeal._id));
+    assert.strictEqual(beefSource.sourceGroupId, String(proteinsGroup._id));
+    assert.strictEqual(beefSource.sourceProductKey, "basic_meal");
+    assert.strictEqual(beefSource.sourceGroupKey, "proteins");
+    assert.strictEqual(beefSource.relationId, `menu_option:${beef._id}:${basicMeal._id}:${proteinsGroup._id}`);
+    assert.deepStrictEqual(beefSource.compatibilityKeys, ["beef_steak"]);
     assert.strictEqual(beefSource.group.key, "proteins");
     assert.strictEqual(beefSource.selectable, true);
+    assert.strictEqual(beefSource.linked, false);
+    assert.strictEqual(beefSource.linkedConfigId, null);
     assert(!Object.prototype.hasOwnProperty.call(beefSource, "sourceType"), "source picker hides sourceType");
 
     res = await api.get("/api/dashboard/premium-upgrades/sources?kind=product&limit=100").set(headers);
@@ -143,6 +160,9 @@ async function main() {
     const saladSource = res.body.data.find((source) => source.key === "premium_large_salad");
     assert(saladSource, "source picker includes premium salad product");
     assert.strictEqual(saladSource.kind, "product");
+    assert.strictEqual(saladSource.sourceId, String(premiumSalad._id));
+    assert.strictEqual(saladSource.supportedSelectionType, "premium_large_salad");
+    assert.deepStrictEqual(saladSource.premiumCompatibilityKeys, ["premium_large_salad", "custom_premium_salad"]);
     assert.strictEqual(saladSource.group.key, "premium");
     assert.strictEqual(saladSource.selectable, true);
 
@@ -152,7 +172,7 @@ async function main() {
     assert(premiumSaladCandidate, "premium salad remains product-backed");
     assert.strictEqual(premiumSaladCandidate.sourceType, "menu_product");
     assert.strictEqual(premiumSaladCandidate.upgradeDeltaHalala, 2900);
-    assert(res.body.data.some((candidate) => candidate.sourceType === "menu_product" && candidate.premiumKey !== "premium_large_salad"), "product candidates are data-driven");
+    assert(!res.body.data.some((candidate) => candidate.sourceType === "menu_product" && candidate.premiumKey !== "premium_large_salad"), "normal products are not premium product sources");
 
     const dynamicOption = await MenuOption.create({
       groupId: proteinsGroup._id,
@@ -278,6 +298,24 @@ async function main() {
     await MenuOption.deleteOne({ _id: addonContextOption._id });
     await MenuProduct.deleteOne({ _id: unsupportedProduct._id });
 
+    const normalSubscriptionProduct = await MenuProduct.create({
+      categoryId: basicMeal.categoryId,
+      key: "normal_subscription_product",
+      name: { en: "Normal Subscription Product", ar: "منتج اشتراك عادي" },
+      priceHalala: 1700,
+      availableFor: ["subscription"],
+      isActive: true,
+      isVisible: true,
+      isAvailable: true,
+      publishedAt: new Date(),
+    });
+    res = await api.get("/api/dashboard/premium-upgrades/sources?kind=product&limit=100").set(headers);
+    expectStatus(res, 200, "normal products excluded from product sources");
+    assert(!res.body.data.some((source) => source.sourceId === String(normalSubscriptionProduct._id)));
+    res = await api.get("/api/dashboard/premium-upgrades/candidates?sourceType=menu_product&includeLinked=true&limit=100").set(headers);
+    expectStatus(res, 200, "normal products excluded from product candidates");
+    assert(!res.body.data.some((candidate) => candidate.sourceId === String(normalSubscriptionProduct._id)));
+
     res = await api.get("/api/dashboard/premium-upgrades/readiness").set(headers);
     expectStatus(res, 200, "legacy fallback readiness");
     assert.strictEqual(res.body.isReady, true);
@@ -310,6 +348,8 @@ async function main() {
     res = await api.post("/api/dashboard/premium-upgrades").set(headers).send({
       kind: "option",
       sourceId: String(beef._id),
+      sourceProductId: String(basicMeal._id),
+      sourceGroupId: String(proteinsGroup._id),
       upgradeDeltaHalala: 1500,
       currency: "SAR",
       isActive: true,
@@ -348,6 +388,36 @@ async function main() {
     assert.strictEqual(saladConfig.key, "premium_large_salad");
     assert.strictEqual(saladConfig.kind, "product");
 
+    const alternatePremiumSalad = await MenuProduct.create({
+      categoryId: basicMeal.categoryId,
+      key: "premium_large_salad_v2_source",
+      itemType: "premium_large_salad",
+      name: { en: "Premium Large Salad V2", ar: "سلطة كبيرة مميزة ٢" },
+      priceHalala: 3200,
+      availableFor: ["subscription"],
+      isActive: true,
+      isVisible: true,
+      isAvailable: true,
+      publishedAt: new Date(),
+    });
+    res = await api.patch(`/api/dashboard/premium-upgrades/${saladConfig.id}`).set(headers).send({
+      expectedRevision: saladConfig.revision,
+      kind: "product",
+      sourceId: String(alternatePremiumSalad._id),
+    });
+    expectStatus(res, 200, "premium salad relink preserves premiumKey when product key differs");
+    const relinkedSaladConfig = res.body.data;
+    assert.strictEqual(relinkedSaladConfig.key, "premium_large_salad");
+    assert.strictEqual(relinkedSaladConfig.source.id, String(alternatePremiumSalad._id));
+
+    res = await api.patch(`/api/dashboard/premium-upgrades/${saladConfig.id}`).set(headers).send({
+      expectedRevision: relinkedSaladConfig.revision,
+      kind: "product",
+      sourceId: String(normalSubscriptionProduct._id),
+    });
+    expectStatus(res, 400, "incompatible normal product relink rejected");
+    assert.strictEqual(res.body.code || res.body.error?.code, "PREMIUM_RELINK_KEY_MISMATCH");
+
     const createKnownOptionConfig = async (option, price) => {
       const candidateRes = await api.get(`/api/dashboard/premium-upgrades/candidates?includeLinked=true&q=${option.key}`).set(headers);
       expectStatus(candidateRes, 200, `candidate for ${option.key}`);
@@ -356,6 +426,8 @@ async function main() {
       const createRes = await api.post("/api/dashboard/premium-upgrades").set(headers).send({
         kind: "option",
         sourceId: candidate.sourceId,
+        sourceProductId: candidate.sourceProductId,
+        sourceGroupId: candidate.sourceGroupId,
         upgradeDeltaHalala: price,
       });
       expectStatus(createRes, 201, `create ${option.key} config`);
@@ -370,6 +442,21 @@ async function main() {
     for (const premiumKey of ["beef_steak", "shrimp", "salmon", "premium_large_salad"]) {
       assert(allCandidates.some((candidate) => candidate.premiumKey === premiumKey), `candidate generated for ${premiumKey}`);
     }
+
+    res = await api.get("/api/dashboard/premium-upgrades/sources?kind=option&limit=100").set(headers);
+    expectStatus(res, 200, "source conflict metadata");
+    const linkedBeefSource = res.body.data.find((source) => source.sourceId === String(beef._id) && source.sourceProductId === String(basicMeal._id));
+    assert(linkedBeefSource, "linked beef source row exists");
+    assert.strictEqual(linkedBeefSource.linked, true);
+    assert.strictEqual(linkedBeefSource.linkedConfigId, beefConfig.id);
+    assert.strictEqual(linkedBeefSource.conflictReason, "SOURCE_ALREADY_LINKED");
+    res = await api.get(`/api/dashboard/premium-upgrades/sources?kind=option&excludeConfigId=${beefConfig.id}&limit=100`).set(headers);
+    expectStatus(res, 200, "source conflict excludes current config");
+    const selfBeefSource = res.body.data.find((source) => source.sourceId === String(beef._id) && source.sourceProductId === String(basicMeal._id));
+    assert(selfBeefSource, "self linked beef source row exists");
+    assert.strictEqual(selfBeefSource.linked, false);
+    assert.strictEqual(selfBeefSource.linkedConfigId, beefConfig.id);
+    assert.strictEqual(selfBeefSource.conflictReason, null);
     res = await api.get("/api/dashboard/meal-builder").set(headers);
     expectStatus(res, 200, "dashboard meal builder exposes automatic premium section");
     assert.strictEqual(res.body.data.premiumSection.automatic, true);
@@ -537,7 +624,7 @@ async function main() {
     );
 
     res = await api.post(`/api/dashboard/premium-upgrades/${saladConfig.id}/archive`).set(headers).send({
-      expectedRevision: saladConfig.revision,
+      expectedRevision: relinkedSaladConfig.revision,
       reason: "test archive",
     });
     expectStatus(res, 200, "archive soft archives");
@@ -594,6 +681,8 @@ async function main() {
     res = await api.post("/api/dashboard/premium-upgrades").set(headers).send({
       kind: "option",
       sourceId: String(brokenSourceOption._id),
+      sourceProductId: String(basicMeal._id),
+      sourceGroupId: String(proteinsGroup._id),
       upgradeDeltaHalala: 2100,
     });
     expectStatus(res, 201, "create relink source config");
@@ -612,10 +701,32 @@ async function main() {
     expectStatus(res, 200, "detail with broken source diagnostics");
     assert.strictEqual(res.body.data.health.status, "broken");
     assert.strictEqual(res.body.data.health.code, "SOURCE_NOT_FOUND");
+    assert.strictEqual(res.body.data.repair.currentPremiumKey, "broken_relink_source");
+    assert.strictEqual(res.body.data.repair.missingSourceId, String(brokenSourceOption._id));
+    assert.strictEqual(res.body.data.repair.expectedKind, "option");
+    assert.strictEqual(res.body.data.repair.canRelink, false);
+
+    res = await api.get("/api/dashboard/premium-upgrades?health=broken&limit=1").set(headers);
+    expectStatus(res, 200, "health broken filter");
+    assert(res.body.data.every((row) => row.health === "broken"), "health=broken only returns broken rows");
+    assert.strictEqual(res.body.meta.total, 1, "pagination total reflects health=broken filter");
+    res = await api.get("/api/dashboard/premium-upgrades?health=ready&limit=1").set(headers);
+    expectStatus(res, 200, "health ready filter");
+    assert(res.body.data.every((row) => row.health === "ready"), "health=ready only returns ready rows");
+    assert(res.body.meta.total > res.body.data.length, "pagination total reflects full ready set");
+
+    res = await api.get("/api/dashboard/premium-upgrades").set(kitchenHeaders);
+    expectStatus(res, 200, "kitchen can read premium upgrades");
+    res = await api.patch(`/api/dashboard/premium-upgrades/${relinkConfig.id}`).set(kitchenHeaders).send({
+      expectedRevision: relinkConfig.revision,
+      upgradeDeltaHalala: 2200,
+    });
+    expectStatus(res, 403, "kitchen cannot mutate premium upgrades");
 
     const relinkTargetOption = await MenuOption.create({
       groupId: proteinsGroup._id,
       key: "broken_relink_target",
+      premiumKey: "broken_relink_source",
       name: { en: "Broken Relink Target", ar: "مصدر ربط بديل" },
       availableFor: ["subscription"],
       availableForSubscription: true,
@@ -631,13 +742,19 @@ async function main() {
       extraPriceHalala: 2100,
     });
     res = await api.patch(`/api/dashboard/premium-upgrades/${relinkConfig.id}`).set(headers).send({
+      expectedRevision: relinkConfig.revision,
       kind: "option",
       sourceId: String(relinkTargetOption._id),
+      sourceProductId: String(basicMeal._id),
+      sourceGroupId: String(proteinsGroup._id),
     });
     expectStatus(res, 200, "broken source can be relinked");
-    assert.strictEqual(res.body.data.key, "broken_relink_target");
+    assert.strictEqual(res.body.data.key, "broken_relink_source");
     assert.strictEqual(res.body.data.health.status, "ready");
     const relinkedDoc = await PremiumUpgradeConfig.findById(relinkConfig.id).lean();
+    assert.strictEqual(relinkedDoc.premiumKey, "broken_relink_source");
+    assert.strictEqual(String(relinkedDoc.sourceProductId), String(basicMeal._id));
+    assert.strictEqual(String(relinkedDoc.sourceGroupId), String(proteinsGroup._id));
     assert.strictEqual(relinkedDoc.revision, relinkConfig.revision + 1);
     assert.strictEqual(relinkedDoc.metadata.previousSources[0].premiumKey, "broken_relink_source");
 
