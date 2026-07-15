@@ -9,12 +9,25 @@ const {
   loadCatalogItemsByIdForDocs,
 } = require("../catalog/catalogAvailabilityService");
 const {
+  ALL_SUPPORTED_SUBSCRIPTION_ADDON_CATEGORIES,
   SUBSCRIPTION_ADDON_CATEGORIES,
   SUBSCRIPTION_ADDON_CHOICE_MAPPINGS,
   buildAddonEntitlementEligibility,
   isAddonChoiceEligibleForAllowance,
   resolveAddonCategoryForMenuProduct,
 } = require("./subscriptionAddonPolicyService");
+const {
+  ERROR_CODE_ADDON_PLAN_MISMATCH,
+  ERROR_CODE_BALANCE_BUCKET_MISMATCH,
+  ERROR_CODE_ENTITLEMENT_CATEGORY_MISMATCH,
+  ERROR_CODE_ENTITLEMENT_NOT_OWNED,
+  ERROR_CODE_ENTITLEMENT_PRODUCT_NOT_FOUND,
+  ERROR_CODE_SNAPSHOT_MISSING,
+  loadOwnedCategoryRowsForProducts,
+  loadOwnedSnapshotProducts,
+  resolveOwnedAddonEntitlementChoice,
+  syntheticCategoryFromKey,
+} = require("./subscriptionOwnedAddonSnapshotService");
 const {
   buildAddonChoicePricingPreview,
   resolveEntitlementBalance,
@@ -56,11 +69,11 @@ function activePublishedQuery(extra = {}) {
 
 function normalizeCategoryFilter(category) {
   if (category === undefined || category === null || String(category).trim() === "") {
-    return SUBSCRIPTION_ADDON_CATEGORIES;
+    return ALL_SUPPORTED_SUBSCRIPTION_ADDON_CATEGORIES;
   }
   const normalized = String(category).trim();
-  if (!SUBSCRIPTION_ADDON_CHOICE_MAPPINGS[normalized]) {
-    const err = new Error("category must be one of: juice, snack, small_salad");
+  if (!ALL_SUPPORTED_SUBSCRIPTION_ADDON_CATEGORIES.includes(normalized)) {
+    const err = new Error();
     err.status = 400;
     err.code = "INVALID";
     throw err;
@@ -162,14 +175,16 @@ function normalizeEntitlementName(entitlement) {
 }
 
 function buildEntitlementMetadata(subscription, entitlement, index) {
-  const { includedTotalQty, remainingQty } = resolveEntitlementBalance(subscription, entitlement);
+  const { bucket, includedTotalQty, remainingQty } = resolveEntitlementBalance(subscription, entitlement);
   const addonPlanId = String(entitlement && (entitlement.addonPlanId || entitlement.addonId) || "");
   const category = String(entitlement && entitlement.category || "");
   return {
     entitlementIndex: index,
     entitlementKey: `${category || "legacy"}:${addonPlanId || index}`,
+    addonId: addonPlanId,
     addonPlanId,
     addonPlanName: normalizeEntitlementName(entitlement),
+    balanceBucketId: bucket && bucket._id ? String(bucket._id) : null,
     category,
     entitlementCategory: category,
     maxPerDay: Math.max(1, Math.floor(Number(entitlement && entitlement.maxPerDay || entitlement && entitlement.quantityPerDay || 1))),
@@ -201,22 +216,7 @@ function buildChoicePricingMetadata(subscription, entitlement, product) {
   };
 }
 
-async function loadSelectableSnapshotProducts(productIds, { MenuProductModel = MenuProduct } = {}) {
-  if (!productIds.length) return [];
-  const rows = await MenuProductModel.find(activePublishedQuery({
-    _id: { $in: productIds },
-    ...availableForChannelQuery("one_time"),
-  })).lean();
-  const catalogItemsById = await loadCatalogItemsByIdForDocs(rows);
-  const byId = new Map(
-    filterGloballyAvailable(rows, catalogItemsById)
-      .filter(isDailyAddonMenuProduct)
-      .map((row) => [String(row._id), row])
-  );
-  return productIds
-    .map((id) => byId.get(String(id)))
-    .filter(Boolean);
-}
+
 
 async function loadCategoryRowsForProducts(products, { MenuCategoryModel = MenuCategory } = {}) {
   const categoryIds = [
@@ -342,29 +342,41 @@ async function buildSubscriptionAddonChoicesCatalog({
     const snapshotProductIds = normalizeIdList(entitlement.menuProductIds);
     const entitlementCategory = String(entitlement.category || requestedCategory || "legacy");
     const fallbackGroupCategory = entitlementCategory;
-    let products = [];
+    let loadedProducts = [];
     if (snapshotProductIds.length) {
-      products = await loadSelectableSnapshotProducts(snapshotProductIds, models);
+      loadedProducts = await loadOwnedSnapshotProducts(snapshotProductIds, entitlement, {
+        MenuProductModel: models.MenuProductModel,
+      });
     } else if (SUBSCRIPTION_ADDON_CHOICE_MAPPINGS[fallbackGroupCategory]) {
       const mapping = SUBSCRIPTION_ADDON_CHOICE_MAPPINGS[fallbackGroupCategory];
       const categoryRows = await findActiveOneTimeCategories(mapping.sourceCategories, models);
-      products = await findMappedProducts(categoryRows, mapping, models);
+      const genericProducts = await findMappedProducts(categoryRows, mapping, models);
+      loadedProducts = genericProducts.map(product => ({ product, fromSnapshot: false, id: product._id }));
     }
 
-    const categoriesById = await loadCategoryRowsForProducts(products, models);
+    const productsList = loadedProducts.map(p => p.product).filter(Boolean);
+    const { rowsById: categoriesById, fallbackCategory } = await loadOwnedCategoryRowsForProducts(productsList, entitlementCategory, { MenuCategoryModel: models.MenuCategoryModel });
     const metadata = buildEntitlementMetadata(subscription, entitlement, index);
     const groupedChoices = new Map();
-    for (const product of products) {
-      const sourceCategory = categoriesById.get(String(product.categoryId));
+    for (const { product, fromSnapshot } of loadedProducts) {
+      if (!product) continue;
+      const sourceCategory = categoriesById.get(String(product.categoryId)) || fallbackCategory;
       if (!sourceCategory) continue;
       const displayCategory = resolveDisplayCategoryForProduct(product, sourceCategory, { entitlementCategory });
       if (!displayCategory || !requestedCategoryMatches(requestedCategory, displayCategory)) continue;
+      const serialized = serializeChoice(product, sourceCategory.key, lang);
       const choice = {
-        ...serializeChoice(product, sourceCategory.key, lang),
+        ...serialized,
         ...metadata,
         ...buildChoicePricingMetadata(subscription, entitlement, product),
         category: displayCategory,
         entitlementCategory,
+        source: "subscription",
+        ownedSnapshot: true,
+        availableForNewSale: false,
+        addonId: serialized.id,
+        unitPriceHalala: serialized.priceHalala,
+        currency: serialized.currency,
       };
       const list = groupedChoices.get(displayCategory) || [];
       list.push(choice);
@@ -432,10 +444,14 @@ async function resolveEntitlementDisplayCategories(subscription, { models = {} }
       if (entitlement && entitlement.category) displayCategories.add(String(entitlement.category));
       continue;
     }
-    const products = await loadSelectableSnapshotProducts(snapshotProductIds, models);
-    const categoriesById = await loadCategoryRowsForProducts(products, models);
-    for (const product of products) {
-      const sourceCategory = categoriesById.get(String(product.categoryId));
+    const loadedProducts = await loadOwnedSnapshotProducts(snapshotProductIds, entitlement, {
+      MenuProductModel: models.MenuProductModel,
+    });
+    const productsList = loadedProducts.map(p => p.product).filter(Boolean);
+    const { rowsById: categoriesById, fallbackCategory } = await loadOwnedCategoryRowsForProducts(productsList, entitlement.category, { MenuCategoryModel: models.MenuCategoryModel });
+    for (const { product } of loadedProducts) {
+      if (!product) continue;
+      const sourceCategory = categoriesById.get(String(product.categoryId)) || fallbackCategory;
       if (!sourceCategory) continue;
       const displayCategory = resolveDisplayCategoryForProduct(product, sourceCategory, {
         entitlementCategory: entitlement.category,
@@ -567,8 +583,55 @@ async function buildAddonChoicesCatalog({
   return filterCatalogToRequestedCategory(data, category);
 }
 
-async function resolveAddonChoiceProductById(productId, { models = {} } = {}) {
+function isOwnedResolutionHardError(err) {
+  return [
+    ERROR_CODE_ADDON_PLAN_MISMATCH,
+    ERROR_CODE_BALANCE_BUCKET_MISMATCH,
+    ERROR_CODE_ENTITLEMENT_CATEGORY_MISMATCH,
+    ERROR_CODE_ENTITLEMENT_PRODUCT_NOT_FOUND,
+    ERROR_CODE_SNAPSHOT_MISSING,
+  ].includes(err && err.code);
+}
+
+async function resolveAddonChoiceProductById(productId, {
+  subscription = null,
+  entitlement = null,
+  addonPlanId = null,
+  category = null,
+  balanceBucketId = null,
+  userId = null,
+  models = {},
+} = {}) {
   if (!mongoose.Types.ObjectId.isValid(String(productId || ""))) return null;
+
+  if (subscription) {
+    try {
+      const owned = await resolveOwnedAddonEntitlementChoice({
+        subscription,
+        productId,
+        addonPlanId: addonPlanId || (entitlement && (entitlement.addonPlanId || entitlement.addonId)) || null,
+        category: category || (entitlement && entitlement.category) || null,
+        balanceBucketId,
+        userId,
+      });
+      const results = await loadOwnedSnapshotProducts([productId], owned.entitlement, {
+        MenuProductModel: models.MenuProductModel || MenuProduct,
+      });
+      if (results.length > 0 && results[0].product) {
+        return {
+          product: results[0].product,
+          category: syntheticCategoryFromKey(owned.category),
+          addonCategory: owned.category,
+          fromOwnedSnapshot: results[0].fromSnapshot,
+          ownedResolution: owned,
+        };
+      }
+    } catch (err) {
+      if (isOwnedResolutionHardError(err)) throw err;
+      if (err && err.code !== ERROR_CODE_ENTITLEMENT_NOT_OWNED) throw err;
+    }
+  }
+
   const MenuProductModel = models.MenuProductModel || MenuProduct;
   const MenuCategoryModel = models.MenuCategoryModel || MenuCategory;
   const product = await MenuProductModel.findOne(activePublishedQuery({
@@ -591,16 +654,16 @@ async function resolveAddonChoiceProductById(productId, { models = {} } = {}) {
   if (!isLinkedDocGloballyAvailable(product, catalogItemsById)) return null;
   if (!isDailyAddonMenuProduct(product)) return null;
 
-  const category = await MenuCategoryModel.findOne(activePublishedQuery({
+  const menuCategory = await MenuCategoryModel.findOne(activePublishedQuery({
     _id: product.categoryId,
   })).lean();
-  if (!category) return null;
+  if (!menuCategory) return null;
 
-  const addonCategory = resolveAddonCategoryForMenuProduct(product, category.key);
+  const addonCategory = resolveAddonCategoryForMenuProduct(product, menuCategory.key);
   if (addonCategory) {
     return {
       product,
-      category,
+      category: menuCategory,
       addonCategory,
     };
   }

@@ -33,6 +33,7 @@ const {
   releaseCheckoutDraftIdempotencyKey,
 } = require("./subscriptionCheckoutHelpers");
 const { resolveReadLabel } = require("../../utils/subscription/subscriptionReadLocalization");
+const { buildMenuProductsSnapshot } = require("./subscriptionOwnedAddonSnapshotService");
 
 // ---------------------------------------------------------------------------
 // Premium normalization helpers
@@ -463,24 +464,32 @@ async function performSubscriptionCheckout(userId, idempotencyKey, body, lang, r
         premiumUpgradeLimit: quote.premiumUpgradeLimit || null,
         premiumCount: Number(quote.premiumCount || 0),
         premiumUnitPriceHalala: Number(quote.premiumUnitPriceHalala || 0),
-        addonSubscriptions: (quote.addonSubscriptions || []).map((sub) => ({
-          addonId: sub.addonId,
-          addonPlanId: sub.addonPlanId,
-          name: sub.name,
-          addonPlanName: sub.addonPlanName,
-          category: sub.category,
-          maxPerDay: sub.maxPerDay,
-          basePlanId: sub.basePlanId,
-          priceHalala: sub.priceHalala,
-          quantityPerDay: sub.quantityPerDay,
-          purchasedDailyQty: sub.purchasedDailyQty,
-          includedTotalQty: sub.includedTotalQty,
-          unitPlanPriceHalala: sub.unitPlanPriceHalala,
-          totalHalala: sub.totalHalala,
-          currency: sub.currency,
-          menuProductIds: sub.menuProductIds,
-          menuCategoryKeys: [],
-          priceSource: sub.priceSource,
+        addonSubscriptions: await Promise.all((quote.addonSubscriptions || []).map(async (sub) => {
+          let menuProductsSnapshot = [];
+          if (Array.isArray(sub.menuProductIds) && sub.menuProductIds.length > 0) {
+            menuProductsSnapshot = await buildMenuProductsSnapshot(sub.menuProductIds);
+          }
+          return {
+            addonId: sub.addonId,
+            addonPlanId: sub.addonPlanId,
+            name: sub.name,
+            addonPlanName: sub.addonPlanName,
+            category: sub.category,
+            maxPerDay: sub.maxPerDay,
+            basePlanId: sub.basePlanId,
+            priceHalala: sub.priceHalala,
+            quantityPerDay: sub.quantityPerDay,
+            purchasedDailyQty: sub.purchasedDailyQty,
+            includedTotalQty: sub.includedTotalQty,
+            unitPlanPriceHalala: sub.unitPlanPriceHalala,
+            unitPriceHalala: sub.unitPriceHalala,
+            totalHalala: sub.totalHalala,
+            currency: sub.currency,
+            menuProductIds: sub.menuProductIds,
+            menuCategoryKeys: [],
+            priceSource: sub.priceSource,
+            menuProductsSnapshot,
+          };
         })),
         promo: quote.promoCode
           ? {

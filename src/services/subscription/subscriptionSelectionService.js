@@ -171,22 +171,43 @@ async function releasePremiumBalanceAtomically({ subscription, dayId, date, prem
   return { released: true, remainingQty: atomicResult.premiumBalance[bucketIndex]?.remainingQty || 0 };
 }
 
-async function consumeAddonBalanceAtomically({ subscription, dayId, date, addonId, addonPlanId = null, category = null, session }) {
+async function consumeAddonBalanceAtomically({ subscription, dayId, date, addonId, addonPlanId = null, category = null, balanceBucketId = null, session }) {
   if (!session) throw new Error("consumeAddonBalanceAtomically requires a session");
-  if (!subscription || !Array.isArray(subscription.addonBalance)) return { consumed: false };
+  if (!subscription || !Array.isArray(subscription.addonBalance)) return { consumed: false, reason: "bucket_not_found" };
 
-  const bucket = findAddonBalanceBucket(subscription, { addonId, addonPlanId, category, requirePositiveRemaining: true });
+  let bucket = null;
+  if (balanceBucketId) {
+    bucket = subscription.addonBalance.find((b) => String(b._id) === String(balanceBucketId));
+    if (!bucket) return { consumed: false, reason: "bucket_not_found" };
+  }
+  if (!bucket) {
+    bucket = findAddonBalanceBucket(subscription, { addonId, addonPlanId, category, requirePositiveRemaining: true });
+  }
+
   const bucketIndex = bucket
     ? subscription.addonBalance.findIndex((b) => b._id && bucket._id && String(b._id) === String(bucket._id))
     : -1;
 
-  if (bucketIndex < 0 || Number(bucket.remainingQty || 0) <= 0) return { consumed: false };
+  if (bucketIndex < 0) return { consumed: false, reason: "bucket_not_found" };
+  if (!suppliedAddonReleaseIdentityMatchesBucket(bucket, { addonId, addonPlanId, category })) {
+    return { consumed: false, reason: "bucket_identity_mismatch" };
+  }
+  if (Number(bucket.remainingQty || 0) <= 0) return { consumed: false, reason: "no_remaining_balance" };
 
   const atomicResult = await Subscription.findOneAndUpdate(
     {
       _id: subscription._id,
-      "addonBalance._id": bucket._id,
-      "addonBalance.remainingQty": { $gt: 0 },
+      addonBalance: {
+        $elemMatch: {
+          _id: bucket._id,
+          addonId: bucket.addonId,
+          addonPlanId: bucket.addonPlanId || null,
+          category: bucket.category || "",
+          unitPriceHalala: Number(bucket.unitPriceHalala || 0),
+          currency: bucket.currency || "SAR",
+          remainingQty: { $gt: 0 },
+        },
+      },
     },
     {
       $inc: { "addonBalance.$.remainingQty": -1, "addonBalance.$.consumedQty": 1 },
@@ -194,7 +215,7 @@ async function consumeAddonBalanceAtomically({ subscription, dayId, date, addonI
     { session, new: true }
   );
 
-  if (!atomicResult) return { consumed: false };
+  if (!atomicResult) return { consumed: false, reason: "atomic_consume_failed" };
 
   // Keep the in-memory Mongoose document synchronized with the atomic
   // addon balance updates performed via findOneAndUpdate(). Without this,
@@ -325,18 +346,25 @@ function assertAddonBalanceReleaseSucceeded(result, context = {}) {
   throw err;
 }
 
-async function releaseAddonBalanceAtomically({ subscription, addonId, addonPlanId = null, category = null, unitPriceHalala, currency = null, session }) {
+async function releaseAddonBalanceAtomically({ subscription, addonId, addonPlanId = null, category = null, unitPriceHalala, currency = null, balanceBucketId = null, session }) {
   if (!session) throw new Error("releaseAddonBalanceAtomically requires a session");
   if (!subscription || !Array.isArray(subscription.addonBalance)) return { released: false };
 
-  const hasStrongIdentifier = Boolean(addonPlanId || addonId);
+  const hasStrongIdentifier = Boolean(addonPlanId || addonId || balanceBucketId);
   if (!hasStrongIdentifier) return { released: false, reason: "bucket_not_found" };
 
   // The current persisted selection model records one row per covered add-on
   // credit. Keep release as a single-credit operation unless consume is changed
   // to reserve multiple credits per selection.
   const releaseQuantity = 1;
-  const bucket = findAddonBalanceBucket(subscription, { addonId, addonPlanId, category });
+  let bucket = null;
+  if (balanceBucketId) {
+    bucket = subscription.addonBalance.find((b) => String(b._id) === String(balanceBucketId));
+    if (!bucket) return { released: false, reason: "bucket_not_found" };
+  }
+  if (!bucket) {
+    bucket = findAddonBalanceBucket(subscription, { addonId, addonPlanId, category });
+  }
   const bucketIndex = bucket ? findAddonBalanceBucketIndex(subscription.addonBalance, bucket._id) : -1;
 
   if (bucketIndex < 0) return { released: false, reason: "bucket_not_found" };
@@ -960,16 +988,48 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
                   existingList.shift();
                   processedAddonSelections.push(sel);
                } else {
+                  let ownedResolution = null;
+                  try {
+                     const { resolveOwnedAddonEntitlementChoice } = require("./subscriptionOwnedAddonSnapshotService");
+                     ownedResolution = await resolveOwnedAddonEntitlementChoice({
+                       subscription: subInSession,
+                       productId: sel.addonId,
+                       addonPlanId: sel.addonPlanId || null,
+                       category: sel.category || null,
+                       balanceBucketId: sel.balanceBucketId || null,
+                       userId: subInSession.userId,
+                       session,
+                     });
+                  } catch (err) {
+                     throw err;
+                  }
+
                   const walletResult = await consumeAddonBalanceAtomically({
                      subscription: subInSession,
                      addonId: sel.addonId,
                      addonPlanId: sel.addonPlanId || null,
                      category: sel.category || null,
+                     balanceBucketId: ownedResolution && ownedResolution.bucket ? ownedResolution.bucket._id : null,
                      session
                   });
                   if (walletResult.consumed) {
-                     processedAddonSelections.push({ ...sel, addonPlanId: sel.addonPlanId || walletResult.addonPlanId || null, source: "subscription", priceHalala: 0 });
+                     processedAddonSelections.push({
+                       ...sel,
+                       addonPlanId: sel.addonPlanId || walletResult.addonPlanId || null,
+                       source: "subscription",
+                       priceHalala: 0,
+                       balanceBucketId: ownedResolution && ownedResolution.bucket ? ownedResolution.bucket._id : null,
+                       entitlementKey: ownedResolution ? ownedResolution.entitlementKey : undefined,
+                       category: ownedResolution ? ownedResolution.category : (sel.category || ""),
+                     });
                   } else {
+                     if (walletResult.reason === "bucket_identity_mismatch" || walletResult.reason === "atomic_consume_failed") {
+                       const err = new Error(`Add-on balance consume failed: ${walletResult.reason}`);
+                       err.code = "ADDON_BALANCE_CONSUME_FAILED";
+                       err.status = 409;
+                       err.reason = walletResult.reason;
+                       throw err;
+                     }
                      processedAddonSelections.push({
                        ...sel,
                        source: "pending_payment",
@@ -994,6 +1054,7 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
                category: sel.category || null,
                unitPriceHalala: hasOwnValue(sel, "unitPriceHalala") ? sel.unitPriceHalala : null,
                currency: sel.currency || null,
+               balanceBucketId: sel.balanceBucketId || null,
                session
             });
             assertAddonBalanceReleaseSucceeded(releaseResult, sel);
@@ -1018,7 +1079,19 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
        subInSession.addonSelections = subInSession.addonSelections.filter(s => s.date !== date);
        for (const sel of day.addonSelections) {
          if (sel.source === "subscription" || sel.source === "pending_payment" || sel.source === "paid") {
-           subInSession.addonSelections.push({ dayId: day._id, date: day.date, addonId: sel.addonId, addonPlanId: sel.addonPlanId || null, qty: 1, unitPriceHalala: sel.priceHalala, currency: sel.currency });
+           subInSession.addonSelections.push({
+             dayId: day._id,
+             date: day.date,
+             addonId: sel.addonId,
+             addonPlanId: sel.addonPlanId || null,
+             qty: 1,
+             unitPriceHalala: Object.prototype.hasOwnProperty.call(sel, "unitPriceHalala") ? sel.unitPriceHalala : sel.priceHalala,
+             currency: sel.currency,
+             category: sel.category || "",
+             entitlementKey: sel.entitlementKey || "",
+             balanceBucketId: sel.balanceBucketId || null,
+             source: sel.source || "",
+           });
          }
        }
        subInSession.markModified("addonSelections");

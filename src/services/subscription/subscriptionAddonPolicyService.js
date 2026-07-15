@@ -10,7 +10,7 @@ const SUBSCRIPTION_ADDON_CHOICE_MAPPINGS = Object.freeze({
 });
 
 const SUBSCRIPTION_ADDON_CATEGORIES = Object.freeze(Object.keys(SUBSCRIPTION_ADDON_CHOICE_MAPPINGS));
-const DYNAMIC_SUBSCRIPTION_ADDON_CATEGORIES = Object.freeze(["meal", "dessert"]);
+const DYNAMIC_SUBSCRIPTION_ADDON_CATEGORIES = Object.freeze(["meal", "dessert", "premium_meal", "premium_large_salad"]);
 const ALL_SUPPORTED_SUBSCRIPTION_ADDON_CATEGORIES = Object.freeze([
   ...SUBSCRIPTION_ADDON_CATEGORIES,
   ...DYNAMIC_SUBSCRIPTION_ADDON_CATEGORIES,
@@ -140,16 +140,24 @@ function resolveAddonCategoryForMenuProduct(product, menuCategoryKey) {
     return null;
   }
 
+  // Explicit meal guard — meal must NEVER be mapped to snack.
+  // A meal source key or itemType always resolves to "meal", regardless of the
+  // SUBSCRIPTION_ADDON_CHOICE_MAPPINGS snack entry (which uses "desserts" as its
+  // source category, not "snack").
+  if (sourceKey === "meal" || sourceKey === "meals") return "meal";
+  if (itemTypeRaw === "meal") return "meal";
+
+  // Dessert — before checking snack mapping (which uses sourceKey "desserts")
+  if (itemTypeRaw === "dessert") return "dessert";
   if (!productKey && !itemTypeRaw && (sourceKey === "dessert" || sourceKey === "desserts")) {
     return "dessert";
   }
-
-  if (itemType && itemType !== "dessert") return itemType;
+  // Generic snack mapping (source: "desserts" in CHOICE_MAPPINGS)
+  // Do NOT allow snack coercion for meal/dessert products.
+  if (itemType && itemType !== "dessert" && itemType !== "snack") return itemType;
   for (const mapping of Object.values(SUBSCRIPTION_ADDON_CHOICE_MAPPINGS)) {
     if (mapping.sourceCategories.includes(sourceKey)) return mapping.category;
   }
-  if (sourceKey === "meal" || sourceKey === "meals") return "meal";
-  if (sourceKey === "dessert" || sourceKey === "desserts") return "dessert";
   if (itemType) return itemType;
   return null;
 }
@@ -243,6 +251,7 @@ function findAddonBalanceBucket(subscription, {
 }
 
 module.exports = {
+  ALL_SUPPORTED_SUBSCRIPTION_ADDON_CATEGORIES,
   SUBSCRIPTION_ADDON_CATEGORIES,
   SUBSCRIPTION_ADDON_CHOICE_MAPPINGS,
   buildAddonEntitlementEligibility,

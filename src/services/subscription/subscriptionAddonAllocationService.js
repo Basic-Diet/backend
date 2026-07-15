@@ -3,6 +3,7 @@ const {
 } = require("./subscriptionAddonChoicesService");
 const {
   buildSimulatedAddonRemainingByEntitlement,
+  findAddonBalanceBucket,
   getAddonEntitlementKey,
   getEligibleAddonEntitlementsForProduct,
 } = require("./subscriptionAddonPolicyService");
@@ -33,7 +34,7 @@ async function reconcileAddonInclusions(
   const choiceMap = new Map();
   for (const addonId of requestedAddonIds) {
     if (choiceMap.has(String(addonId))) continue;
-    const choice = await resolveChoiceProductById(addonId);
+    const choice = await resolveChoiceProductById(addonId, { subscription });
     if (choice) choiceMap.set(String(addonId), choice);
   }
 
@@ -62,6 +63,11 @@ async function reconcileAddonInclusions(
     }) || eligibleEntitlements[0] || null;
     const entitlement = selectedMatch ? selectedMatch.entry : null;
     const entitlementKey = selectedMatch ? getAddonEntitlementKey(selectedMatch.entry, selectedMatch.index) : null;
+    const balanceBucket = entitlement ? findAddonBalanceBucket(subscription, {
+      addonPlanId: entitlement.addonPlanId || entitlement.addonId,
+      addonId: entitlement.addonId || entitlement.addonPlanId,
+      category,
+    }) : null;
     let source = "pending_payment";
     let unitPriceHalala = resolveAuthoritativeAddonUnitPriceHalala(doc, { required: !entitlement });
     let priceHalala = unitPriceHalala;
@@ -91,6 +97,8 @@ async function reconcileAddonInclusions(
       addonPlanId: entitlement ? (entitlement.addonPlanId || entitlement.addonId) : null,
       name: resolveAddonSelectionName(doc),
       category,
+      entitlementKey: source === "subscription" ? entitlementKey : "",
+      balanceBucketId: source === "subscription" && balanceBucket ? balanceBucket._id : null,
       source,
       priceHalala,
       unitPriceHalala,

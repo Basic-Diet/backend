@@ -49,9 +49,14 @@ function createInvalidAddonPriceError(product) {
   return err;
 }
 
-function resolveAuthoritativeAddonUnitPriceHalala(product, { required = false } = {}) {
+function resolveAuthoritativeAddonUnitPriceHalala(product, { required = false, entitlement = null } = {}) {
   const hasPrice = product && Object.prototype.hasOwnProperty.call(product, "priceHalala");
-  const value = hasPrice ? product.priceHalala : undefined;
+  let value = hasPrice ? product.priceHalala : undefined;
+
+  if (value === undefined && entitlement && typeof entitlement.unitPriceHalala === "number") {
+    value = entitlement.unitPriceHalala;
+  }
+
   const valid = typeof value === "number"
     && Number.isFinite(value)
     && Number.isInteger(value)
@@ -80,7 +85,7 @@ function buildAddonChoicePricingPreview({
   const currency = (product && product.currency) || (selectedEntitlement && selectedEntitlement.currency) || SYSTEM_CURRENCY;
 
   if (!selectedEntitlement) {
-    const unitPriceHalala = resolveAuthoritativeAddonUnitPriceHalala(product, { required: true });
+    const unitPriceHalala = resolveAuthoritativeAddonUnitPriceHalala(product, { required: true, entitlement: null });
     return {
       requestedQty,
       coveredQty: 0,
@@ -116,7 +121,7 @@ function buildAddonChoicePricingPreview({
     : coveredQty > 0
       ? "allowance_partial"
       : "paid_overage";
-  const unitPriceHalala = resolveAuthoritativeAddonUnitPriceHalala(product, { required: paidQty > 0 });
+  const unitPriceHalala = resolveAuthoritativeAddonUnitPriceHalala(product, { required: paidQty > 0, entitlement: selectedEntitlement });
 
   return {
     requestedQty,

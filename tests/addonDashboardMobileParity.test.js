@@ -341,6 +341,21 @@ async function main() {
         publishedAt: new Date(),
         sortOrder: 2,
       },
+      {
+        categoryId: dessertCategory._id,
+        key: "addon_parity_snack_bites",
+        name: { ar: "سناك", en: "Snack Bites" },
+        description: { ar: "", en: "" },
+        priceHalala: 1200,
+        currency: "SAR",
+        itemType: "snack",
+        availableFor: ["one_time"],
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: new Date(),
+        sortOrder: 3,
+      },
     ]);
 
     const invalidSnackMealPlan = await invoke(createDashboardAddonPlan, {
@@ -468,8 +483,11 @@ async function main() {
       String(mealProducts[1]._id),
       String(mealProducts[2]._id),
     ]);
-    assert.deepStrictEqual(ids(mobileChoicesResponse.body.data.dessert.choices), [String(dessertProducts[0]._id)]);
-    assert.deepStrictEqual(ids(mobileChoicesResponse.body.data.snack.choices), [String(dessertProducts[1]._id)]);
+    assert.deepStrictEqual(ids(mobileChoicesResponse.body.data.dessert.choices), [
+      String(dessertProducts[0]._id),
+      String(dessertProducts[1]._id),
+    ]);
+    assert.deepStrictEqual(ids(mobileChoicesResponse.body.data.snack.choices), [String(dessertProducts[2]._id)]);
     assert.strictEqual(
       mobileChoicesResponse.body.data.juice.choices.find((choice) => String(choice.id) === configuredIds[0]).isEligibleForAllowance,
       true
@@ -492,7 +510,7 @@ async function main() {
       "unrelated global meal product remains visible but is not allowance-eligible"
     );
     assert(
-      mobileChoicesResponse.body.data.snack.choices.some((choice) => String(choice.id) === String(dessertProducts[1]._id) && choice.isEligibleForAllowance === false),
+      mobileChoicesResponse.body.data.snack.choices.some((choice) => String(choice.id) === String(dessertProducts[2]._id) && choice.isEligibleForAllowance === false),
       "unrelated generic snack product remains visible but is not allowance-eligible"
     );
     assert.strictEqual(mobileChoicesResponse.body.data.juice.choices[0].payableTotalHalala, 0);
@@ -562,7 +580,7 @@ async function main() {
     );
     const afterVisibilityJuiceCategory = afterVisibilityCategories.find((row) => row.key === "juices");
     assert.strictEqual(afterVisibilityJuiceCategory.productsCount, 4);
-    assert.strictEqual(afterVisibilityChoices.juice.choices.length, 2);
+    assert.strictEqual(afterVisibilityChoices.juice.choices.length, 3);
     assert.deepStrictEqual(listedPlan.menuProductIds, [...updatedIds, String(staleId)]);
 
     const archived = await invoke(deleteDashboardAddonPlan, { params: { id: created.body.data.id } });
@@ -574,7 +592,7 @@ async function main() {
     });
     assert.deepStrictEqual(
       ids(afterArchiveChoices.juice.choices),
-      configuredIds.slice(0, 3).filter((id) => id !== String(eligibleProducts[4]._id)),
+      configuredIds.slice(0, 3),
       "archiving the live plan must not replace the subscription snapshot"
     );
 

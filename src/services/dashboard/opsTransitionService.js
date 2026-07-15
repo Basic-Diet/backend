@@ -783,6 +783,7 @@ async function handleCancel({ entityId, entityType, payload, userId, role, sessi
                 category: sel.category,
                 unitPriceHalala: Object.prototype.hasOwnProperty.call(sel, "unitPriceHalala") ? sel.unitPriceHalala : null,
                 currency: sel.currency || null,
+                balanceBucketId: sel.balanceBucketId || null,
                 session,
               });
               assertAddonBalanceReleaseSucceeded(releaseResult, sel);

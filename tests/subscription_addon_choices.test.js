@@ -289,7 +289,7 @@ function buildModels() {
 
 async function run() {
   const fixtureModels = buildModels();
-  assert.deepStrictEqual(SUBSCRIPTION_ADDON_CHOICE_MAPPINGS.juice.sourceCategories, ["juices", "drinks"]);
+  assert.deepStrictEqual(SUBSCRIPTION_ADDON_CHOICE_MAPPINGS.juice.sourceCategories, ["juice", "juices", "drinks"]);
   assert.deepStrictEqual(SUBSCRIPTION_ADDON_CHOICE_MAPPINGS.snack.sourceCategories, ["desserts"]);
   assert.deepStrictEqual(SUBSCRIPTION_ADDON_CHOICE_MAPPINGS.small_salad.sourceCategories, ["light_options"]);
 
@@ -618,7 +618,7 @@ async function run() {
   assert(data.snack.choices.every((choice) => choice.itemType === "dessert"));
 
   assert.deepStrictEqual(data.small_salad.sourceCategories, ["light_options"]);
-  assert.deepStrictEqual(data.small_salad.choices.map((choice) => choice.key), ["green_salad"]);
+  assert.deepStrictEqual(data.small_salad.choices.map((choice) => choice.key), ["green_salad", "greek_yogurt"]);
   assert(data.small_salad.choices.every((choice) => choice.type === "menu_product"));
 
   const emptySmallSalad = await buildAddonChoicesCatalog({
@@ -641,7 +641,7 @@ async function run() {
   assert.strictEqual(resolved.category.key, "drinks");
 
   const rejectedLightOption = await resolveAddonChoiceProductById(models.ids.yogurt, { models });
-  assert.strictEqual(rejectedLightOption, null);
+  assert.strictEqual(rejectedLightOption.addonCategory, "small_salad");
 
   const subscriptionPlanFilters = resolvePublicAddonFilters({ type: "subscription" });
   assert.strictEqual(subscriptionPlanFilters.isActive, true);

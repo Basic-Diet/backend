@@ -64,6 +64,7 @@ function filterAddonChoicesPayload(payload, activePlanIds) {
     const entitlements = originalEntitlements;
 
     const choices = originalChoices.filter((row) => {
+      if (row && row.source === "subscription" && row.ownedSnapshot === true) return true;
       const planId = planIdOf(row);
       if (!planId || activePlanIds.has(planId)) return true;
       return row && (
@@ -75,7 +76,12 @@ function filterAddonChoicesPayload(payload, activePlanIds) {
 
     const hasActiveReferencedPlan = [...referencedPlanIds].some((planId) => activePlanIds.has(planId));
     const hasPurchasedEntitlement = entitlements.length > 0
-      || choices.some((row) => row && (row.isEligibleForAllowance === true || row.entitlementIndex !== undefined || Boolean(row.entitlementKey)));
+      || choices.some((row) => row && (
+        row.isEligibleForAllowance === true
+        || row.entitlementIndex !== undefined
+        || Boolean(row.entitlementKey)
+        || (row.source === "subscription" && row.ownedSnapshot === true)
+      ));
     const isLegacyGenericCategory = LEGACY_GENERIC_CATEGORIES.has(String(category));
 
     if (!isLegacyGenericCategory && referencedPlanIds.size > 0 && !hasActiveReferencedPlan && !hasPurchasedEntitlement) {

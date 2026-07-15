@@ -75,8 +75,34 @@ const AddonSelectionSchema = new mongoose.Schema(
     unitPriceHalala: { type: Number, min: 0, default: 0 },
     currency: { type: String, default: "SAR" },
     consumedAt: { type: Date, default: Date.now },
+    // Owned entitlement identity — populated on save so edit/cancel can release the exact bucket.
+    // All fields are optional for backward compatibility with historical selections.
+    category:        { type: String, default: "" },
+    entitlementKey:  { type: String, default: "" },
+    balanceBucketId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    source:          { type: String, default: "" },
   },
   { _id: true }
+);
+
+// Immutable product snapshot stored per entitlement at checkout so the product
+// can still be resolved after the live catalog record is archived.
+const MenuProductSnapshotSchema = new mongoose.Schema(
+  {
+    id: { type: mongoose.Schema.Types.ObjectId, ref: "MenuProduct" },
+    key: { type: String, default: "" },
+    name: { type: mongoose.Schema.Types.Mixed, default: "" },
+    nameI18n: { type: mongoose.Schema.Types.Mixed, default: null },
+    description: { type: mongoose.Schema.Types.Mixed, default: "" },
+    descriptionI18n: { type: mongoose.Schema.Types.Mixed, default: null },
+    imageUrl: { type: String, default: "" },
+    category: { type: String, default: "" },
+    categoryKey: { type: String, default: "" },
+    itemType: { type: String, default: "" },
+    priceHalala: { type: Number, min: 0, default: 0 },
+    currency: { type: String, default: "SAR" },
+  },
+  { _id: false }
 );
 
 const AddonSubscriptionEntitlementSchema = new mongoose.Schema(
@@ -93,11 +119,17 @@ const AddonSubscriptionEntitlementSchema = new mongoose.Schema(
     purchasedDailyQty: { type: Number, min: 1, default: 1 },
     includedTotalQty: { type: Number, min: 0, default: 0 },
     unitPlanPriceHalala: { type: Number, min: 0, default: 0 },
+    // Authoritative per-unit price for this entitlement — persisted at checkout
+    // so validate/save can price correctly even when the live catalog is archived.
+    unitPriceHalala: { type: Number, min: 0, default: 0 },
     totalHalala: { type: Number, min: 0, default: 0 },
     currency: { type: String, default: "SAR" },
     menuProductIds: { type: [mongoose.Schema.Types.ObjectId], ref: "MenuProduct", default: [] },
     menuCategoryKeys: { type: [String], default: [] },
     priceSource: { type: String, default: "" },
+    // Immutable product snapshot. Optional — absent on historical subscriptions.
+    // Use as fallback when the live MenuProduct document is no longer accessible.
+    menuProductsSnapshot: { type: [MenuProductSnapshotSchema], default: undefined },
   },
   { _id: false }
 );
