@@ -120,17 +120,20 @@ async function createBaseRows() {
   return { user, otherUser, plan, categories, products, snapshots, planIds };
 }
 
-async function createSubscription({
-  category = "meal",
-  product = fixture.products.meal,
-  snapshot = fixture.snapshots.meal,
-  planId = fixture.planIds.meal,
-  remainingQty = 2,
-  consumedQty = 0,
-  unitPriceHalala = 2100,
-  currency = "SAR",
-  userId = null,
-} = {}) {
+async function createSubscription(options = {}) {
+  const {
+    category = "meal",
+    product = fixture.products.meal,
+    planId = fixture.planIds.meal,
+    remainingQty = 2,
+    consumedQty = 0,
+    unitPriceHalala = 2100,
+    currency = "SAR",
+    userId = null,
+  } = options;
+  const snapshot = Object.prototype.hasOwnProperty.call(options, "snapshot")
+    ? options.snapshot
+    : fixture.snapshots.meal;
   const ownerId = userId || (await User.create({
     phone: `+96650000${String(userSeq++).padStart(4, "0")}`,
     name: "Owned Meal Case",

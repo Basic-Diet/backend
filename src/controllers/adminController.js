@@ -815,6 +815,115 @@ function resolvePaginationOrRespond(res, query = {}) {
   return pagination;
 }
 
+function normalizeAppUserRoleFilter(value) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (["all", "client", "app_user", "app-user"].includes(normalized)) {
+    return normalized === "all" ? null : "client";
+  }
+  throw createControlledError(400, "INVALID", "role must be one of: app_user, client, all");
+}
+
+function normalizeAppUserStatusFilter(value) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (["all"].includes(normalized)) return null;
+  if (["active", "enabled", "true", "1"].includes(normalized)) return "active";
+  if (["inactive", "disabled", "false", "0"].includes(normalized)) return "inactive";
+  throw createControlledError(400, "INVALID", "status must be one of: active, inactive, all");
+}
+
+function normalizeAppUserAuthStateFilter(value) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "all") return null;
+  if (["active", "temporary_password", "temporary_password_expired"].includes(normalized)) {
+    return normalized;
+  }
+  throw createControlledError(
+    400,
+    "INVALID",
+    "authState must be one of: active, temporary_password, temporary_password_expired, all"
+  );
+}
+
+async function buildAppUserSearchClause(q) {
+  const normalized = String(q || "").trim();
+  if (!normalized) return null;
+
+  const regex = new RegExp(escapeRegExp(normalized), "i");
+  const compact = normalized.replace(/[\s().-]+/g, "");
+  const phoneRegex = compact && compact !== normalized
+    ? new RegExp(escapeRegExp(compact), "i")
+    : regex;
+
+  const appUsers = await AppUser.find({
+    $or: [
+      { phone: phoneRegex },
+      { email: regex },
+      { fullName: regex },
+    ],
+  }).select("coreUserId phone").lean();
+
+  const appCoreUserIds = appUsers.map((row) => row.coreUserId).filter(Boolean);
+  const appPhones = appUsers.map((row) => row.phone).filter(Boolean);
+
+  return {
+    $or: [
+      { _id: { $in: appCoreUserIds } },
+      { phone: phoneRegex },
+      { phoneE164: phoneRegex },
+      { email: regex },
+      { name: regex },
+      { phone: { $in: appPhones } },
+    ],
+  };
+}
+
+async function buildAppUsersListQuery(query = {}) {
+  normalizeAppUserRoleFilter(query.role);
+  const status = normalizeAppUserStatusFilter(
+    query.status === undefined ? query.isActive : query.status
+  );
+  const authState = normalizeAppUserAuthStateFilter(query.authState || query.auth_state);
+
+  const filter = { role: "client" };
+  if (status === "active") filter.isActive = { $ne: false };
+  if (status === "inactive") filter.isActive = false;
+
+  const now = new Date();
+  if (authState === "active") {
+    filter.forcePasswordChange = { $ne: true };
+  } else if (authState === "temporary_password") {
+    filter.forcePasswordChange = true;
+    filter.$or = [
+      { temporaryPasswordExpiresAt: null },
+      { temporaryPasswordExpiresAt: { $gt: now } },
+    ];
+  } else if (authState === "temporary_password_expired") {
+    filter.forcePasswordChange = true;
+    filter.temporaryPasswordExpiresAt = { $lte: now };
+  }
+
+  const searchClause = await buildAppUserSearchClause(query.q);
+  if (searchClause) {
+    if (filter.$or) {
+      filter.$and = [{ $or: filter.$or }, searchClause];
+      delete filter.$or;
+    } else {
+      Object.assign(filter, searchClause);
+    }
+  }
+
+  return filter;
+}
+
 function parseDateFilterOrNull(value, { bound = "start" } = {}) {
   if (!value) return null;
   const normalized = String(value).trim();
@@ -3965,19 +4074,21 @@ async function listDashboardUsers(req, res) {
 }
 
 async function listAppUsers(req, res) {
-  const pagination = resolvePaginationOrRespond(res, req.query || {});
-  if (!pagination) {
-    return undefined;
-  }
-  const skip = (pagination.page - 1) * pagination.limit;
-  const [users, total] = await Promise.all([
-    User.find({ role: "client" })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(pagination.limit)
-      .lean(),
-    User.countDocuments({ role: "client" }),
-  ]);
+  try {
+    const pagination = resolvePaginationOrRespond(res, req.query || {});
+    if (!pagination) {
+      return undefined;
+    }
+    const filter = await buildAppUsersListQuery(req.query || {});
+    const skip = (pagination.page - 1) * pagination.limit;
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(pagination.limit)
+        .lean(),
+      User.countDocuments(filter),
+    ]);
   const userIds = users.map((user) => user._id);
   const phones = users.map((user) => user.phone).filter(Boolean);
   const [appUsers, countsByUserId] = await Promise.all([
@@ -4004,6 +4115,12 @@ async function listAppUsers(req, res) {
     }),
     meta: buildPaginationMeta(pagination.page, pagination.limit, total),
   });
+  } catch (err) {
+    if (isControlledError(err)) {
+      return errorResponse(res, err.status, err.code, err.message);
+    }
+    throw err;
+  }
 }
 
 async function resetAppUserPassword(req, res) {
