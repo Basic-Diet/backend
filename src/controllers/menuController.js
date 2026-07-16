@@ -20,7 +20,15 @@ const {
 const { getMealPlannerCatalog } = require("../services/subscription/mealPlannerCatalogService");
 const { resolvePremiumUpgrade } = require("../services/subscription/premiumUpgradeConfigService");
 const { resolvePremiumKeyFromName } = require("../utils/subscription/premiumIdentity");
-const { buildAddonChoicesCatalog } = require("../services/subscription/subscriptionAddonChoicesService");
+const {
+  buildAddonChoicesCatalog,
+  findCurrentSubscriptionForUser,
+} = require("../services/subscription/subscriptionAddonChoicesService");
+const Subscription = require("../models/Subscription");
+const {
+  buildAddonCategoryAllowances,
+  buildAddonSubscriptionAllowances,
+} = require("../services/subscription/subscriptionAddonBalanceService");
 
 const SYSTEM_CURRENCY = "SAR";
 
@@ -504,6 +512,9 @@ async function getSubscriptionMealPlannerMenu(req, res) {
   const authoritativeAddonChoices = req.userId
     ? await buildAddonChoicesCatalog({ lang, userId: req.userId })
     : null;
+  const allowanceSubscription = req.userId
+    ? await findCurrentSubscriptionForUser(req.userId, { SubscriptionModel: Subscription })
+    : null;
   const legacyAddonCatalog = buildAddonCatalogFromLegacyPlannerAddons(legacyPlannerAddons);
 
   const data = {
@@ -516,6 +527,10 @@ async function getSubscriptionMealPlannerMenu(req, res) {
   if (authoritativeAddonChoices) {
     data.addonChoices = authoritativeAddonChoices;
     data.legacyAddonCatalog = legacyAddonCatalog;
+  }
+  if (allowanceSubscription) {
+    data.addonCategoryAllowances = buildAddonCategoryAllowances(allowanceSubscription);
+    data.addonSubscriptionAllowances = buildAddonSubscriptionAllowances(allowanceSubscription);
   }
   if (builderCatalogV2) {
     data.builderCatalogV2 = builderCatalogV2;

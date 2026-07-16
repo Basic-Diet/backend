@@ -22,7 +22,12 @@ const {
 } = require("../services/subscription/subscriptionService");
 const {
   buildAddonChoicesCatalog,
+  findCurrentSubscriptionForUser,
 } = require("../services/subscription/subscriptionAddonChoicesService");
+const {
+  buildAddonCategoryAllowances,
+  buildAddonSubscriptionAllowances,
+} = require("../services/subscription/subscriptionAddonBalanceService");
 // Settlement on read is DISABLED — see pastSubscriptionDaySettlementService.js
 const {
   buildPhase1SubscriptionContract,
@@ -2398,7 +2403,15 @@ async function getSubscriptionAddonChoices(req, res) {
     const responseData = requestedCategory
       ? (data && data[requestedCategory] ? { [requestedCategory]: data[requestedCategory] } : {})
       : data;
-    return res.status(200).json({ status: true, data: responseData });
+    const allowanceSubscription = subscriptionId
+      ? await Subscription.findById(subscriptionId).lean()
+      : (req.userId ? await findCurrentSubscriptionForUser(req.userId, { SubscriptionModel: Subscription }) : null);
+    const response = { status: true, data: responseData };
+    if (allowanceSubscription) {
+      response.addonCategoryAllowances = buildAddonCategoryAllowances(allowanceSubscription);
+      response.addonSubscriptionAllowances = buildAddonSubscriptionAllowances(allowanceSubscription);
+    }
+    return res.status(200).json(response);
   } catch (err) {
     if (err && err.status) {
       return errorResponse(res, err.status, err.code || "INVALID", err.message || "Invalid add-on choice filters");

@@ -1,5 +1,8 @@
 const crypto = require("crypto");
-const { buildAddonCategoryAllowances } = require("./subscriptionAddonBalanceService");
+const {
+  buildAddonCategoryAllowances,
+  buildAddonSubscriptionAllowances,
+} = require("./subscriptionAddonBalanceService");
 
 const SYSTEM_CURRENCY = "SAR";
 const FULFILLABLE_DAY_STATUSES = new Set(["open"]);
@@ -461,6 +464,7 @@ function buildDayCommercialState(day = {}, { subscription = null } = {}) {
     premiumSummary,
     addonSummary: buildAddonSummary({ addonSelections: day.addonSelections, currency: premiumSummary.currency }),
     addonCategoryAllowances: buildAddonCategoryAllowances(subscription, day),
+    addonSubscriptionAllowances: buildAddonSubscriptionAllowances(subscription, day),
     premiumExtraPayment,
     paymentRequirement,
     commercialState,
@@ -496,6 +500,7 @@ function applyCommercialStateToDay(day = {}, options = {}) {
     premiumSummary: derived.premiumSummary,
     addonSummary: derived.addonSummary,
     addonCategoryAllowances: derived.addonCategoryAllowances,
+    addonSubscriptionAllowances: derived.addonSubscriptionAllowances,
     premiumExtraPayment: derived.premiumExtraPayment,
     paymentRequirement: derived.paymentRequirement,
     commercialState: derived.commercialState,

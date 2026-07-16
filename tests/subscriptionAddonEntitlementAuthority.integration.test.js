@@ -20,6 +20,10 @@ const Plan = require("../src/models/Plan");
 const Subscription = require("../src/models/Subscription");
 const SubscriptionDay = require("../src/models/SubscriptionDay");
 const User = require("../src/models/User");
+const {
+  buildAddonCategoryAllowances,
+  buildAddonSubscriptionAllowances,
+} = require("../src/services/subscription/subscriptionAddonBalanceService");
 
 const REQUIRED_COVERAGE_FIELDS = [
   "id",
@@ -195,6 +199,129 @@ async function createSubscriptionFixture({
     addonSelections: [],
   })));
   return { subscription, dates, token: issueAppAccessToken(user) };
+}
+
+async function createMultiPlanAllowanceFixture({ user, plan }) {
+  const definitions = [
+    { allowanceCategory: "juice", displayCategory: "juice", sourceCategory: "juices", name: "Juice Subscription", priceHalala: 1000 },
+    { allowanceCategory: "small_salad", displayCategory: "small_salad", sourceCategory: "light_options", name: "Small Salad Subscription", priceHalala: 900 },
+    { allowanceCategory: "snack", displayCategory: "snack", sourceCategory: "desserts", name: "Snack Subscription", priceHalala: 1500 },
+    { allowanceCategory: "snack", displayCategory: "ice_cream", sourceCategory: "ice_cream", name: "Ice Cream Subscription", priceHalala: 500 },
+  ];
+  const now = new Date();
+  const planProducts = [];
+  for (const [definitionIndex, definition] of definitions.entries()) {
+    const category = await MenuCategory.findOne({ key: definition.sourceCategory })
+      || await MenuCategory.create({
+        key: definition.sourceCategory,
+        name: { en: definition.name, ar: definition.name },
+        isActive: true,
+        isVisible: true,
+        isAvailable: true,
+        publishedAt: now,
+      });
+    planProducts.push(await MenuProduct.create(Array.from({ length: 3 }, (_, productIndex) => ({
+      categoryId: category._id,
+      key: `multi_${definition.displayCategory}_${productIndex + 1}`,
+      name: {
+        en: `${definition.name} Choice ${productIndex + 1}`,
+        ar: `${definition.name} Choice ${productIndex + 1}`,
+      },
+      itemType: definition.displayCategory,
+      pricingModel: "fixed",
+      priceHalala: definition.priceHalala,
+      currency: "SAR",
+      availableFor: ["one_time", "subscription"],
+      isActive: true,
+      isVisible: true,
+      isAvailable: true,
+      publishedAt: now,
+      sortOrder: definitionIndex * 10 + productIndex,
+    }))));
+  }
+  const addonPlans = await Addon.create(definitions.map((definition, index) => ({
+    name: { en: definition.name, ar: definition.name },
+    category: definition.allowanceCategory,
+    kind: "plan",
+    type: "subscription",
+    billingMode: "per_day",
+    maxPerDay: 1,
+    priceHalala: definition.priceHalala,
+    currency: "SAR",
+    isActive: true,
+    menuProductIds: planProducts[index].map((product) => product._id),
+    menuCategoryKeys: [definition.displayCategory],
+    sortOrder: 20 + index,
+  })));
+  const start = dateOffset(20);
+  const entitlementRows = definitions.map((definition, index) => ({
+    addonId: addonPlans[index]._id,
+    addonPlanId: addonPlans[index]._id,
+    addonPlanName: definition.name,
+    category: definition.allowanceCategory,
+    maxPerDay: 1,
+    quantityPerDay: 1,
+    includedTotalQty: 7,
+    unitPriceHalala: definition.priceHalala,
+    currency: "SAR",
+    menuProductIds: planProducts[index].map((product) => product._id),
+    menuCategoryKeys: [definition.displayCategory],
+    menuProductsSnapshot: planProducts[index].map((product) => ({
+      id: product._id,
+      key: product.key,
+      name: product.name,
+      nameI18n: product.name,
+      category: definition.displayCategory,
+      categoryKey: definition.displayCategory,
+      itemType: definition.displayCategory,
+      priceHalala: product.priceHalala,
+      currency: "SAR",
+    })),
+  }));
+  const balanceRows = definitions.map((definition, index) => ({
+    addonId: addonPlans[index]._id,
+    addonPlanId: addonPlans[index]._id,
+    name: definition.name,
+    category: definition.allowanceCategory,
+    includedTotalQty: 7,
+    purchasedQty: 7,
+    consumedQty: 0,
+    reservedQty: 0,
+    remainingQty: 7,
+    overageUnitPriceHalala: definition.priceHalala,
+    unitPriceHalala: definition.priceHalala,
+    currency: "SAR",
+  }));
+  const subscription = await Subscription.create({
+    userId: user._id,
+    planId: plan._id,
+    status: "active",
+    startDate: dateStart(start),
+    endDate: dateEnd(dateOffset(30)),
+    validityEndDate: dateEnd(dateOffset(30)),
+    totalMeals: 11,
+    remainingMeals: 11,
+    selectedGrams: 200,
+    selectedMealsPerDay: 1,
+    contractMode: "canonical",
+    deliveryMode: "pickup",
+    pickupLocationId: "main",
+    addonSubscriptions: entitlementRows,
+    addonBalance: balanceRows,
+  });
+  await SubscriptionDay.create({
+    subscriptionId: subscription._id,
+    date: start,
+    status: "open",
+    addonSelections: [],
+  });
+  return {
+    subscription,
+    date: start,
+    token: issueAppAccessToken(user),
+    addonPlans,
+    planProducts,
+  };
 }
 
 async function replaceEntitlementProductsWithoutSnapshots(subscriptionId, productIds, { addonPlanId = null } = {}) {
@@ -441,6 +568,116 @@ async function main() {
     assert.strictEqual(overviewIncluded.isEligibleForAllowance, true);
     assert.strictEqual(overviewIncluded.remainingQty, 6);
     assert.strictEqual(res.body.data.addonBalanceSummary.juice.remainingUnits, 6);
+    assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 1);
+
+    const multiPlanUser = await createUser("Four plan allowance user");
+    const multiPlan = await createMultiPlanAllowanceFixture({ user: multiPlanUser, plan });
+    const multiPlanAuth = { Authorization: `Bearer ${multiPlan.token}`, "Accept-Language": "en" };
+    const multiPlanSubscription = await Subscription.findById(multiPlan.subscription._id).lean();
+    const categoryAllowances = buildAddonCategoryAllowances(multiPlanSubscription);
+    const subscriptionAllowances = buildAddonSubscriptionAllowances(multiPlanSubscription);
+    assert.strictEqual(categoryAllowances.length, 3, JSON.stringify(categoryAllowances));
+    assert.strictEqual(categoryAllowances.find((row) => row.category === "snack").includedTotalQty, 14);
+    assert.strictEqual(subscriptionAllowances.length, 4, JSON.stringify(subscriptionAllowances));
+    assert.strictEqual(new Set(subscriptionAllowances.map((row) => row.addonPlanId)).size, 4);
+    assert.strictEqual(new Set(subscriptionAllowances.map((row) => row.entitlementKey)).size, 4);
+    assert(subscriptionAllowances.every((row) => row.includedTotalQty === 7));
+    assert(subscriptionAllowances.every((row) => row.remainingIncludedQty === 7));
+    assert(subscriptionAllowances.every((row) => row.choicesCount === 3));
+    assert(subscriptionAllowances.every((row) => row.source === "subscription"));
+    const snackPlanAllowance = subscriptionAllowances.find((row) => row.displayCategory === "snack");
+    const iceCreamPlanAllowance = subscriptionAllowances.find((row) => row.displayCategory === "ice_cream");
+    assert(snackPlanAllowance, JSON.stringify(subscriptionAllowances));
+    assert(iceCreamPlanAllowance, JSON.stringify(subscriptionAllowances));
+    assert.strictEqual(snackPlanAllowance.entitlementCategory, "snack");
+    assert.strictEqual(iceCreamPlanAllowance.entitlementCategory, "snack");
+    assert.notStrictEqual(snackPlanAllowance.addonPlanId, iceCreamPlanAllowance.addonPlanId);
+    assert(subscriptionAllowances.every((row) => row.balanceBucketId));
+
+    const reservedByPlan = buildAddonSubscriptionAllowances(multiPlanSubscription, {
+      addonSelections: [{
+        source: "subscription",
+        category: "snack",
+        addonPlanId: multiPlan.addonPlans[3]._id,
+        qty: 1,
+      }],
+    });
+    assert.strictEqual(reservedByPlan.find((row) => row.displayCategory === "snack").remainingIncludedQty, 7);
+    assert.strictEqual(reservedByPlan.find((row) => row.displayCategory === "ice_cream").remainingIncludedQty, 6);
+    const reservedCategoryAggregate = buildAddonCategoryAllowances(multiPlanSubscription, {
+      addonSelections: [{
+        source: "subscription",
+        category: "snack",
+        addonPlanId: multiPlan.addonPlans[3]._id,
+        qty: 1,
+      }],
+    });
+    assert.strictEqual(reservedCategoryAggregate.find((row) => row.category === "snack").remainingIncludedQty, 13);
+
+    const threePlanRegression = buildAddonSubscriptionAllowances({
+      addonSubscriptions: multiPlanSubscription.addonSubscriptions.slice(0, 3),
+      addonBalance: multiPlanSubscription.addonBalance.slice(0, 3),
+    });
+    assert.strictEqual(threePlanRegression.length, 3, JSON.stringify(threePlanRegression));
+
+    res = await api.get("/api/subscriptions/current/overview").set(multiPlanAuth);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.data.addonCategoryAllowances.length, 3);
+    assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 4);
+
+    res = await api.get("/api/subscriptions/addon-choices").set(multiPlanAuth);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.addonCategoryAllowances.length, 3);
+    assert.strictEqual(res.body.addonSubscriptionAllowances.length, 4);
+    const exposedEntitlements = Object.values(res.body.data)
+      .flatMap((group) => Array.isArray(group && group.entitlements) ? group.entitlements : []);
+    assert.strictEqual(new Set(exposedEntitlements.map((row) => String(row.addonPlanId))).size, 4, JSON.stringify(exposedEntitlements));
+    const badIncludedAsPaid = Object.values(res.body.data)
+      .flatMap((group) => Array.isArray(group && group.choices) ? group.choices : [])
+      .filter((choice) => choice.source === "subscription" && choice.pricingMode === "paid_no_entitlement");
+    assert.strictEqual(badIncludedAsPaid.length, 0, JSON.stringify(badIncludedAsPaid));
+
+    res = await api.get("/api/subscriptions/meal-planner-menu?lang=en").set(multiPlanAuth);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.data.addonCategoryAllowances.length, 3);
+    assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 4);
+
+    res = await api
+      .get(`/api/subscriptions/${multiPlan.subscription._id}/days/${multiPlan.date}`)
+      .set(multiPlanAuth);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.data.addonCategoryAllowances.length, 3);
+    assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 4);
+
+    const multiPlanPayload = selectionBody({
+      protein,
+      carb,
+      addonIds: [multiPlan.planProducts[3][0]._id],
+    });
+    res = await api
+      .post(`/api/subscriptions/${multiPlan.subscription._id}/days/${multiPlan.date}/selection/validate`)
+      .set(multiPlanAuth)
+      .send(multiPlanPayload);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.data.addonCategoryAllowances.length, 3);
+    assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 4);
+    assert.strictEqual(res.body.data.addonSelections[0].source, "subscription");
+    assert.strictEqual(res.body.data.addonSelections[0].pricingMode, "allowance_covered");
+    assert.strictEqual(res.body.data.paymentRequirement.requiresPayment, false);
+    assert.strictEqual(
+      res.body.data.addonSubscriptionAllowances.find((row) => row.displayCategory === "ice_cream").remainingIncludedQty,
+      6
+    );
+
+    res = await api
+      .put(`/api/subscriptions/${multiPlan.subscription._id}/days/${multiPlan.date}/selection`)
+      .set(multiPlanAuth)
+      .send(multiPlanPayload);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.data.addonCategoryAllowances.length, 3);
+    assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 4);
+    assert.strictEqual(res.body.data.addonSelections[0].source, "subscription");
+    assert.strictEqual(res.body.data.paymentRequirement.requiresPayment, false);
 
     const partialUser = await createUser("Partial allowance user");
     const partial = await createSubscriptionFixture({

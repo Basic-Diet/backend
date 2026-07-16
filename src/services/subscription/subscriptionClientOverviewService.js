@@ -24,7 +24,11 @@ const {
 const {
   findCurrentActiveSubscriptionForUser,
 } = require("./subscriptionCurrentResolverService");
-const { buildClientAddonBalance } = require("./subscriptionAddonBalanceService");
+const {
+  buildClientAddonBalance,
+  buildAddonCategoryAllowances,
+  buildAddonSubscriptionAllowances,
+} = require("./subscriptionAddonBalanceService");
 const { buildSubscriptionAddonCoverageSummary } = require("./subscriptionAddonPricingService");
 
 const ACTIVE_PICKUP_REQUEST_STATUSES = ["locked", "in_preparation", "ready_for_pickup"];
@@ -456,6 +460,8 @@ async function buildCurrentSubscriptionOverview({ userId, lang, runtime: runtime
       ...skipUsage,
       businessDate: restaurantHours.businessDate,
       addonBalanceSummary: buildClientAddonBalance(sub, restaurantHours.businessDate),
+      addonCategoryAllowances: buildAddonCategoryAllowances(sub),
+      addonSubscriptionAllowances: buildAddonSubscriptionAllowances(sub),
       addonCoverage: buildSubscriptionAddonCoverageSummary(sub),
       pickupPreparation,
       premiumSummary,

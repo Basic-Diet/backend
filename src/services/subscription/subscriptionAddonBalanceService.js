@@ -160,11 +160,221 @@ function countReservedAddonSelectionsForCategory(day = {}, category = "") {
   }, 0);
 }
 
+function objectIdString(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "object" && value._id) return String(value._id);
+  return String(value);
+}
+
+function normalizeDisplayCategory(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!normalized) return "";
+  if (normalized === "desserts") return "dessert";
+  if (normalized === "salads") return "salad";
+  if (normalized === "juices") return "juice";
+  return normalized;
+}
+
+function entitlementProductIds(entitlement) {
+  const ids = [];
+  for (const id of Array.isArray(entitlement && entitlement.menuProductIds) ? entitlement.menuProductIds : []) {
+    const normalized = objectIdString(id);
+    if (normalized) ids.push(normalized);
+  }
+  for (const snapshot of Array.isArray(entitlement && entitlement.menuProductsSnapshot)
+    ? entitlement.menuProductsSnapshot
+    : []) {
+    const normalized = objectIdString(snapshot && (snapshot.id || snapshot._id || snapshot.productId));
+    if (normalized) ids.push(normalized);
+  }
+  return [...new Set(ids)];
+}
+
+function resolveEntitlementDisplayCategory(entitlement, allowanceCategory) {
+  const explicit = normalizeDisplayCategory(
+    entitlement && (entitlement.displayCategory || entitlement.categoryKey || entitlement.displayCategoryKey)
+  );
+  if (explicit) return explicit;
+
+  const snapshotCategories = new Set(
+    (Array.isArray(entitlement && entitlement.menuProductsSnapshot) ? entitlement.menuProductsSnapshot : [])
+      .map((snapshot) => normalizeDisplayCategory(
+        snapshot && (snapshot.categoryKey || snapshot.category || snapshot.itemType)
+      ))
+      .filter(Boolean)
+  );
+  if (snapshotCategories.size === 1) return [...snapshotCategories][0];
+
+  const menuCategoryKeys = new Set(
+    (Array.isArray(entitlement && entitlement.menuCategoryKeys) ? entitlement.menuCategoryKeys : [])
+      .map(normalizeDisplayCategory)
+      .filter(Boolean)
+  );
+  if (menuCategoryKeys.size === 1) return [...menuCategoryKeys][0];
+
+  return allowanceCategory;
+}
+
+function entitlementIdentity(entitlement, entitlementIndex) {
+  const allowanceCategory = normalizeSubscriptionAddonCategory(entitlement && entitlement.category, { allowEmpty: true });
+  const addonPlanId = objectIdString(entitlement && (entitlement.addonPlanId || entitlement.addonId));
+  const explicitEntitlementKey = String(entitlement && entitlement.entitlementKey || "").trim();
+  return {
+    addonPlanId,
+    allowanceCategory,
+    entitlementKey: explicitEntitlementKey || `${allowanceCategory || "addon"}:${addonPlanId || entitlementIndex}`,
+  };
+}
+
+function resolveBalanceBucketForEntitlement(entitlement, entitlementIndex, balances) {
+  const identity = entitlementIdentity(entitlement, entitlementIndex);
+  const rows = Array.isArray(balances) ? balances.filter(Boolean) : [];
+
+  if (identity.addonPlanId) {
+    const matches = rows.filter((bucket) => {
+      const bucketPlanId = objectIdString(bucket && (bucket.addonPlanId || bucket.addonId));
+      return bucketPlanId && bucketPlanId === identity.addonPlanId;
+    });
+    if (matches.length === 1) return { bucket: matches[0], matchSource: "addonPlanId" };
+  }
+
+  if (identity.entitlementKey) {
+    const matches = rows.filter((bucket) => String(bucket && bucket.entitlementKey || "").trim() === identity.entitlementKey);
+    if (matches.length === 1) return { bucket: matches[0], matchSource: "entitlementKey" };
+  }
+
+  const requestedBucketId = objectIdString(entitlement && entitlement.balanceBucketId);
+  if (requestedBucketId) {
+    const matches = rows.filter((bucket) => objectIdString(bucket && (bucket._id || bucket.balanceBucketId)) === requestedBucketId);
+    if (matches.length === 1) return { bucket: matches[0], matchSource: "balanceBucketId" };
+  }
+
+  if (identity.allowanceCategory) {
+    const matches = rows.filter((bucket) => (
+      normalizeSubscriptionAddonCategory(bucket && bucket.category, { allowEmpty: true }) === identity.allowanceCategory
+    ));
+    if (matches.length === 1) return { bucket: matches[0], matchSource: "category_legacy" };
+  }
+
+  return { bucket: null, matchSource: "none" };
+}
+
+function countReservedAddonSelectionsForEntitlement(day, entitlement, entitlementIndex, bucket, categoryEntitlementCount) {
+  const identity = entitlementIdentity(entitlement, entitlementIndex);
+  const bucketId = objectIdString(bucket && (bucket._id || bucket.balanceBucketId));
+  const selections = Array.isArray(day && day.addonSelections) ? day.addonSelections : [];
+
+  return selections.reduce((sum, selection) => {
+    if (!selection || selection.source !== "subscription") return sum;
+    const selectionPlanId = objectIdString(selection.addonPlanId);
+    const selectionEntitlementKey = String(selection.entitlementKey || "").trim();
+    const selectionBucketId = objectIdString(selection.balanceBucketId);
+
+    if (selectionPlanId) {
+      if (selectionPlanId !== identity.addonPlanId) return sum;
+    } else if (selectionEntitlementKey) {
+      if (selectionEntitlementKey !== identity.entitlementKey) return sum;
+    } else if (selectionBucketId) {
+      if (!bucketId || selectionBucketId !== bucketId) return sum;
+    } else {
+      const selectionCategory = normalizeSubscriptionAddonCategory(selection.category, { allowEmpty: true });
+      if (categoryEntitlementCount !== 1 || selectionCategory !== identity.allowanceCategory) return sum;
+    }
+
+    return sum + Math.max(1, Math.floor(Number(selection.qty || selection.quantity || 1)));
+  }, 0);
+}
+
+function buildAddonSubscriptionAllowances(subscription, day = {}) {
+  if (!subscription) return [];
+
+  const entitlements = Array.isArray(subscription.addonSubscriptions) ? subscription.addonSubscriptions : [];
+  const balances = Array.isArray(subscription.addonBalance) ? subscription.addonBalance : [];
+  const entitlementCountsByCategory = entitlements.reduce((counts, entitlement) => {
+    const category = normalizeSubscriptionAddonCategory(entitlement && entitlement.category, { allowEmpty: true });
+    if (category) counts.set(category, (counts.get(category) || 0) + 1);
+    return counts;
+  }, new Map());
+
+  return entitlements.filter(Boolean).map((entitlement, entitlementIndex) => {
+    const identity = entitlementIdentity(entitlement, entitlementIndex);
+    const { bucket, matchSource } = resolveBalanceBucketForEntitlement(entitlement, entitlementIndex, balances);
+    const entitlementIncludedTotalQty = Math.max(0, Math.floor(Number(entitlement.includedTotalQty || 0)));
+    const includedTotalQty = bucket
+      ? Math.max(
+        entitlementIncludedTotalQty,
+        Math.max(0, Math.floor(Number(bucket.includedTotalQty || 0)))
+      )
+      : entitlementIncludedTotalQty;
+    const remainingBeforeReservation = bucket
+      ? resolveAddonBalanceRemainingQty(bucket, { entitlement })
+      : includedTotalQty;
+    const reservedQty = countReservedAddonSelectionsForEntitlement(
+      day,
+      entitlement,
+      entitlementIndex,
+      bucket,
+      entitlementCountsByCategory.get(identity.allowanceCategory) || 0
+    );
+    const rawConsumedQty = bucket
+      ? Math.max(0, Math.floor(Number(
+        bucket.consumedQty != null ? bucket.consumedQty : includedTotalQty - remainingBeforeReservation
+      )))
+      : 0;
+    const consumedQty = Math.max(0, rawConsumedQty - reservedQty);
+    const displayCategory = resolveEntitlementDisplayCategory(entitlement, identity.allowanceCategory);
+    const menuProductIds = entitlementProductIds(entitlement);
+
+    return {
+      entitlementIndex,
+      entitlementKey: identity.entitlementKey,
+      addonPlanId: identity.addonPlanId || null,
+      addonId: objectIdString(entitlement.addonId || entitlement.addonPlanId) || null,
+      addonPlanName: entitlement.addonPlanName || entitlement.name || "",
+      category: displayCategory,
+      entitlementCategory: identity.allowanceCategory,
+      displayCategory,
+      allowanceCategory: identity.allowanceCategory,
+      balanceBucketId: bucket ? objectIdString(bucket._id || bucket.balanceBucketId) || null : null,
+      balanceMatchSource: matchSource,
+      includedTotalQty,
+      consumedQty,
+      reservedQty,
+      remainingIncludedQty: Math.max(0, remainingBeforeReservation - reservedQty),
+      overageUnitPriceHalala: Math.max(0, Math.floor(Number(
+        bucket && bucket.overageUnitPriceHalala != null
+          ? bucket.overageUnitPriceHalala
+          : bucket && bucket.unitPriceHalala != null
+            ? bucket.unitPriceHalala
+            : entitlement.unitPriceHalala != null
+              ? entitlement.unitPriceHalala
+              : entitlement.unitPlanPriceHalala != null
+                ? entitlement.unitPlanPriceHalala
+                : entitlement.priceHalala || 0
+      ))),
+      currency: bucket && bucket.currency || entitlement.currency || SYSTEM_CURRENCY,
+      choicesCount: menuProductIds.length,
+      menuProductIds,
+      maxPerDay: Math.max(1, Math.floor(Number(entitlement.maxPerDay || entitlement.quantityPerDay || 1))),
+      source: "subscription",
+    };
+  });
+}
+
 function buildAddonCategoryAllowances(subscription, day = {}) {
   if (!subscription) return [];
 
   const balances = Array.isArray(subscription.addonBalance) ? subscription.addonBalance : [];
   const entitlements = Array.isArray(subscription.addonSubscriptions) ? subscription.addonSubscriptions : [];
+  const entitlementCountsByCategory = entitlements.reduce((counts, entitlement) => {
+    const category = normalizeSubscriptionAddonCategory(entitlement && entitlement.category, { allowEmpty: true });
+    if (category) counts.set(category, (counts.get(category) || 0) + 1);
+    return counts;
+  }, new Map());
   const byCategory = new Map();
 
   for (const entitlement of entitlements) {
@@ -200,7 +410,19 @@ function buildAddonCategoryAllowances(subscription, day = {}) {
       Math.floor(Number(entitlement && entitlement.includedTotalQty || 0))
     );
     const remainingQty = resolveAddonBalanceRemainingQty(bucket, { entitlement });
-    const reservedQty = countReservedAddonSelectionsForCategory(day, category);
+    const entitlementIndex = entitlement ? entitlements.indexOf(entitlement) : -1;
+    const categoryBuckets = balances.filter((candidate) => (
+      normalizeSubscriptionAddonCategory(candidate && candidate.category) === category
+    ));
+    const reservedQty = entitlementIndex >= 0
+      ? countReservedAddonSelectionsForEntitlement(
+        day,
+        entitlement,
+        entitlementIndex,
+        bucket,
+        entitlementCountsByCategory.get(category) || 0
+      )
+      : (categoryBuckets[0] === bucket ? countReservedAddonSelectionsForCategory(day, category) : 0);
     const rawConsumedQty = Math.max(0, Math.floor(Number(
       bucket.consumedQty != null ? bucket.consumedQty : includedTotalQty - remainingQty
     )));
@@ -254,5 +476,6 @@ module.exports = {
   resolveSubscriptionAddonBalanceWithAudit,
   buildClientAddonBalance,
   buildAddonCategoryAllowances,
+  buildAddonSubscriptionAllowances,
   buildAddonBalanceRowsFromEntitlements,
 };
