@@ -59,6 +59,7 @@ function buildNonCheckoutInitiationPayload(payment, fallbackResponseShape) {
     responseShape === "premium_overage_day"
     || responseShape === "premium_extra_day"
     || responseShape === "one_time_addon_day_planning"
+    || responseShape === "day_planning_payment"
   ) {
     payload.totalHalala = Number(
       metadata.totalHalala !== undefined && metadata.totalHalala !== null
@@ -72,6 +73,27 @@ function buildNonCheckoutInitiationPayload(payment, fallbackResponseShape) {
   return payload;
 }
 
+function buildFinalizedPaymentPayload(payment, fallbackResponseShape) {
+  const base = buildNonCheckoutInitiationPayload(payment, fallbackResponseShape);
+  const status = String(payment && payment.status || "").trim().toLowerCase();
+  return {
+    ...base,
+    payment_url: "",
+    paymentStatus: status || null,
+    status: status || null,
+    applied: Boolean(payment && payment.applied),
+    isFinal: true,
+    alreadyFinalized: true,
+    requiresNewIdempotencyKey: status !== "paid",
+    messageAr: status === "paid"
+      ? "تم إتمام الدفع بالفعل"
+      : "انتهت محاولة الدفع السابقة، ابدأ محاولة دفع جديدة",
+    messageEn: status === "paid"
+      ? "Payment has already been completed"
+      : "The previous payment attempt is finalized. Start a new payment attempt.",
+  };
+}
+
 async function resolveNonCheckoutIdempotency({
   headers = {},
   body = {},
@@ -81,8 +103,6 @@ async function resolveNonCheckoutIdempotency({
   fallbackResponseShape,
   runtime,
 }) {
-  // Early return moved after key computation to preserve them in the result payload.
-
   let operationIdempotencyKey = "";
   try {
     operationIdempotencyKey = runtime.parseOperationIdempotencyKey({ headers, body });
@@ -121,7 +141,11 @@ async function resolveNonCheckoutIdempotency({
 
   if (existingByKey) {
     if (!existingByKey.operationRequestHash) {
-      return buildErrorResult(409, "IDEMPOTENCY_CONFLICT", "idempotencyKey is already used by an incompatible payment initiation");
+      return buildErrorResult(409, "IDEMPOTENCY_CONFLICT", "This payment key was used by an incompatible payment attempt", {
+        messageAr: "مفتاح محاولة الدفع مستخدم في عملية أخرى",
+        messageEn: "This payment key was used by an incompatible payment attempt",
+        requiresNewIdempotencyKey: true,
+      });
     }
 
     const decision = runtime.compareIdempotentRequest({
@@ -130,14 +154,30 @@ async function resolveNonCheckoutIdempotency({
     });
 
     if (decision === "conflict") {
-      return buildErrorResult(409, "IDEMPOTENCY_CONFLICT", "idempotencyKey is already used with a different payment payload");
+      return buildErrorResult(409, "IDEMPOTENCY_CONFLICT", "This payment key was used with different payment details", {
+        messageAr: "مفتاح محاولة الدفع مستخدم مع تفاصيل دفع مختلفة",
+        messageEn: "This payment key was used with different payment details",
+        requiresNewIdempotencyKey: true,
+      });
     }
 
     if (decision === "reuse" && isReusableInitiatedPayment(existingByKey)) {
       return buildSuccessResult(200, buildNonCheckoutInitiationPayload(existingByKey, fallbackResponseShape));
     }
 
-    return buildErrorResult(409, "IDEMPOTENCY_CONFLICT", "idempotencyKey is already used with a non-reusable payment initiation");
+    if (decision === "reuse") {
+      const finalizedPayload = buildFinalizedPaymentPayload(existingByKey, fallbackResponseShape);
+      if (String(existingByKey.status || "").toLowerCase() === "paid") {
+        return buildSuccessResult(200, finalizedPayload);
+      }
+      return buildErrorResult(409, "PAYMENT_ATTEMPT_FINALIZED", finalizedPayload.messageEn, finalizedPayload);
+    }
+
+    return buildErrorResult(409, "IDEMPOTENCY_CONFLICT", "Payment key conflict", {
+      messageAr: "تعارض في مفتاح محاولة الدفع",
+      messageEn: "Payment key conflict",
+      requiresNewIdempotencyKey: true,
+    });
   }
 
   const existingByHash = await runtime.findReusableInitiatedPaymentByHash({
@@ -164,5 +204,6 @@ module.exports = {
   buildSuccessResult,
   isReusableInitiatedPayment,
   buildNonCheckoutInitiationPayload,
+  buildFinalizedPaymentPayload,
   resolveNonCheckoutIdempotency,
 };
