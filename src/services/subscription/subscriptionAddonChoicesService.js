@@ -232,42 +232,100 @@ function resolvePlanLocalizedFields(plan, entitlement, displayKey, lang) {
   };
 }
 
-function entitlementDisplayKey(entitlement) {
-  const explicit = entitlement && (
-    entitlement.displayKey
-    || entitlement.displayCategory
-    || entitlement.categoryKey
-    || entitlement.displayCategoryKey
-  );
-  if (explicit) return normalizeDynamicDisplayKey(explicit);
-  const configuredKeys = (Array.isArray(entitlement && entitlement.menuCategoryKeys)
-    ? entitlement.menuCategoryKeys
-    : []).map((key) => normalizeDynamicDisplayKey(key)).filter(Boolean);
-  if (new Set(configuredKeys).size === 1) return configuredKeys[0];
-  const snapshotKeys = (Array.isArray(entitlement && entitlement.menuProductsSnapshot)
-    ? entitlement.menuProductsSnapshot
-    : []).map((snapshot) => normalizeDynamicDisplayKey(
-      snapshot && (snapshot.displayKey || snapshot.displayCategory || snapshot.categoryKey || snapshot.category)
-    )).filter(Boolean);
-  if (new Set(snapshotKeys).size === 1) return snapshotKeys[0];
-  return normalizeDynamicDisplayKey(entitlement && entitlement.category);
+function normalizePlanDisplayKey(value) {
+  return normalizeDynamicDisplayKey(value);
 }
 
-function planDisplayKey(plan, entitlement, planId) {
-  const explicit = plan && (
-    plan.displayKey
-    || plan.displayCategory
-    || plan.categoryKey
-    || plan.displayCategoryKey
-  );
-  if (explicit) return normalizeDynamicDisplayKey(explicit, planId);
-  const configuredKeys = (Array.isArray(plan && plan.menuCategoryKeys) ? plan.menuCategoryKeys : [])
-    .map((key) => normalizeDynamicDisplayKey(key))
+function normalizeProductDisplayKey(value) {
+  return normalizeDynamicDisplayKey(normalizeDisplayCategoryKey(value));
+}
+
+function uniquePlanDisplayKey(values) {
+  const keys = (Array.isArray(values) ? values : [])
+    .map((value) => normalizePlanDisplayKey(value))
     .filter(Boolean);
-  if (new Set(configuredKeys).size === 1) return configuredKeys[0];
-  return normalizeDynamicDisplayKey(plan && plan.category)
-    || entitlementDisplayKey(entitlement)
-    || planId;
+  const uniqueKeys = [...new Set(keys)];
+  return uniqueKeys.length === 1 ? uniqueKeys[0] : "";
+}
+
+async function loadPlanDisplayMetadata(plans, {
+  MenuProductModel = MenuProduct,
+  MenuCategoryModel = MenuCategory,
+} = {}) {
+  const planRows = Array.isArray(plans) ? plans.filter(Boolean) : [];
+  const productIds = uniqueIdStrings(planRows.flatMap((plan) => (
+    Array.isArray(plan.menuProductIds) ? plan.menuProductIds : []
+  )));
+  if (!productIds.length) {
+    return { productsById: new Map(), categoriesById: new Map() };
+  }
+
+  // Display identity must describe every product configured on the dashboard
+  // plan, including a temporarily hidden or unavailable product. Choice
+  // availability is filtered separately by loadLivePlanProducts().
+  const products = await MenuProductModel.find({ _id: { $in: productIds } }).lean();
+  const productsById = new Map(products.map((product) => [objectIdString(product._id), product]));
+  const categoryIds = uniqueIdStrings(products.map((product) => product && product.categoryId));
+  const categories = categoryIds.length
+    ? await MenuCategoryModel.find({ _id: { $in: categoryIds } }).lean()
+    : [];
+  return {
+    productsById,
+    categoriesById: new Map(categories.map((category) => [objectIdString(category._id), category])),
+  };
+}
+
+function inferPlanProductDisplayKey(plan, { productsById, categoriesById }) {
+  const productIds = uniqueIdStrings(Array.isArray(plan && plan.menuProductIds) ? plan.menuProductIds : []);
+  if (!productIds.length) return "";
+
+  const productKeys = [];
+  for (const productId of productIds) {
+    const product = productsById.get(productId);
+    if (!product) return "";
+    const category = categoriesById.get(objectIdString(product.categoryId));
+    const categoryKey = normalizeProductDisplayKey(
+      product.categoryKey || category && category.key || product.category
+    );
+    const itemTypeKey = normalizeProductDisplayKey(product.itemType);
+    const meaningfulItemType = itemTypeKey
+      && !["addon", "item", "product", "subscription"].includes(itemTypeKey)
+      ? itemTypeKey
+      : "";
+    const productKey = meaningfulItemType || categoryKey;
+    if (!productKey) return "";
+    productKeys.push(productKey);
+  }
+  return uniquePlanDisplayKey(productKeys);
+}
+
+function planDisplayKey(plan, planId, displayMetadata) {
+  // These values belong to the dashboard plan. Subscription entitlement and
+  // balance fields are intentionally absent from this resolver.
+  for (const value of [
+    plan && plan.displayKey,
+    plan && plan.displayCategory,
+    plan && plan.categoryKey,
+    plan && plan.displayCategoryKey,
+  ]) {
+    const key = normalizePlanDisplayKey(value);
+    if (key) return key;
+  }
+
+  const categoryKey = normalizePlanDisplayKey(plan && plan.category);
+  if (categoryKey) return categoryKey;
+
+  for (const value of [plan && plan.slug, plan && plan.key]) {
+    const key = normalizePlanDisplayKey(value);
+    if (key) return key;
+  }
+
+  const configuredKey = uniquePlanDisplayKey(
+    Array.isArray(plan && plan.menuCategoryKeys) ? plan.menuCategoryKeys : []
+  );
+  if (configuredKey) return configuredKey;
+
+  return inferPlanProductDisplayKey(plan, displayMetadata) || String(planId || "");
 }
 
 function numericPlanOrder(plan) {
@@ -327,9 +385,15 @@ async function loadLivePlanProducts(productIds, {
 
 function buildAddonChoicesCompatibilityMap(groups) {
   const data = {};
-  for (const group of Array.isArray(groups) ? groups : []) {
+  const rows = Array.isArray(groups) ? groups : [];
+  const displayKeyCounts = rows.reduce((counts, group) => {
+    const key = normalizeDynamicDisplayKey(group.displayKey, group.addonPlanId);
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return counts;
+  }, new Map());
+  for (const group of rows) {
     const preferredKey = normalizeDynamicDisplayKey(group.displayKey, group.addonPlanId);
-    const key = !Object.prototype.hasOwnProperty.call(data, preferredKey)
+    const key = displayKeyCounts.get(preferredKey) === 1
       ? preferredKey
       : `${preferredKey}:${group.addonPlanId}`;
     data[key] = {
@@ -917,17 +981,28 @@ async function buildAddonChoiceGroups({
   const requestedDisplayKey = category
     ? normalizeDynamicDisplayKey(category)
     : "";
+  const displayMetadata = await loadPlanDisplayMetadata([...planRowsById.values()], {
+    MenuProductModel: models.MenuProductModel || MenuProduct,
+    MenuCategoryModel: models.MenuCategoryModel || MenuCategory,
+  });
   const groups = [];
 
   for (const addonPlanId of allPlanIds) {
     const plan = planRowsById.get(addonPlanId) || null;
     const entitlementRow = entitlementByPlanId.get(addonPlanId) || null;
     const entitlement = entitlementRow && entitlementRow.entitlement;
-    const displayKey = planDisplayKey(plan, entitlement, addonPlanId);
+    const displayKey = planDisplayKey(plan, addonPlanId, displayMetadata);
     if (requestedDisplayKey && requestedDisplayKey !== displayKey && requestedDisplayKey !== addonPlanId) {
       continue;
     }
-    const allowanceCategory = String(entitlement && entitlement.category || plan && plan.category || "").trim();
+    const entitlementCategory = String(
+      entitlement && (entitlement.entitlementCategory || entitlement.category) || ""
+    ).trim();
+    const allowanceCategory = String(
+      entitlement && (entitlement.allowanceCategory || entitlement.category)
+      || plan && (plan.allowanceCategory || plan.category)
+      || ""
+    ).trim();
     const configuredProductIds = uniqueIdStrings([
       ...(Array.isArray(plan && plan.menuProductIds) ? plan.menuProductIds : []),
       ...entitlementProductIds(entitlement),
@@ -983,7 +1058,7 @@ async function buildAddonChoiceGroups({
         category: displayKey,
         displayCategory: displayKey,
         allowanceCategory,
-        entitlementCategory: entitlement && entitlement.category || null,
+        entitlementCategory: entitlementCategory || null,
         ownedSnapshot: owned ? owned.fromSnapshot === true : pricing.ownedSnapshot,
         snapshotMissing: owned ? owned.snapshotMissing === true : serialized.snapshotMissing,
         liveCatalogMissing: owned ? owned.liveCatalogMissing === true : serialized.liveCatalogMissing,
@@ -1005,8 +1080,9 @@ async function buildAddonChoiceGroups({
       ...localizedFields,
       displayKey,
       displayCategory: displayKey,
+      category: displayKey,
       allowanceCategory,
-      entitlementCategory: entitlement && entitlement.category || allowanceCategory || null,
+      entitlementCategory: entitlementCategory || allowanceCategory || null,
       sortOrder: sortOrder == null
         ? (Number.isFinite(entitlementIndex) ? entitlementIndex : 0)
         : sortOrder,
@@ -1019,7 +1095,7 @@ async function buildAddonChoiceGroups({
       choices,
       entitlements: entitlement ? [{
         entitlementIndex: entitlementRow.entitlementIndex,
-        entitlementKey: `${entitlement.category || "addon"}:${addonPlanId}`,
+        entitlementKey: `${entitlementCategory || "addon"}:${addonPlanId}`,
         addonPlanId,
         allowanceCategory,
         includedTotalQty: Number(balance.includedTotalQty || 0),

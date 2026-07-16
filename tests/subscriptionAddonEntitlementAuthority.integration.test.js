@@ -101,6 +101,15 @@ function assertPaidNoEntitlement(row, expectedUnitPrice, label, requireChoiceFie
   assert.strictEqual(row.balanceBucketId, null, `${label}: balanceBucketId`);
 }
 
+function addonChoiceGroupForPlan(body, addonPlanId) {
+  assert(Array.isArray(body && body.addonChoiceGroups), JSON.stringify(body));
+  const group = body.addonChoiceGroups.find((row) => (
+    String(row && row.addonPlanId) === String(addonPlanId)
+  ));
+  assert(group, `missing addonChoiceGroup for plan ${addonPlanId}: ${JSON.stringify(body.addonChoiceGroups)}`);
+  return group;
+}
+
 function selectionBody({ protein, carb, addonIds }) {
   return {
     mealSlots: [{
@@ -242,6 +251,7 @@ async function createMultiPlanAllowanceFixture({ user, plan }) {
   const addonPlans = await Addon.create(definitions.map((definition, index) => ({
     name: { en: definition.name, ar: definition.nameAr },
     category: definition.allowanceCategory,
+    displayKey: definition.displayCategory,
     kind: "plan",
     type: "subscription",
     billingMode: "per_day",
@@ -250,7 +260,10 @@ async function createMultiPlanAllowanceFixture({ user, plan }) {
     currency: "SAR",
     isActive: true,
     menuProductIds: planProducts[index].map((product) => product._id),
-    menuCategoryKeys: [definition.displayCategory],
+    // Dashboard CRUD persists explicit product links and clears category links.
+    // Visible identity must therefore resolve from the plan/product data, not
+    // from the subscription allowance bucket below.
+    menuCategoryKeys: [],
     sortOrder: 20 + index,
   })));
   const start = dateOffset(20);
@@ -644,8 +657,23 @@ async function main() {
     assert.strictEqual(new Set(res.body.addonChoiceGroups.map((group) => group.addonPlanId)).size, 4);
     const snackChoiceGroup = res.body.addonChoiceGroups.find((group) => group.displayKey === "snack");
     const iceCreamChoiceGroup = res.body.addonChoiceGroups.find((group) => group.displayKey === "ice_cream");
+    assert.strictEqual(snackChoiceGroup.groupId, String(multiPlan.addonPlans[2]._id));
+    assert.strictEqual(snackChoiceGroup.addonPlanId, String(multiPlan.addonPlans[2]._id));
+    assert.strictEqual(snackChoiceGroup.displayCategory, "snack");
+    assert.strictEqual(snackChoiceGroup.category, "snack");
     assert.strictEqual(snackChoiceGroup.allowanceCategory, "snack");
+    assert.strictEqual(iceCreamChoiceGroup.groupId, String(multiPlan.addonPlans[3]._id));
+    assert.strictEqual(iceCreamChoiceGroup.addonPlanId, String(multiPlan.addonPlans[3]._id));
+    assert.strictEqual(iceCreamChoiceGroup.displayCategory, "ice_cream");
+    assert.strictEqual(iceCreamChoiceGroup.category, "ice_cream");
     assert.strictEqual(iceCreamChoiceGroup.allowanceCategory, "snack");
+    assert.strictEqual(iceCreamChoiceGroup.entitlementCategory, "snack");
+    assert(iceCreamChoiceGroup.choices.every((choice) => choice.category === "ice_cream"));
+    assert(iceCreamChoiceGroup.choices.every((choice) => choice.displayCategory === "ice_cream"));
+    assert(iceCreamChoiceGroup.choices.every((choice) => choice.allowanceCategory === "snack"));
+    assert(iceCreamChoiceGroup.choices.every((choice) => choice.pricingMode === "allowance_covered"));
+    assert(iceCreamChoiceGroup.choices.every((choice) => choice.coveredQty === 1));
+    assert(iceCreamChoiceGroup.choices.every((choice) => choice.paidQty === 0));
     assert.deepStrictEqual(
       snackChoiceGroup.choices.map((choice) => choice.productId).sort(),
       multiPlan.planProducts[2].map((product) => String(product._id)).sort()
@@ -769,9 +797,10 @@ async function main() {
     const brokenAuth = { Authorization: `Bearer ${broken.token}` };
     res = await api.get("/api/subscriptions/addon-choices").set(brokenAuth);
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    const brokenIncluded = res.body.data.juice.choices.find((row) => String(row.id) === String(products[0]._id));
+    const brokenChoices = addonChoiceGroupForPlan(res.body, addonPlan._id).choices;
+    const brokenIncluded = brokenChoices.find((row) => String(row.id) === String(products[0]._id));
     assertIncluded(brokenIncluded, 7, 7, "recovered zero balance included");
-    assert(!res.body.data.juice.choices.some((row) => String(row.id) === String(products[4]._id)));
+    assert(!brokenChoices.some((row) => String(row.id) === String(products[4]._id)));
     res = await api
       .put(`/api/subscriptions/${broken.subscription._id}/days/${broken.dates[0]}/selection`)
       .set(brokenAuth)
@@ -828,7 +857,8 @@ async function main() {
     const exhaustedAuth = { Authorization: `Bearer ${exhausted.token}` };
     res = await api.get("/api/subscriptions/addon-choices").set(exhaustedAuth);
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    const exhaustedChoice = res.body.data.juice.choices.find((row) => String(row.id) === String(products[0]._id));
+    const exhaustedChoice = addonChoiceGroupForPlan(res.body, addonPlan._id).choices
+      .find((row) => String(row.id) === String(products[0]._id));
     assertCoverageFields(exhaustedChoice, "exhausted choice");
     assert.strictEqual(exhaustedChoice.isEligibleForAllowance, true);
     assert.strictEqual(exhaustedChoice.remainingQty, 0);
@@ -866,7 +896,7 @@ async function main() {
 
     res = await api.get("/api/subscriptions/addon-choices").set(historicalAuth);
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    const historicalChoices = res.body.data.juice.choices;
+    const historicalChoices = addonChoiceGroupForPlan(res.body, addonPlan._id).choices;
     const recoveredChoices = products.slice(0, 3).map((product) => (
       historicalChoices.find((row) => String(row.id) === String(product._id))
     ));
@@ -980,7 +1010,7 @@ async function main() {
     const exhaustedMissingAuth = { Authorization: `Bearer ${exhaustedMissing.token}`, "Accept-Language": "en" };
     res = await api.get("/api/subscriptions/addon-choices").set(exhaustedMissingAuth);
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    const recoveredOverageChoice = res.body.data.juice.choices
+    const recoveredOverageChoice = addonChoiceGroupForPlan(res.body, addonPlan._id).choices
       .find((row) => String(row.id) === String(products[0]._id));
     assertLegacyRecoveredChoice(
       recoveredOverageChoice,
@@ -1027,7 +1057,7 @@ async function main() {
     const recoveredMissingAuth = { Authorization: `Bearer ${recoveredMissing.token}`, "Accept-Language": "en" };
     res = await api.get("/api/subscriptions/addon-choices").set(recoveredMissingAuth);
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    const recoveredMissingChoice = res.body.data.juice.choices
+    const recoveredMissingChoice = addonChoiceGroupForPlan(res.body, addonPlan._id).choices
       .find((row) => String(row.id) === String(products[0]._id));
     assertLegacyRecoveredChoice(
       recoveredMissingChoice,
@@ -1073,6 +1103,10 @@ async function main() {
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
     const unmappedGroup = res.body.addonChoiceGroups.find((group) => String(group.addonPlanId) === String(missingPlanId));
     assert(unmappedGroup, JSON.stringify(res.body.addonChoiceGroups));
+    assert.strictEqual(unmappedGroup.displayKey, String(missingPlanId));
+    assert.strictEqual(unmappedGroup.displayCategory, String(missingPlanId));
+    assert.strictEqual(unmappedGroup.category, String(missingPlanId));
+    assert.notStrictEqual(unmappedGroup.displayKey, unmappedGroup.allowanceCategory);
     const unmappedPlaceholder = unmappedGroup.choices
       .find((row) => String(row.id) === String(unmappedMissingProductId));
     assertMissingOwnedPlaceholder(

@@ -36,6 +36,7 @@ async function invoke(handler, { body = {}, params = {}, query = {} } = {}) {
 const planKeys = [
   "archivedAt",
   "category",
+  "displayKey",
   "id",
   "isActive",
   "isArchived",
@@ -70,6 +71,9 @@ async function main() {
       categoryId: category._id,
       key: "yogurt_cup_contract",
       name: { ar: "كوب زبادي", en: "Yogurt Cup" },
+      // The historical catalog taxonomy does not own the dashboard plan's
+      // visible grouping identity.
+      itemType: "dessert",
       priceHalala: 900,
       availableFor: ["subscription"],
       isActive: true,
@@ -80,6 +84,7 @@ async function main() {
       categoryId: category._id,
       key: "one_time_snack_contract",
       name: { ar: "سناك الطلب الواحد", en: "One-time Snack" },
+      itemType: "dessert",
       priceHalala: 800,
       availableFor: ["one_time"],
       isActive: true,
@@ -173,6 +178,7 @@ async function main() {
     const createBody = {
       name: { ar: "اشتراك الزبادي", en: "Yogurt Subscription" },
       category: "snack",
+      displayKey: "snack",
       maxPerDay: 1,
       isActive: true,
       menuProductIds: [String(product._id), String(oneTimeProduct._id)],
@@ -209,6 +215,7 @@ async function main() {
     assert.strictEqual(await AddonPlanPrice.countDocuments({ addonPlanId: addonId, basePlanId: basePlan._id }), 1);
     const stored = await Addon.findById(addonId).lean();
     assert.strictEqual(stored.kind, "plan");
+    assert.strictEqual(stored.displayKey, "snack");
     assert.strictEqual(stored.type, "subscription");
     assert.strictEqual(stored.pricingModel, "subscription");
 
@@ -262,12 +269,14 @@ async function main() {
     });
     assert.strictEqual(updated.statusCode, 200);
     assert.deepStrictEqual(Object.keys(updated.body.data).sort(), planKeys);
+    assert.strictEqual(updated.body.data.displayKey, "snack");
     assert.strictEqual(updated.body.data.maxPerDay, 0);
     assert.strictEqual(updated.body.data.planPrices[0].priceHalala, 7500);
 
     const invalidCases = [
       [{ ...createBody, name: { ar: "", en: "Missing Arabic" } }, "name.ar"],
       [{ ...createBody, isActive: "true" }, "isActive"],
+      [{ ...createBody, displayKey: "***" }, "displayKey"],
       [{ ...createBody, menuProductIds: [] }, "menuProductIds must contain at least one product"],
       [{ ...createBody, menuProductIds: [String(product._id), String(product._id)] }, "Duplicate menuProductIds are not allowed"],
       [{ ...createBody, planPrices: [] }, "planPrices"],
@@ -277,7 +286,7 @@ async function main() {
     ];
     for (const [body, messageFragment] of invalidCases) {
       const invalid = await invoke(createDashboardAddonPlan, { body });
-      assert.strictEqual(invalid.statusCode, 400);
+      assert.strictEqual(invalid.statusCode, 400, JSON.stringify({ messageFragment, body: invalid.body }));
       assert.ok(invalid.body.error.message.includes(messageFragment), invalid.body.error.message);
     }
     assert.strictEqual(await MenuProduct.countDocuments(), 5);

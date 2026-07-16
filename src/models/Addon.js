@@ -67,6 +67,16 @@ const AddonSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Explicit customer-facing group identity. Legacy dashboard plans may
+    // still use `category` as the lower-priority display identity; subscription
+    // allowance/balance categories remain separate entitlement data.
+    displayKey: {
+      type: String,
+      default: "",
+      trim: true,
+      lowercase: true,
+    },
+
     menuProductId: { 
       type: mongoose.Schema.Types.ObjectId, 
       ref: "MenuProduct", 
@@ -107,6 +117,15 @@ AddonSchema.pre("validate", function syncBillingModeAndKind(next) {
     this.invalidate("category", "category must be a non-empty normalized key");
   } else {
     this.category = normalizedCategory;
+  }
+
+  if (this.displayKey) {
+    const normalizedDisplayKey = normalizeSubscriptionAddonCategory(this.displayKey);
+    if (!normalizedDisplayKey) {
+      this.invalidate("displayKey", "displayKey must be a normalized display key");
+    } else {
+      this.displayKey = normalizedDisplayKey;
+    }
   }
 
   // 1. Sync legacy priceHalala

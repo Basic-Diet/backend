@@ -161,6 +161,16 @@ function normalizeAddonCategory(value) {
   return category;
 }
 
+function normalizeAddonDisplayKey(value) {
+  if (value === undefined) return undefined;
+  if (value === null || String(value).trim() === "") return "";
+  const displayKey = normalizeSubscriptionAddonCategory(value);
+  if (!displayKey) {
+    throw { status: 400, code: "INVALID_ADDON_DISPLAY_KEY", message: "displayKey must be a normalized display key" };
+  }
+  return displayKey;
+}
+
 function resolveAddonBillingMode({ kind, rawBillingMode }) {
   const billingMode = rawBillingMode
     ? normalizeOptionalString(rawBillingMode)
@@ -221,6 +231,7 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null, dashboardPlanC
 
   const kind = normalizeAddonKind(payload.kind, { forceKind });
   const category = normalizeAddonCategory(payload.category);
+  const displayKey = normalizeAddonDisplayKey(payload.displayKey);
   const name = normalizeName(parseLocalizedFieldFromBody(payload, "name", { allowString: true }) ?? payload.name);
   if (dashboardPlanCreate && (!name.ar || !name.en)) {
     throw { status: 400, code: "INVALID", message: "name.ar and name.en are required non-empty strings" };
@@ -278,7 +289,9 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null, dashboardPlanC
         };
       }
       const key = String(id);
-      if (seenMenuProductIds.has(key)) continue;
+      if (seenMenuProductIds.has(key)) {
+        throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
+      }
       seenMenuProductIds.add(key);
       menuProductIds.push(id);
     }
@@ -312,6 +325,7 @@ function validateAddonPayloadOrThrow(payload, { forceKind = null, dashboardPlanC
     currency,
     kind,
     category,
+    ...(displayKey !== undefined ? { displayKey } : {}),
     isActive,
     sortOrder,
     menuProductId,
@@ -350,6 +364,11 @@ async function assertAddonPlanProductsExist(payload) {
       details: { productId: String(invalidProduct._id) },
     };
   }
+
+  // A dashboard-owned display identity intentionally overrides menu taxonomy.
+  // Product category matching remains only as a guard for legacy plans that do
+  // not yet persist an explicit displayKey.
+  if (payload.displayKey) return;
 
   const expectedCategory = normalizeSubscriptionAddonCategory(payload.category);
   const categoryIds = [...new Set(products.map((product) => String(product.categoryId || "")).filter(Boolean))];
@@ -718,6 +737,7 @@ function toDashboardAddonPlanLeanDTO(plan) {
     id: String(plan._id || plan.id),
     name: plan.name || { ar: "", en: "" },
     category: plan.category || "",
+    displayKey: plan.displayKey || "",
     kind: plan.kind || "plan",
     type: plan.type || "subscription",
     maxPerDay: plan.maxPerDay ?? 1,
@@ -1131,7 +1151,10 @@ async function updateAddon(req, res, options = {}) {
       if (uniqueProductIds.length !== payload.menuProductIds.length) {
         throw { status: 400, code: "INVALID", message: "Duplicate menuProductIds are not allowed" };
       }
-      await assertAddonPlanProductsExist(payload);
+      await assertAddonPlanProductsExist({
+        ...payload,
+        displayKey: payload.displayKey !== undefined ? payload.displayKey : existing.displayKey,
+      });
     }
 
     const imageState = await resolveManagedImageFromRequest({
@@ -1212,6 +1235,9 @@ async function patchAddon(req, res, options = {}) {
     if (!existing) return errorResponse(res, 404, "NOT_FOUND", "Addon not found");
 
     const payload = {};
+    if (req.body.displayKey !== undefined) {
+      payload.displayKey = normalizeAddonDisplayKey(req.body.displayKey);
+    }
     if (req.body.menuProductId !== undefined) {
       let menuProductId = null;
       if (req.body.menuProductId && String(req.body.menuProductId).trim() !== "") {
