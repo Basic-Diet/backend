@@ -16,6 +16,7 @@ const ALL_SUPPORTED_SUBSCRIPTION_ADDON_CATEGORIES = Object.freeze([
   ...DYNAMIC_SUBSCRIPTION_ADDON_CATEGORIES,
 ]);
 const MAX_SUBSCRIPTION_ADDON_CATEGORY_LENGTH = 64;
+const LEGACY_RECOVERED_ADDON_STATE = Symbol.for("basicdiet.subscription.legacyRecoveredAddonState");
 
 function normalizeSubscriptionAddonCategory(value, { allowEmpty = false } = {}) {
   const normalized = String(value || "")
@@ -56,19 +57,99 @@ function getEntitlementMenuProductIds(entitlement) {
   return [...ids];
 }
 
+function legacyRecoveryKey(entitlement, index = 0) {
+  return getAddonEntitlementKey(entitlement, index);
+}
+
+function getLegacyRecoveryState(subscription, { create = false } = {}) {
+  if (!subscription) return null;
+  if (subscription[LEGACY_RECOVERED_ADDON_STATE] instanceof Map) {
+    return subscription[LEGACY_RECOVERED_ADDON_STATE];
+  }
+  if (!create) return null;
+  const state = new Map();
+  Object.defineProperty(subscription, LEGACY_RECOVERED_ADDON_STATE, {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: state,
+  });
+  return state;
+}
+
+function registerLegacyRecoveredAddonProducts(subscription, entitlement, recoveredProducts = [], entitlementIndex = 0) {
+  const state = getLegacyRecoveryState(subscription, { create: true });
+  if (!state) return null;
+  const entitlementKey = legacyRecoveryKey(entitlement, entitlementIndex);
+  const existing = state.get(entitlementKey);
+  const productMetadataById = new Map(
+    existing && existing.productMetadataById ? existing.productMetadataById : []
+  );
+  for (const row of Array.isArray(recoveredProducts) ? recoveredProducts : []) {
+    const productId = String(row && (row.productId || row.id || row.product && row.product._id) || "");
+    if (!productId) continue;
+    productMetadataById.set(productId, {
+      productId,
+      legacySourceProductId: row && row.legacySourceProductId
+        ? String(row.legacySourceProductId)
+        : null,
+      product: row && row.product || null,
+    });
+  }
+  const record = {
+    entitlementKey,
+    addonPlanId: resolveEntitlementPlanId(entitlement),
+    category: normalizeSubscriptionAddonCategory(entitlement && entitlement.category, { allowEmpty: true }),
+    productMetadataById,
+  };
+  state.set(record.entitlementKey, record);
+  return record;
+}
+
+function getLegacyRecoveredAddonRecord(subscription, entitlement, entitlementIndex = 0) {
+  const state = getLegacyRecoveryState(subscription);
+  return state ? state.get(legacyRecoveryKey(entitlement, entitlementIndex)) || null : null;
+}
+
+function getLegacyRecoveredAddonProductMetadata(subscription, entitlement, productId, entitlementIndex = 0) {
+  const record = getLegacyRecoveredAddonRecord(subscription, entitlement, entitlementIndex);
+  return record && record.productMetadataById
+    ? record.productMetadataById.get(String(productId || "")) || null
+    : null;
+}
+
+function getLegacyRecoveredAddonProductMetadataBySource(subscription, entitlement, sourceProductId, entitlementIndex = 0) {
+  const record = getLegacyRecoveredAddonRecord(subscription, entitlement, entitlementIndex);
+  const normalizedSourceId = String(sourceProductId || "");
+  if (!record || !normalizedSourceId) return null;
+  for (const metadata of record.productMetadataById.values()) {
+    if (String(metadata && metadata.legacySourceProductId || "") === normalizedSourceId) return metadata;
+  }
+  return null;
+}
+
+function getResolvedEntitlementMenuProductIds(subscription, entitlement, entitlementIndex = 0) {
+  const ids = new Set(getEntitlementMenuProductIds(entitlement));
+  const record = getLegacyRecoveredAddonRecord(subscription, entitlement, entitlementIndex);
+  for (const id of record && record.productMetadataById ? record.productMetadataById.keys() : []) {
+    ids.add(String(id));
+  }
+  return [...ids];
+}
+
 function buildAddonEntitlementEligibility(subscription) {
   const entitlements = Array.isArray(subscription && subscription.addonSubscriptions)
     ? subscription.addonSubscriptions
     : null;
   const eligibleProductIdsByCategory = new Map();
 
-  for (const entitlement of entitlements || []) {
+  for (const [entitlementIndex, entitlement] of (entitlements || []).entries()) {
     if (!entitlement) continue;
     const category = normalizeSubscriptionAddonCategory(entitlement.category, { allowEmpty: true });
     if (hasModernAddonProductSnapshot(entitlement)) {
       const categoryKey = category || "legacy";
       if (!eligibleProductIdsByCategory.has(categoryKey)) eligibleProductIdsByCategory.set(categoryKey, new Set());
-      for (const id of getEntitlementMenuProductIds(entitlement)) {
+      for (const id of getResolvedEntitlementMenuProductIds(subscription, entitlement, entitlementIndex)) {
         eligibleProductIdsByCategory.get(categoryKey).add(String(id));
       }
       continue;
@@ -214,7 +295,7 @@ function resolveAddonEntitlementContext(subscription, {
 
   const indexed = entitlements.map((entry, index) => ({ entry, index }));
   const exactProductMatches = normalizedProductId
-    ? indexed.filter(({ entry }) => getEntitlementMenuProductIds(entry).includes(normalizedProductId))
+    ? indexed.filter(({ entry, index }) => getResolvedEntitlementMenuProductIds(subscription, entry, index).includes(normalizedProductId))
     : [];
 
   let candidates = exactProductMatches;
@@ -274,6 +355,10 @@ function resolveAddonEntitlementContext(subscription, {
 
   if (candidates.length !== 1) return null;
   const { entry: entitlement, index: entitlementIndex } = candidates[0];
+  const recoveredProductMetadata = normalizedProductId
+    ? getLegacyRecoveredAddonProductMetadata(subscription, entitlement, normalizedProductId, entitlementIndex)
+    : null;
+  if (recoveredProductMetadata) matchType = "legacy_plan_recovered";
   const bucket = explicitBucket || findAddonBalanceBucket(subscription, {
     addonPlanId: resolveEntitlementPlanId(entitlement),
     addonId: entitlement && (entitlement.addonId || entitlement.addonPlanId),
@@ -291,6 +376,8 @@ function resolveAddonEntitlementContext(subscription, {
     balanceBucketId: bucket && rawValue(bucket, "_id") ? String(rawValue(bucket, "_id")) : null,
     matchType,
     ownedSnapshot: matchType === "menu_product_snapshot",
+    legacyRecovered: matchType === "legacy_plan_recovered",
+    legacySourceProductId: recoveredProductMetadata && recoveredProductMetadata.legacySourceProductId || null,
   };
 }
 
@@ -469,12 +556,16 @@ module.exports = {
   findAddonEntitlementForChoice,
   getAddonEntitlementKey,
   getEntitlementMenuProductIds,
+  getLegacyRecoveredAddonProductMetadata,
+  getLegacyRecoveredAddonProductMetadataBySource,
+  getResolvedEntitlementMenuProductIds,
   getEligibleAddonEntitlementsForProduct,
   hasModernAddonProductSnapshot,
   isAddonEntitlementEligibleForProduct,
   isAddonChoiceEligibleForAllowance,
   isRecoverableUninitializedAddonBalanceBucket,
   normalizeSubscriptionAddonCategory,
+  registerLegacyRecoveredAddonProducts,
   resolveAddonBalanceRemainingQty,
   resolveAddonEntitlementContext,
   resolveEntitlementPlanId,

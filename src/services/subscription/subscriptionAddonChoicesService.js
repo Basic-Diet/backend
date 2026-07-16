@@ -22,6 +22,7 @@ const {
   ERROR_CODE_ENTITLEMENT_NOT_OWNED,
   ERROR_CODE_ENTITLEMENT_PRODUCT_NOT_FOUND,
   ERROR_CODE_SNAPSHOT_MISSING,
+  ensureLegacyRecoveredAddonEntitlements,
   loadOwnedCategoryRowsForProducts,
   loadOwnedSnapshotProducts,
   resolveOwnedAddonEntitlementChoice,
@@ -225,6 +226,8 @@ function buildChoicePricingMetadata(subscription, entitlement, product) {
     balanceBucketId: preview.balanceBucketId,
     entitlementCategory: preview.entitlementCategory,
     ownedSnapshot: preview.ownedSnapshot,
+    legacyRecovered: preview.legacyRecovered,
+    legacySourceProductId: preview.legacySourceProductId,
     isEligibleForAllowance: preview.isEligibleForAllowance,
     source: preview.source,
     requestedQty: preview.requestedQty,
@@ -259,6 +262,8 @@ function buildGenericChoicePricingMetadata(product, subscription = null, categor
     balanceBucketId: preview.balanceBucketId,
     entitlementCategory: preview.entitlementCategory,
     ownedSnapshot: preview.ownedSnapshot,
+    legacyRecovered: preview.legacyRecovered,
+    legacySourceProductId: preview.legacySourceProductId,
     isEligibleForAllowance: preview.isEligibleForAllowance,
     source: preview.source,
     requestedQty: preview.requestedQty,
@@ -405,7 +410,10 @@ async function buildSubscriptionAddonChoicesCatalog({
     let loadedProducts = [];
     if (snapshotProductIds.length) {
       loadedProducts = await loadOwnedSnapshotProducts(snapshotProductIds, entitlement, {
+        AddonModel: models.AddonModel,
         MenuProductModel: models.MenuProductModel,
+        entitlementIndex: index,
+        subscription,
       });
     }
 
@@ -413,7 +421,14 @@ async function buildSubscriptionAddonChoicesCatalog({
     const { rowsById: categoriesById, fallbackCategory } = await loadOwnedCategoryRowsForProducts(productsList, entitlementCategory, { MenuCategoryModel: models.MenuCategoryModel });
     const metadata = buildEntitlementMetadata(subscription, entitlement, index);
     const groupedChoices = new Map();
-    for (const { product, fromSnapshot, snapshotMissing, liveCatalogMissing } of loadedProducts) {
+    for (const {
+      product,
+      fromSnapshot,
+      snapshotMissing,
+      liveCatalogMissing,
+      legacyRecovered,
+      legacySourceProductId,
+    } of loadedProducts) {
       if (!product) continue;
       const sourceCategory = categoriesById.get(String(product.categoryId)) || fallbackCategory;
       if (!sourceCategory) continue;
@@ -432,6 +447,8 @@ async function buildSubscriptionAddonChoicesCatalog({
         ownedSnapshot: fromSnapshot === true,
         snapshotMissing: snapshotMissing === true,
         liveCatalogMissing: liveCatalogMissing === true,
+        legacyRecovered: legacyRecovered === true,
+        legacySourceProductId: legacySourceProductId || null,
         currency: serialized.currency,
       };
       const list = groupedChoices.get(displayCategory) || [];
@@ -495,14 +512,17 @@ async function resolveEntitlementDisplayCategories(subscription, { models = {} }
     ? subscription.addonSubscriptions
     : [];
   const displayCategories = new Set();
-  for (const entitlement of entitlements) {
+  for (const [entitlementIndex, entitlement] of entitlements.entries()) {
     const snapshotProductIds = snapshotProductIdList(entitlement);
     if (!snapshotProductIds.length) {
       if (entitlement && entitlement.category) displayCategories.add(String(entitlement.category));
       continue;
     }
     const loadedProducts = await loadOwnedSnapshotProducts(snapshotProductIds, entitlement, {
+      AddonModel: models.AddonModel,
       MenuProductModel: models.MenuProductModel,
+      entitlementIndex,
+      subscription,
     });
     const productsList = loadedProducts.map(p => p.product).filter(Boolean);
     const { rowsById: categoriesById, fallbackCategory } = await loadOwnedCategoryRowsForProducts(productsList, entitlement.category, { MenuCategoryModel: models.MenuCategoryModel });
@@ -628,6 +648,8 @@ async function buildAddonChoicesCatalog({
           ownedSnapshot: choice.ownedSnapshot === true,
           snapshotMissing: choice.snapshotMissing === true,
           liveCatalogMissing: choice.liveCatalogMissing === true,
+          legacyRecovered: choice.legacyRecovered === true,
+          legacySourceProductId: choice.legacySourceProductId || null,
           available: choice.available !== false,
           active: choice.active !== false,
           availableForNewSale: choice.availableForNewSale !== false,
@@ -675,6 +697,10 @@ async function resolveAddonChoiceProductById(productId, {
   if (!mongoose.Types.ObjectId.isValid(String(productId || ""))) return null;
 
   if (subscription) {
+    await ensureLegacyRecoveredAddonEntitlements(subscription, {
+      AddonModel: models.AddonModel || mongoose.models.Addon,
+      MenuProductModel: models.MenuProductModel || MenuProduct,
+    });
     let owned = null;
     try {
       owned = await resolveOwnedAddonEntitlementChoice({
@@ -686,7 +712,10 @@ async function resolveAddonChoiceProductById(productId, {
         userId,
       });
       const results = await loadOwnedSnapshotProducts([productId], owned.entitlement, {
+        AddonModel: models.AddonModel || mongoose.models.Addon,
         MenuProductModel: models.MenuProductModel || MenuProduct,
+        entitlementIndex: owned.entitlementIndex,
+        subscription,
       });
       if (results.length > 0 && results[0].product) {
         const resolvedProduct = results[0].snapshotMissing === true
@@ -705,6 +734,8 @@ async function resolveAddonChoiceProductById(productId, {
           fromOwnedSnapshot: results[0].fromSnapshot,
           snapshotMissing: results[0].snapshotMissing === true,
           liveCatalogMissing: results[0].liveCatalogMissing === true,
+          legacyRecovered: results[0].legacyRecovered === true,
+          legacySourceProductId: results[0].legacySourceProductId || null,
           ownedResolution: owned,
         };
       }

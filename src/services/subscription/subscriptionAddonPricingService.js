@@ -110,6 +110,8 @@ function buildAddonChoicePricingPreview({
       : (resolvedContext && resolvedContext.bucket && resolvedContext.bucket._id ? String(resolvedContext.bucket._id) : null),
     entitlementCategory: resolvedContext && resolvedContext.entitlementCategory || null,
     ownedSnapshot: Boolean(resolvedContext && resolvedContext.ownedSnapshot),
+    legacyRecovered: Boolean(resolvedContext && resolvedContext.legacyRecovered),
+    legacySourceProductId: resolvedContext && resolvedContext.legacySourceProductId || null,
     isEligibleForAllowance: Boolean(selectedEntitlement),
   };
 

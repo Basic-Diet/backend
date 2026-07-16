@@ -1280,6 +1280,8 @@ async function performDaySelectionUpdate({ userId, subscriptionId, date, selecti
              ownedSnapshot: Boolean(sel.ownedSnapshot),
              snapshotMissing: Boolean(sel.snapshotMissing),
              liveCatalogMissing: Boolean(sel.liveCatalogMissing),
+             legacyRecovered: Boolean(sel.legacyRecovered),
+             legacySourceProductId: sel.legacySourceProductId || null,
              available: sel.available !== false,
              active: sel.active !== false,
              availableForNewSale: sel.availableForNewSale !== false,

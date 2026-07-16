@@ -111,6 +111,8 @@ async function reconcileAddonInclusions(
       ownedSnapshot: choice.fromOwnedSnapshot === true,
       snapshotMissing: choice.snapshotMissing === true,
       liveCatalogMissing: choice.liveCatalogMissing === true,
+      legacyRecovered: choice.legacyRecovered === true || preview.legacyRecovered === true,
+      legacySourceProductId: choice.legacySourceProductId || preview.legacySourceProductId || null,
       available: doc.isAvailable !== false,
       active: doc.isActive !== false,
       availableForNewSale: doc.availableForNewSale !== false,

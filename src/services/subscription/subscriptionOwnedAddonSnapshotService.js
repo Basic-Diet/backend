@@ -24,7 +24,10 @@ const {
 const { availableForChannelQuery } = require("./subscriptionMenuEligibilityPolicyService");
 const {
   findAddonBalanceBucket,
+  getLegacyRecoveredAddonProductMetadata,
+  getLegacyRecoveredAddonProductMetadataBySource,
   normalizeSubscriptionAddonCategory,
+  registerLegacyRecoveredAddonProducts,
   resolveAddonBalanceRemainingQty,
   resolveAddonEntitlementContext,
 } = require("./subscriptionAddonPolicyService");
@@ -202,16 +205,18 @@ function materializeUnavailableOwnedProduct(productId, entitlement) {
  *   filterGloballyAvailable (CatalogItem gate)
  *   active MenuCategory (implied by caller)
  */
-async function loadGenericSelectableProducts(productIds, { MenuProductModel = MenuProduct } = {}) {
+async function loadGenericSelectableProducts(productIds, { MenuProductModel = MenuProduct, session = null } = {}) {
   const validIds = normalizeIdList(productIds);
   if (!validIds.length) return [];
 
-  const rows = await MenuProductModel.find(
+  let query = MenuProductModel.find(
     activePublishedQuery({
       _id: { $in: validIds },
       ...availableForChannelQuery("one_time"),
     })
-  ).lean();
+  );
+  if (session && typeof query.session === "function") query = query.session(session);
+  const rows = await query.lean();
 
   const catalogItemsById = await loadCatalogItemsByIdForDocs(rows);
   const byId = new Map(
@@ -221,6 +226,130 @@ async function loadGenericSelectableProducts(productIds, { MenuProductModel = Me
   );
 
   return validIds.map((id) => byId.get(id)).filter(Boolean);
+}
+
+async function recoverMissingOwnedProductsFromCurrentPlan(results, entitlement, {
+  subscription = null,
+  entitlementIndex = 0,
+  AddonModel = mongoose.models.Addon,
+  MenuProductModel = MenuProduct,
+  session = null,
+} = {}) {
+  if (!subscription || !AddonModel) return results;
+  let resolvedResults = Array.isArray(results) ? results : [];
+  let missingRows = resolvedResults.filter((row) => row && row.snapshotMissing === true);
+  if (!missingRows.length) {
+    return resolvedResults.map((row) => {
+      const metadata = getLegacyRecoveredAddonProductMetadata(
+        subscription,
+        entitlement,
+        row && row.product && row.product._id,
+        entitlementIndex
+      );
+      return metadata ? {
+        ...row,
+        snapshotMissing: true,
+        liveCatalogMissing: false,
+        legacyRecovered: true,
+        legacySourceProductId: metadata.legacySourceProductId,
+      } : row;
+    });
+  }
+
+  resolvedResults = resolvedResults.map((row) => {
+    if (!row || row.snapshotMissing !== true) return row;
+    const metadata = getLegacyRecoveredAddonProductMetadataBySource(
+      subscription,
+      entitlement,
+      row.id || row.product && row.product._id,
+      entitlementIndex
+    );
+    if (!metadata || !metadata.product) return row;
+    return {
+      product: metadata.product,
+      fromSnapshot: false,
+      snapshotMissing: true,
+      liveCatalogMissing: false,
+      legacyRecovered: true,
+      legacySourceProductId: metadata.legacySourceProductId,
+      id: metadata.productId,
+    };
+  });
+  missingRows = resolvedResults.filter((row) => row && row.snapshotMissing === true && row.legacyRecovered !== true);
+  if (!missingRows.length) return resolvedResults;
+
+  const addonPlanId = String(entitlement && (entitlement.addonPlanId || entitlement.addonId) || "");
+  const entitlementCategory = normalizeSubscriptionAddonCategory(
+    entitlement && entitlement.category,
+    { allowEmpty: true }
+  );
+  if (!mongoose.Types.ObjectId.isValid(addonPlanId) || !entitlementCategory) return resolvedResults;
+
+  let planQuery = AddonModel.findOne({ _id: addonPlanId, kind: "plan" });
+  if (session && planQuery && typeof planQuery.session === "function") planQuery = planQuery.session(session);
+  const plan = planQuery && typeof planQuery.lean === "function" ? await planQuery.lean() : await planQuery;
+  if (!plan) return resolvedResults;
+  const planCategory = normalizeSubscriptionAddonCategory(plan.category, { allowEmpty: true });
+  if (!planCategory || planCategory !== entitlementCategory) return resolvedResults;
+
+  const currentPlanProductIds = normalizeIdList(plan.menuProductIds);
+  if (!currentPlanProductIds.length) return resolvedResults;
+  const currentProducts = await loadGenericSelectableProducts(currentPlanProductIds, {
+    MenuProductModel,
+    session,
+  });
+  if (!currentProducts.length) return resolvedResults;
+
+  const alreadyResolvedIds = new Set(
+    resolvedResults
+      .filter((row) => row && row.product && (row.snapshotMissing !== true || row.legacyRecovered === true))
+      .map((row) => String(row.product._id || ""))
+      .filter(Boolean)
+  );
+  const candidates = currentProducts.filter((product) => !alreadyResolvedIds.has(String(product && product._id || "")));
+  const recoveredCount = Math.min(missingRows.length, candidates.length);
+  if (recoveredCount <= 0) return resolvedResults;
+
+  const recoveredRows = candidates.slice(0, recoveredCount).map((product, index) => ({
+    product,
+    fromSnapshot: false,
+    snapshotMissing: true,
+    liveCatalogMissing: false,
+    legacyRecovered: true,
+    legacySourceProductId: String(missingRows[index].id || missingRows[index].product && missingRows[index].product._id || "") || null,
+    id: String(product._id),
+  }));
+  registerLegacyRecoveredAddonProducts(subscription, entitlement, recoveredRows, entitlementIndex);
+
+  let recoveredIndex = 0;
+  return resolvedResults.map((row) => {
+    if (!row || row.snapshotMissing !== true || row.legacyRecovered === true || recoveredIndex >= recoveredRows.length) return row;
+    const recovered = recoveredRows[recoveredIndex];
+    recoveredIndex += 1;
+    return recovered;
+  });
+}
+
+async function ensureLegacyRecoveredAddonEntitlements(subscription, {
+  AddonModel = mongoose.models.Addon,
+  MenuProductModel = MenuProduct,
+  session = null,
+} = {}) {
+  const entitlements = Array.isArray(subscription && subscription.addonSubscriptions)
+    ? subscription.addonSubscriptions
+    : [];
+  for (const [entitlementIndex, entitlement] of entitlements.entries()) {
+    const productIds = entitlementProductIds(entitlement);
+    if (!productIds.length) continue;
+    await loadOwnedSnapshotProducts(productIds, entitlement, {
+      AddonModel,
+      MenuProductModel,
+      entitlementIndex,
+      session,
+      subscription,
+    });
+  }
+  return subscription;
 }
 
 // ─── Owned snapshot product loader (OWNED ENTITLEMENT USAGE) ─────────────────
@@ -238,8 +367,12 @@ async function loadGenericSelectableProducts(productIds, { MenuProductModel = Me
  * Historical missing rows are never allowed to abort an entire owned catalog.
  */
 async function loadOwnedSnapshotProducts(productIds, entitlement, {
+  AddonModel = mongoose.models.Addon,
   MenuProductModel = MenuProduct,
+  entitlementIndex = 0,
   onMissingProduct = null,
+  session = null,
+  subscription = null,
 } = {}) {
   const validIds = normalizeIdList(productIds);
   if (!validIds.length) return [];
@@ -255,9 +388,12 @@ async function loadOwnedSnapshotProducts(productIds, entitlement, {
   }
 
   const idsMissingSnapshot = validIds.filter((id) => !snapshotById.has(id));
-  const rows = idsMissingSnapshot.length
-    ? await MenuProductModel.find({ _id: { $in: idsMissingSnapshot } }).lean()
-    : [];
+  let rows = [];
+  if (idsMissingSnapshot.length) {
+    let query = MenuProductModel.find({ _id: { $in: idsMissingSnapshot } });
+    if (session && typeof query.session === "function") query = query.session(session);
+    rows = await query.lean();
+  }
   const byId = new Map(rows.map((row) => [String(row._id), row]));
 
   const results = [];
@@ -294,7 +430,13 @@ async function loadOwnedSnapshotProducts(productIds, entitlement, {
     });
   }
 
-  return results;
+  return recoverMissingOwnedProductsFromCurrentPlan(results, entitlement, {
+    subscription,
+    entitlementIndex,
+    AddonModel,
+    MenuProductModel,
+    session,
+  });
 }
 
 // ─── Category loader for owned products ───────────────────────────────────────
@@ -403,6 +545,8 @@ async function resolveOwnedAddonEntitlementChoice({
   const entitlements = Array.isArray(subscription.addonSubscriptions)
     ? subscription.addonSubscriptions
     : [];
+
+  await ensureLegacyRecoveredAddonEntitlements(subscription, { session });
 
   // 3. Search addonSubscriptions for a matching entitlement.
   // Category is only an isolation check. It is never sufficient to prove coverage.
@@ -641,6 +785,7 @@ module.exports = {
   loadGenericSelectableProducts,
   loadOwnedCategoryRowsForProducts,
   loadOwnedSnapshotProducts,
+  ensureLegacyRecoveredAddonEntitlements,
   materializeUnavailableOwnedProduct,
   resolveOwnedAddonEntitlementChoice,
   buildMenuProductsSnapshot,

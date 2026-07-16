@@ -131,6 +131,8 @@ const AddonSelectionSchema = new mongoose.Schema(
     ownedSnapshot: { type: Boolean, default: false },
     snapshotMissing: { type: Boolean, default: false },
     liveCatalogMissing: { type: Boolean, default: false },
+    legacyRecovered: { type: Boolean, default: false },
+    legacySourceProductId: { type: mongoose.Schema.Types.ObjectId, default: null },
     available: { type: Boolean, default: true },
     active: { type: Boolean, default: true },
     availableForNewSale: { type: Boolean, default: true },
