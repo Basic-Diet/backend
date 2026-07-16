@@ -361,13 +361,14 @@ async function main() {
       },
     ]);
 
-    const invalidSnackMealPlan = await invoke(createDashboardAddonPlan, {
+    const mixedTaxonomySnackPlan = await invoke(createDashboardAddonPlan, {
       body: {
         name: { ar: "اشتراك وجبات", en: "Meal Plan Stored As Snack" },
         category: "snack",
         maxPerDay: 2,
         isActive: true,
         menuProductIds: [String(mealProducts[0]._id), String(mealProducts[1]._id)],
+        menuCategoryKeys: [],
         planPrices: [{
           basePlanId: String(basePlan._id),
           priceHalala: 5000,
@@ -375,8 +376,14 @@ async function main() {
         }],
       },
     });
-    assert.strictEqual(invalidSnackMealPlan.statusCode, 400);
-    assert.strictEqual(invalidSnackMealPlan.body.error.code, "ADDON_PLAN_CATEGORY_PRODUCT_MISMATCH");
+    assert.strictEqual(mixedTaxonomySnackPlan.statusCode, 201, JSON.stringify(mixedTaxonomySnackPlan.body));
+    assert.strictEqual(mixedTaxonomySnackPlan.body.data.category, "snack");
+    assert.strictEqual(mixedTaxonomySnackPlan.body.data.displayKey, "");
+    assert.deepStrictEqual(
+      mixedTaxonomySnackPlan.body.data.menuProductIds,
+      [String(mealProducts[0]._id), String(mealProducts[1]._id)]
+    );
+    await Addon.updateOne({ _id: mixedTaxonomySnackPlan.body.data.id }, { $set: { isActive: false } });
 
     const explicitMealDisplayPlan = await invoke(createDashboardAddonPlan, {
       body: {
