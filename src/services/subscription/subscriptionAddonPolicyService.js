@@ -127,7 +127,19 @@ function getAddonEntitlementKey(entitlement, index = 0) {
 }
 
 function hasOwnValue(source, key) {
-  return Boolean(source && Object.prototype.hasOwnProperty.call(source, key));
+  if (!source) return false;
+  if (Object.prototype.hasOwnProperty.call(source, key)) return true;
+  if (typeof source.get === "function") {
+    const raw = source.get(key, null, { getters: false });
+    return raw !== undefined;
+  }
+  return false;
+}
+
+function rawValue(source, key) {
+  if (!source) return undefined;
+  if (typeof source.get === "function") return source.get(key, null, { getters: false });
+  return source[key];
 }
 
 function toNonNegativeInteger(value, fallback = 0) {
@@ -137,26 +149,31 @@ function toNonNegativeInteger(value, fallback = 0) {
 
 function resolveAddonBalanceCapacity(bucket) {
   if (!bucket) return 0;
-  const purchasedQty = toNonNegativeInteger(bucket.purchasedQty, 0);
-  const includedTotalQty = toNonNegativeInteger(bucket.includedTotalQty, 0);
-  const extraPurchasedQty = toNonNegativeInteger(bucket.extraPurchasedQty, 0);
+  const purchasedQty = toNonNegativeInteger(rawValue(bucket, "purchasedQty"), 0);
+  const includedTotalQty = toNonNegativeInteger(rawValue(bucket, "includedTotalQty"), 0);
+  const extraPurchasedQty = toNonNegativeInteger(rawValue(bucket, "extraPurchasedQty"), 0);
   return Math.max(purchasedQty, includedTotalQty + extraPurchasedQty, includedTotalQty);
+}
+
+function hasPositivePurchasedAddonUnits(bucket) {
+  return hasOwnValue(bucket, "purchasedQty") && toNonNegativeInteger(rawValue(bucket, "purchasedQty"), 0) > 0;
 }
 
 function isRecoverableUninitializedAddonBalanceBucket(bucket) {
   if (!bucket) return false;
   if (!hasOwnValue(bucket, "remainingQty")) return false;
-  const rawRemainingQty = Number(bucket.remainingQty || 0);
+  const rawRemainingQty = Number(rawValue(bucket, "remainingQty") || 0);
   if (!Number.isFinite(rawRemainingQty) || rawRemainingQty !== 0) return false;
+  if (!hasPositivePurchasedAddonUnits(bucket)) return false;
   if (resolveAddonBalanceCapacity(bucket) <= 0) return false;
-  return toNonNegativeInteger(bucket.consumedQty, 0) === 0
-    && toNonNegativeInteger(bucket.reservedQty, 0) === 0
-    && toNonNegativeInteger(bucket.overageConsumedQty, 0) === 0;
+  return toNonNegativeInteger(rawValue(bucket, "consumedQty"), 0) === 0
+    && toNonNegativeInteger(rawValue(bucket, "reservedQty"), 0) === 0
+    && toNonNegativeInteger(rawValue(bucket, "overageConsumedQty"), 0) === 0;
 }
 
 function resolveAddonBalanceRemainingQty(bucket) {
   if (!bucket) return 0;
-  const rawRemainingQty = Math.floor(Number(bucket.remainingQty));
+  const rawRemainingQty = Math.floor(Number(rawValue(bucket, "remainingQty")));
   if (Number.isFinite(rawRemainingQty) && rawRemainingQty > 0) return rawRemainingQty;
   if (isRecoverableUninitializedAddonBalanceBucket(bucket)) {
     return resolveAddonBalanceCapacity(bucket);
@@ -308,9 +325,9 @@ function findAddonBalanceBucket(subscription, {
     if (!bucket) return false;
     if (requirePositiveRemaining && resolveAddonBalanceRemainingQty(bucket) <= 0) return false;
 
-    const bucketCategory = normalizeSubscriptionAddonCategory(bucket.category, { allowEmpty: true });
-    const bucketPlanId = String(bucket.addonPlanId || bucket.addonId || "");
-    const bucketAddonId = String(bucket.addonId || "");
+    const bucketCategory = normalizeSubscriptionAddonCategory(rawValue(bucket, "category"), { allowEmpty: true });
+    const bucketPlanId = String(rawValue(bucket, "addonPlanId") || rawValue(bucket, "addonId") || "");
+    const bucketAddonId = String(rawValue(bucket, "addonId") || "");
 
     if (normalizedCategory && bucketCategory !== normalizedCategory) return false;
     if (normalizedPlanId) {
@@ -318,7 +335,7 @@ function findAddonBalanceBucket(subscription, {
     } else if (normalizedAddonId && bucketAddonId !== normalizedAddonId && bucketPlanId !== normalizedAddonId) {
       return false;
     }
-    if (unitPriceHalala !== null && Number(bucket.unitPriceHalala || 0) !== Number(unitPriceHalala || 0)) return false;
+    if (unitPriceHalala !== null && Number(rawValue(bucket, "unitPriceHalala") || 0) !== Number(unitPriceHalala || 0)) return false;
     return Boolean(normalizedCategory || normalizedPlanId || normalizedAddonId || unitPriceHalala !== null);
   }) || null;
 }
