@@ -126,6 +126,44 @@ function getAddonEntitlementKey(entitlement, index = 0) {
   return `${category}:${planId || index}`;
 }
 
+function hasOwnValue(source, key) {
+  return Boolean(source && Object.prototype.hasOwnProperty.call(source, key));
+}
+
+function toNonNegativeInteger(value, fallback = 0) {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function resolveAddonBalanceCapacity(bucket) {
+  if (!bucket) return 0;
+  const purchasedQty = toNonNegativeInteger(bucket.purchasedQty, 0);
+  const includedTotalQty = toNonNegativeInteger(bucket.includedTotalQty, 0);
+  const extraPurchasedQty = toNonNegativeInteger(bucket.extraPurchasedQty, 0);
+  return Math.max(purchasedQty, includedTotalQty + extraPurchasedQty, includedTotalQty);
+}
+
+function isRecoverableUninitializedAddonBalanceBucket(bucket) {
+  if (!bucket) return false;
+  if (!hasOwnValue(bucket, "remainingQty")) return false;
+  const rawRemainingQty = Number(bucket.remainingQty || 0);
+  if (!Number.isFinite(rawRemainingQty) || rawRemainingQty !== 0) return false;
+  if (resolveAddonBalanceCapacity(bucket) <= 0) return false;
+  return toNonNegativeInteger(bucket.consumedQty, 0) === 0
+    && toNonNegativeInteger(bucket.reservedQty, 0) === 0
+    && toNonNegativeInteger(bucket.overageConsumedQty, 0) === 0;
+}
+
+function resolveAddonBalanceRemainingQty(bucket) {
+  if (!bucket) return 0;
+  const rawRemainingQty = Math.floor(Number(bucket.remainingQty));
+  if (Number.isFinite(rawRemainingQty) && rawRemainingQty > 0) return rawRemainingQty;
+  if (isRecoverableUninitializedAddonBalanceBucket(bucket)) {
+    return resolveAddonBalanceCapacity(bucket);
+  }
+  return 0;
+}
+
 function getEligibleAddonEntitlementsForProduct(subscription, { productId, category, addonPlanId = null } = {}) {
   const entitlements = Array.isArray(subscription && subscription.addonSubscriptions)
     ? subscription.addonSubscriptions
@@ -213,7 +251,7 @@ function buildSimulatedAddonRemainingByCategory(subscription, day = {}) {
   for (const bucket of balances) {
     const category = normalizeSubscriptionAddonCategory(bucket && bucket.category);
     if (!category) continue;
-    let remainingQty = Number(bucket.remainingQty || 0);
+    let remainingQty = resolveAddonBalanceRemainingQty(bucket);
     for (const selection of existingSelections) {
       if (selection && selection.source === "subscription" && normalizeSubscriptionAddonCategory(selection.category) === category) {
         remainingQty += Math.max(1, Math.floor(Number(selection.qty || 1)));
@@ -237,7 +275,7 @@ function buildSimulatedAddonRemainingByEntitlement(subscription, day = {}) {
       addonId: entitlement.addonId || entitlement.addonPlanId,
       category: entitlement.category,
     });
-    simulatedRemaining.set(key, Number(bucket && bucket.remainingQty || 0));
+    simulatedRemaining.set(key, resolveAddonBalanceRemainingQty(bucket));
   });
 
   for (const selection of existingSelections) {
@@ -268,7 +306,7 @@ function findAddonBalanceBucket(subscription, {
 
   return balances.find((bucket) => {
     if (!bucket) return false;
-    if (requirePositiveRemaining && Number(bucket.remainingQty || 0) <= 0) return false;
+    if (requirePositiveRemaining && resolveAddonBalanceRemainingQty(bucket) <= 0) return false;
 
     const bucketCategory = normalizeSubscriptionAddonCategory(bucket.category, { allowEmpty: true });
     const bucketPlanId = String(bucket.addonPlanId || bucket.addonId || "");
@@ -299,8 +337,11 @@ module.exports = {
   hasModernAddonProductSnapshot,
   isAddonEntitlementEligibleForProduct,
   isAddonChoiceEligibleForAllowance,
+  isRecoverableUninitializedAddonBalanceBucket,
   normalizeSubscriptionAddonCategory,
-  resolveAddonCategoryForMenuProduct,
+  resolveAddonBalanceRemainingQty,
   resolveEntitlementPlanId,
+  resolveAddonCategoryForMenuProduct,
+  resolveAddonBalanceCapacity,
   selectAddonEntitlementForProduct,
 };
