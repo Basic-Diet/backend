@@ -12,6 +12,7 @@ const requestLanguageMiddleware = require("./middleware/requestLanguage");
 const errorResponse = require("./utils/errorResponse");
 const { logger } = require("./utils/logger");
 const { validateAndFixResponse } = require("./utils/encoding");
+const { normalizeSubscriptionBilingualResponse } = require("./utils/subscriptionBilingualResponse");
 const swaggerSpec = require("./docs/swagger");
 
 function normalizeTopLevelStatusField(payload, responseStatusCode, reqPath = "") {
@@ -161,9 +162,10 @@ function createApp() {
     const originalJson = res.json.bind(res);
     res.json = (payload) => {
       const normalized = normalizeTopLevelStatusField(payload, res.statusCode, req.originalUrl || req.path);
+      const bilingual = normalizeSubscriptionBilingualResponse(normalized, req);
       const requestUrl = req.originalUrl || req.path || "";
       const shouldPreserveExactCopy = /^\/api\/subscriptions\/[^/]+\/pickup-availability(?:\?|$)/.test(requestUrl);
-      const sanitized = shouldPreserveExactCopy ? normalized : validateAndFixResponse(normalized);
+      const sanitized = shouldPreserveExactCopy ? bilingual : validateAndFixResponse(bilingual);
       try {
         JSON.stringify(sanitized);
         return originalJson(sanitized);
