@@ -10,9 +10,26 @@ const CATEGORY_LABELS = Object.freeze({
   meal: { ar: "الوجبات", en: "Meals" },
   premium_meal: { ar: "الوجبات المميزة", en: "Premium Meals" },
   premium_large_salad: { ar: "السلطات المميزة", en: "Premium Salads" },
+  large_salad: { ar: "السلطات الكبيرة", en: "Large Salads" },
+  protein_extra: { ar: "إضافات البروتين", en: "Protein Extras" },
   sandwich: { ar: "السندوتشات", en: "Sandwiches" },
   addon: { ar: "الإضافات", en: "Add-ons" },
 });
+
+const FLAT_TEXT_BASES = Object.freeze([
+  "statusText",
+  "selectionText",
+  "unavailableText",
+  "emptyText",
+  "message",
+  "statusLabel",
+  "reasonLabel",
+  "commercialStateLabel",
+  "paymentStatusLabel",
+  "availabilityLabel",
+  "sectionLabel",
+  "label",
+]);
 
 function cleanText(value) {
   if (value === undefined || value === null) return "";
@@ -41,13 +58,56 @@ function requestedLanguage(req) {
     if (normalized) return normalized;
   }
 
-  // These two mobile contracts historically defaulted to English. Arabic is now
-  // the compatibility default while both languages remain present in the payload.
   return "ar";
 }
 
 function selected(pair, lang) {
   return lang === "en" ? (pair.en || pair.ar) : (pair.ar || pair.en);
+}
+
+function normalizeFlatTextPair(target, base, lang) {
+  const arKey = `${base}Ar`;
+  const enKey = `${base}En`;
+  const i18nKey = `${base}I18n`;
+  const textKey = `${base}Text`;
+  const hasPair = Object.prototype.hasOwnProperty.call(target, arKey)
+    || Object.prototype.hasOwnProperty.call(target, enKey)
+    || Object.prototype.hasOwnProperty.call(target, i18nKey);
+  if (!hasPair) return;
+
+  const pair = pairFrom(target[i18nKey], {
+    ar: target[arKey] || (lang === "ar" && typeof target[base] === "string" ? target[base] : ""),
+    en: target[enKey] || (lang === "en" && typeof target[base] === "string" ? target[base] : ""),
+  });
+  target[i18nKey] = pair;
+  target[arKey] = pair.ar;
+  target[enKey] = pair.en;
+  target[textKey] = selected(pair, lang);
+  if (!Object.prototype.hasOwnProperty.call(target, base) || typeof target[base] === "string") {
+    target[base] = selected(pair, lang);
+  }
+}
+
+function normalizeArrayPair(target, base, lang) {
+  const arKey = `${base}Ar`;
+  const enKey = `${base}En`;
+  const i18nKey = `${base}I18n`;
+  const hasArrays = Array.isArray(target[arKey]) || Array.isArray(target[enKey]);
+  if (!hasArrays) return;
+  const ar = Array.isArray(target[arKey]) ? target[arKey].map(cleanText).filter(Boolean) : [];
+  const en = Array.isArray(target[enKey]) ? target[enKey].map(cleanText).filter(Boolean) : [];
+  const length = Math.max(ar.length, en.length);
+  const pairs = [];
+  for (let index = 0; index < length; index += 1) {
+    pairs.push({
+      ar: ar[index] || en[index] || "",
+      en: en[index] || ar[index] || "",
+    });
+  }
+  target[arKey] = pairs.map((pair) => pair.ar);
+  target[enKey] = pairs.map((pair) => pair.en);
+  target[i18nKey] = pairs;
+  target[base] = pairs.map((pair) => selected(pair, lang));
 }
 
 function normalizeNamedObject(target, lang) {
@@ -88,7 +148,8 @@ function normalizeNamedObject(target, lang) {
     target.titleEn = pair.en;
     target.titleText = selected(pair, lang);
   } else if (target.titleAr || target.titleEn) {
-    const pair = pairFrom(null, { ar: target.titleAr, en: target.titleEn });
+    const pair = pairFrom(target.titleI18n, { ar: target.titleAr, en: target.titleEn });
+    target.titleI18n = pair;
     target.titleAr = pair.ar;
     target.titleEn = pair.en;
     target.titleText = selected(pair, lang);
@@ -100,7 +161,16 @@ function normalizeNamedObject(target, lang) {
     target.subtitleAr = pair.ar;
     target.subtitleEn = pair.en;
     target.subtitleText = selected(pair, lang);
+  } else if (target.subtitleAr || target.subtitleEn) {
+    const pair = pairFrom(target.subtitleI18n, { ar: target.subtitleAr, en: target.subtitleEn });
+    target.subtitleI18n = pair;
+    target.subtitleAr = pair.ar;
+    target.subtitleEn = pair.en;
+    target.subtitleText = selected(pair, lang);
   }
+
+  for (const base of FLAT_TEXT_BASES) normalizeFlatTextPair(target, base, lang);
+  normalizeArrayPair(target, "badges", lang);
 
   return target;
 }
