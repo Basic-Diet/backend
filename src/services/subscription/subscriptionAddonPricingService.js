@@ -5,6 +5,9 @@ const {
   resolveAddonEntitlementContext,
   resolveEntitlementPlanId,
 } = require("./subscriptionAddonPolicyService");
+const {
+  buildAddonSelectionAvailability,
+} = require("./subscriptionAddonAvailabilityService");
 
 const SYSTEM_CURRENCY = "SAR";
 
@@ -221,6 +224,17 @@ function buildSubscriptionAddonCoverageSummary(subscription) {
       });
       rows.push({
         ...preview,
+        ...buildAddonSelectionAvailability({
+          pricing: preview,
+          ownedSnapshot: Boolean(snapshot),
+          snapshotMissing: !snapshot,
+          liveCatalogMissing: true,
+          catalogActive: false,
+          catalogAvailable: false,
+          liveCatalogActive: false,
+          liveCatalogAvailable: false,
+          availableForNewSale: false,
+        }),
         key: snapshot && snapshot.key || "",
         category: entitlement && entitlement.category || "",
         entitlementCategory: entitlement && entitlement.category || "",

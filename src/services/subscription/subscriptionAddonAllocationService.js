@@ -8,6 +8,9 @@ const {
 const {
   buildAddonChoicePricingPreview,
 } = require("./subscriptionAddonPricingService");
+const {
+  buildAddonSelectionAvailability,
+} = require("./subscriptionAddonAvailabilityService");
 
 function resolveAddonSelectionName(addonDoc) {
   if (!addonDoc || addonDoc.name == null) return "";
@@ -94,6 +97,18 @@ async function reconcileAddonInclusions(
       simulatedRemaining.set(entitlementKey, preview.remainingAfter);
     }
 
+    const ownedSnapshot = choice.fromOwnedSnapshot === true;
+    const snapshotMissing = choice.snapshotMissing === true;
+    const liveCatalogMissing = choice.liveCatalogMissing === true;
+    const availability = buildAddonSelectionAvailability({
+      product: doc,
+      pricing: preview,
+      ownedSnapshot: ownedSnapshot || choice.legacyRecovered === true,
+      snapshotMissing: snapshotMissing && choice.legacyRecovered !== true,
+      liveCatalogMissing,
+      availableForNewSale: ownedSnapshot ? false : doc.availableForNewSale !== false,
+    });
+
     newSelections.push({
       addonId: productId,
       productId,
@@ -108,14 +123,12 @@ async function reconcileAddonInclusions(
       entitlementCategory: preview.entitlementCategory || "",
       entitlementKey: preview.entitlementKey || "",
       balanceBucketId: preview.balanceBucketId || null,
-      ownedSnapshot: choice.fromOwnedSnapshot === true,
-      snapshotMissing: choice.snapshotMissing === true,
-      liveCatalogMissing: choice.liveCatalogMissing === true,
+      ownedSnapshot,
+      snapshotMissing,
+      liveCatalogMissing,
       legacyRecovered: choice.legacyRecovered === true || preview.legacyRecovered === true,
       legacySourceProductId: choice.legacySourceProductId || preview.legacySourceProductId || null,
-      available: doc.isAvailable !== false,
-      active: doc.isActive !== false,
-      availableForNewSale: doc.availableForNewSale !== false,
+      ...availability,
       isEligibleForAllowance: preview.isEligibleForAllowance,
       source: preview.source,
       qty: quantity,

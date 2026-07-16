@@ -34,6 +34,9 @@ const {
   resolveEntitlementBalance,
 } = require("./subscriptionAddonPricingService");
 const {
+  buildAddonSelectionAvailability,
+} = require("./subscriptionAddonAvailabilityService");
+const {
   findCurrentActiveSubscriptionForUser,
 } = require("./subscriptionCurrentResolverService");
 const {
@@ -116,6 +119,11 @@ function resolveDisplayCategoryForProduct(product, sourceCategory, { entitlement
 
 function serializeChoice(product, categoryKey, lang) {
   const priceHalala = Number(product.priceHalala || 0);
+  const availableForNewSale = product.availableForNewSale !== false;
+  const availability = buildAddonSelectionAvailability({
+    product,
+    availableForNewSale,
+  });
   return {
     id: String(product._id),
     productId: String(product._id),
@@ -142,9 +150,7 @@ function serializeChoice(product, categoryKey, lang) {
     categoryKey,
     itemType: product.itemType || "product",
     type: "menu_product",
-    available: product.isAvailable !== false,
-    active: product.isActive !== false,
-    availableForNewSale: product.availableForNewSale !== false,
+    ...availability,
     snapshotMissing: product._snapshotMissing === true,
     liveCatalogMissing: product._liveCatalogMissing === true,
     ui: normalizeProductUiMetadata(product.ui),
@@ -708,16 +714,24 @@ async function buildSubscriptionAddonChoicesCatalog({
       const displayCategory = resolveDisplayCategoryForProduct(product, sourceCategory, { entitlementCategory });
       if (!displayCategory || !requestedCategoryMatches(requestedCategory, displayCategory)) continue;
       const serialized = serializeChoice(product, sourceCategory.key, lang);
+      const pricing = buildChoicePricingMetadata(subscription, entitlement, product);
+      const ownedSnapshot = fromSnapshot === true;
+      const availability = buildAddonSelectionAvailability({
+        product,
+        pricing,
+        ownedSnapshot: ownedSnapshot || legacyRecovered === true,
+        snapshotMissing: snapshotMissing === true && legacyRecovered !== true,
+        liveCatalogMissing: liveCatalogMissing === true,
+        availableForNewSale: false,
+      });
       const choice = {
         ...serialized,
         ...metadata,
-        ...buildChoicePricingMetadata(subscription, entitlement, product),
+        ...pricing,
+        ...availability,
         category: displayCategory,
         entitlementCategory,
-        availableForNewSale: false,
-        available: product.isAvailable !== false,
-        active: product.isActive !== false,
-        ownedSnapshot: fromSnapshot === true,
+        ownedSnapshot,
         snapshotMissing: snapshotMissing === true,
         liveCatalogMissing: liveCatalogMissing === true,
         legacyRecovered: legacyRecovered === true,
@@ -768,9 +782,16 @@ async function buildGenericAddonChoicesCatalog({
         if (!sourceCategory) return null;
         const displayCategory = resolveDisplayCategoryForProduct(product, sourceCategory, { genericOnly: Boolean(mapping) });
         if (displayCategory !== addonCategory) return null;
+        const serialized = serializeChoice(product, sourceCategory.key, lang);
+        const pricing = buildGenericChoicePricingMetadata(product, null, addonCategory);
         return {
-          ...serializeChoice(product, sourceCategory.key, lang),
-          ...buildGenericChoicePricingMetadata(product, null, addonCategory),
+          ...serialized,
+          ...pricing,
+          ...buildAddonSelectionAvailability({
+            product,
+            pricing,
+            availableForNewSale: serialized.availableForNewSale,
+          }),
           category: addonCategory,
         };
       })
@@ -923,9 +944,11 @@ async function buildAddonChoicesCatalog({
           liveCatalogMissing: choice.liveCatalogMissing === true,
           legacyRecovered: choice.legacyRecovered === true,
           legacySourceProductId: choice.legacySourceProductId || null,
-          available: choice.available !== false,
-          active: choice.active !== false,
           availableForNewSale: choice.availableForNewSale !== false,
+          catalogAvailable: choice.catalogAvailable === true,
+          catalogActive: choice.catalogActive === true,
+          liveCatalogAvailable: choice.liveCatalogAvailable === true,
+          liveCatalogActive: choice.liveCatalogActive === true,
         };
         const authoritative = buildGenericChoicePricingMetadata({
           _id: choice.id,
@@ -934,6 +957,12 @@ async function buildAddonChoicesCatalog({
           maxPerDay: choice.maxPerDay,
         }, subscription, groupCategory);
         Object.assign(choice, authoritative);
+        Object.assign(choice, buildAddonSelectionAvailability({
+          pricing: authoritative,
+          ...availabilityMetadata,
+          ownedSnapshot: availabilityMetadata.ownedSnapshot || availabilityMetadata.legacyRecovered,
+          snapshotMissing: availabilityMetadata.snapshotMissing && !availabilityMetadata.legacyRecovered,
+        }));
         Object.assign(choice, availabilityMetadata);
       }
     }
@@ -1051,20 +1080,32 @@ async function buildAddonChoiceGroups({
       const isOwnedChoice = isEntitledProduct
         || pricing.isEligibleForAllowance === true;
       const owned = ownedMetadataById.get(productId);
+      const ownedSnapshot = owned ? owned.fromSnapshot === true : pricing.ownedSnapshot;
+      const snapshotMissing = owned ? owned.snapshotMissing === true : serialized.snapshotMissing;
+      const liveCatalogMissing = owned ? owned.liveCatalogMissing === true : serialized.liveCatalogMissing;
+      const availableForNewSale = isOwnedChoice ? false : serialized.availableForNewSale;
       return {
         ...serialized,
         ...pricing,
+        ...buildAddonSelectionAvailability({
+          product,
+          pricing,
+          ownedSnapshot: ownedSnapshot || Boolean(owned && owned.legacyRecovered),
+          snapshotMissing: snapshotMissing && !Boolean(owned && owned.legacyRecovered),
+          liveCatalogMissing,
+          availableForNewSale,
+        }),
         addonPlanId,
         category: displayKey,
         displayCategory: displayKey,
         allowanceCategory,
         entitlementCategory: entitlementCategory || null,
-        ownedSnapshot: owned ? owned.fromSnapshot === true : pricing.ownedSnapshot,
-        snapshotMissing: owned ? owned.snapshotMissing === true : serialized.snapshotMissing,
-        liveCatalogMissing: owned ? owned.liveCatalogMissing === true : serialized.liveCatalogMissing,
+        ownedSnapshot,
+        snapshotMissing,
+        liveCatalogMissing,
         legacyRecovered: owned ? owned.legacyRecovered === true : pricing.legacyRecovered,
         legacySourceProductId: owned && owned.legacySourceProductId || pricing.legacySourceProductId || null,
-        availableForNewSale: isOwnedChoice ? false : serialized.availableForNewSale,
+        availableForNewSale,
       };
     });
     const balance = entitlement

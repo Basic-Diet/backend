@@ -132,7 +132,11 @@ function entitlementProductIds(entitlement) {
   return [...ids];
 }
 
-function materializeProductFromSnapshot(snapshot) {
+function materializeProductFromSnapshot(snapshot, liveProduct = null, catalogItemsById = new Map()) {
+  const liveCatalogMissing = !liveProduct;
+  const catalogActive = Boolean(liveProduct) && liveProduct.isActive !== false;
+  const catalogAvailable = Boolean(liveProduct)
+    && isLinkedDocGloballyAvailable(liveProduct, catalogItemsById);
   return {
     _id: snapshot.id || snapshot._id,
     key: snapshot.key || "",
@@ -150,7 +154,11 @@ function materializeProductFromSnapshot(snapshot) {
     isActive: false,
     isAvailable: false,
     isVisible: false,
+    availableForNewSale: false,
     _isOwnedSnapshot: true,
+    _catalogActive: catalogActive,
+    _catalogAvailable: catalogAvailable,
+    _liveCatalogMissing: liveCatalogMissing,
   };
 }
 
@@ -387,14 +395,16 @@ async function loadOwnedSnapshotProducts(productIds, entitlement, {
     if (snapId) snapshotById.set(snapId, snap);
   }
 
-  const idsMissingSnapshot = validIds.filter((id) => !snapshotById.has(id));
   let rows = [];
-  if (idsMissingSnapshot.length) {
-    let query = MenuProductModel.find({ _id: { $in: idsMissingSnapshot } });
+  if (validIds.length) {
+    // Live rows are loaded for status metadata only. Snapshot content remains
+    // authoritative for owned selections and is never filtered by these flags.
+    let query = MenuProductModel.find({ _id: { $in: validIds } });
     if (session && typeof query.session === "function") query = query.session(session);
     rows = await query.lean();
   }
   const byId = new Map(rows.map((row) => [String(row._id), row]));
+  const catalogItemsById = await loadCatalogItemsByIdForDocs(rows);
 
   const results = [];
   const entitlementKey = buildEntitlementKey(entitlement);
@@ -402,7 +412,13 @@ async function loadOwnedSnapshotProducts(productIds, entitlement, {
   for (const id of validIds) {
     const snap = snapshotById.get(id);
     if (snap) {
-      results.push({ product: materializeProductFromSnapshot(snap), fromSnapshot: true, id });
+      const liveProduct = byId.get(id) || null;
+      results.push({
+        product: materializeProductFromSnapshot(snap, liveProduct, catalogItemsById),
+        fromSnapshot: true,
+        liveCatalogMissing: !liveProduct,
+        id,
+      });
       continue;
     }
 

@@ -24,6 +24,9 @@ const {
   buildAddonCategoryAllowances,
   buildAddonSubscriptionAllowances,
 } = require("../src/services/subscription/subscriptionAddonBalanceService");
+const {
+  buildAddonSelectionAvailability,
+} = require("../src/services/subscription/subscriptionAddonAvailabilityService");
 
 const REQUIRED_COVERAGE_FIELDS = [
   "id",
@@ -51,6 +54,14 @@ const REQUIRED_COVERAGE_FIELDS = [
   "unitPriceHalala",
   "pricingMode",
   "maxPerDay",
+  "catalogAvailable",
+  "catalogActive",
+  "liveCatalogAvailable",
+  "liveCatalogActive",
+  "selectable",
+  "selectionAvailable",
+  "disabled",
+  "disableReason",
 ];
 
 function dateOffset(days) {
@@ -86,6 +97,27 @@ function assertIncluded(row, total, remaining, label, requireChoiceFields = true
   assert(row.addonPlanId, `${label}: addonPlanId`);
   assert(row.balanceBucketId, `${label}: balanceBucketId`);
   assert(row.entitlementKey, `${label}: entitlementKey`);
+}
+
+function assertOwnedSelectable(row, label, {
+  catalogAvailable = false,
+  catalogActive = false,
+} = {}) {
+  assert.strictEqual(row.ownedSnapshot, true, `${label}: owned snapshot`);
+  assert.strictEqual(row.source, "subscription", `${label}: source`);
+  assert.strictEqual(row.pricingMode, "allowance_covered", `${label}: pricing mode`);
+  assert(row.coveredQty > 0, `${label}: covered quantity`);
+  assert.strictEqual(row.available, true, `${label}: available`);
+  assert.strictEqual(row.active, true, `${label}: active`);
+  assert.strictEqual(row.availableForNewSale, false, `${label}: new sale`);
+  assert.strictEqual(row.catalogAvailable, catalogAvailable, `${label}: catalog available`);
+  assert.strictEqual(row.catalogActive, catalogActive, `${label}: catalog active`);
+  assert.strictEqual(row.liveCatalogAvailable, catalogAvailable, `${label}: live catalog available`);
+  assert.strictEqual(row.liveCatalogActive, catalogActive, `${label}: live catalog active`);
+  assert.strictEqual(row.selectable, true, `${label}: selectable`);
+  assert.strictEqual(row.selectionAvailable, true, `${label}: selection available`);
+  assert.strictEqual(row.disabled, false, `${label}: disabled`);
+  assert.strictEqual(row.disableReason, null, `${label}: disable reason`);
 }
 
 function assertPaidNoEntitlement(row, expectedUnitPrice, label, requireChoiceFields = true, expectNoPlan = true) {
@@ -213,10 +245,10 @@ async function createSubscriptionFixture({
 
 async function createMultiPlanAllowanceFixture({ user, plan }) {
   const definitions = [
-    { allowanceCategory: "juice", displayCategory: "juice", sourceCategory: "juices", name: "Juice Subscription", nameAr: "عصائر", priceHalala: 1000 },
+    { allowanceCategory: "juice", displayCategory: "juice", sourceCategory: "juices", name: "Juice Subscription", nameAr: "عصائر", priceHalala: 1000, productNames: ["Orange Juice", "Apple Juice", "Mango Juice"] },
     { allowanceCategory: "small_salad", displayCategory: "small_salad", sourceCategory: "light_options", name: "Small Salad Subscription", nameAr: "سلطة صغيرة", priceHalala: 900 },
     { allowanceCategory: "snack", displayCategory: "snack", sourceCategory: "desserts", name: "Snack Subscription", nameAr: "سناك", priceHalala: 1500 },
-    { allowanceCategory: "snack", displayCategory: "ice_cream", sourceCategory: "ice_cream", name: "Ice Cream Subscription", nameAr: "آيس كريم", priceHalala: 500 },
+    { allowanceCategory: "snack", displayCategory: "ice_cream", sourceCategory: "ice_cream", name: "Ice Cream Subscription", nameAr: "آيس كريم", priceHalala: 500, productNames: ["Vanilla Ice Cream", "Chocolate Ice Cream", "Ice Cream Add-on"] },
   ];
   const now = new Date();
   const planProducts = [];
@@ -234,7 +266,8 @@ async function createMultiPlanAllowanceFixture({ user, plan }) {
       categoryId: category._id,
       key: `multi_${definition.displayCategory}_${productIndex + 1}`,
       name: {
-        en: `${definition.name} Choice ${productIndex + 1}`,
+        en: definition.productNames && definition.productNames[productIndex]
+          || `${definition.name} Choice ${productIndex + 1}`,
         ar: `${definition.nameAr} ${productIndex + 1}`,
       },
       itemType: definition.displayCategory,
@@ -415,6 +448,16 @@ async function main() {
   await Promise.all([Subscription.init(), SubscriptionDay.init()]);
 
   try {
+    const inactivePaidExtraAvailability = buildAddonSelectionAvailability({
+      product: { isActive: false, isAvailable: false, availableForNewSale: false },
+      pricing: { source: "pending_payment", pricingMode: "paid_no_entitlement", coveredQty: 0 },
+      ownedSnapshot: false,
+      availableForNewSale: false,
+    });
+    assert.strictEqual(inactivePaidExtraAvailability.selectable, false);
+    assert.strictEqual(inactivePaidExtraAvailability.selectionAvailable, false);
+    assert.strictEqual(inactivePaidExtraAvailability.disabled, true);
+
     const now = new Date();
     const category = await MenuCategory.create({
       key: "juices",
@@ -497,6 +540,13 @@ async function main() {
     });
     const primaryAuth = { Authorization: `Bearer ${primary.token}`, "Accept-Language": "en" };
 
+    // The immutable subscription snapshot remains selectable after the live
+    // product is disabled for new sales.
+    await MenuProduct.updateOne(
+      { _id: products[0]._id },
+      { $set: { isActive: false, isAvailable: false } }
+    );
+
     let res = await api.get("/api/subscriptions/addon-choices").set(primaryAuth);
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
     const choices = res.body.data.juice.choices;
@@ -504,6 +554,7 @@ async function main() {
     choices.forEach((choice, index) => assertCoverageFields(choice, `choice ${index + 1}`));
     const includedChoice = choices.find((choice) => String(choice.id) === String(products[0]._id));
     assertIncluded(includedChoice, 7, 7, "GET addon-choices included");
+    assertOwnedSelectable(includedChoice, "GET inactive owned snapshot");
     assert(!choices.some((choice) => String(choice.id) === String(products[4]._id)), "unconfigured same-category product is not injected into the plan group");
 
     res = await api.get("/api/subscriptions/addon-choice").set(primaryAuth);
@@ -527,6 +578,7 @@ async function main() {
       .send(includedPayload);
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
     assertIncluded(res.body.data.addonSelections[0], 7, 7, "validate included", false);
+    assertOwnedSelectable(res.body.data.addonSelections[0], "validate inactive owned snapshot");
     assert.strictEqual(res.body.data.paymentRequirement.requiresPayment, false);
     assert.strictEqual(res.body.data.paymentRequirement.addonPendingPaymentCount, 0);
     assert.strictEqual(res.body.data.paymentRequirement.pendingAmountHalala, 0);
@@ -547,6 +599,7 @@ async function main() {
     assert(savedIncluded.addonPlanId);
     assert(savedIncluded.balanceBucketId);
     assert(savedIncluded.entitlementKey);
+    assertOwnedSelectable(savedIncluded, "save inactive owned snapshot");
 
     res = await api
       .get(`/api/subscriptions/${primary.subscription._id}/days/${primary.dates[0]}`)
@@ -555,6 +608,7 @@ async function main() {
     assert.strictEqual(res.body.data.addonSelections[0].source, "subscription");
     assert.strictEqual(res.body.data.addonSelections[0].coveredQty, 1);
     assert.strictEqual(res.body.data.paymentRequirement.requiresPayment, false);
+    assertOwnedSelectable(res.body.data.addonSelections[0], "day read inactive owned snapshot");
 
     const extraPayload = selectionBody({ protein, carb, addonIds: [products[4]._id] });
     res = await api
@@ -588,6 +642,9 @@ async function main() {
     assert(overviewIncluded, "overview contains exact included product coverage");
     assert.strictEqual(overviewIncluded.isEligibleForAllowance, true);
     assert.strictEqual(overviewIncluded.remainingQty, 6);
+    assert.strictEqual(overviewIncluded.selectable, true);
+    assert.strictEqual(overviewIncluded.selectionAvailable, true);
+    assert.strictEqual(overviewIncluded.availableForNewSale, false);
     assert.strictEqual(res.body.data.addonBalanceSummary.juice.remainingUnits, 6);
     assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 1);
 
@@ -598,9 +655,26 @@ async function main() {
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
     assert.notStrictEqual(res.body.error && res.body.error.code, "INVALID_ID");
 
+    await MenuProduct.updateOne(
+      { _id: products[0]._id },
+      { $set: { isActive: true, isAvailable: true } }
+    );
+
     const multiPlanUser = await createUser("Four plan allowance user");
     const multiPlan = await createMultiPlanAllowanceFixture({ user: multiPlanUser, plan });
     const multiPlanAuth = { Authorization: `Bearer ${multiPlan.token}`, "Accept-Language": "en" };
+    await MenuProduct.updateMany(
+      {
+        _id: {
+          $in: [
+            ...multiPlan.planProducts[0].map((product) => product._id),
+            multiPlan.planProducts[2][0]._id,
+            ...multiPlan.planProducts[3].map((product) => product._id),
+          ],
+        },
+      },
+      { $set: { isActive: false, isAvailable: false } }
+    );
     const multiPlanSubscription = await Subscription.findById(multiPlan.subscription._id).lean();
     const categoryAllowances = buildAddonCategoryAllowances(multiPlanSubscription);
     const subscriptionAllowances = buildAddonSubscriptionAllowances(multiPlanSubscription);
@@ -694,6 +768,22 @@ async function main() {
     assert(iceCreamChoiceGroup.choices.every((choice) => choice.coveredQty === 1));
     assert(iceCreamChoiceGroup.choices.every((choice) => choice.paidQty === 0));
     assert.deepStrictEqual(
+      iceCreamChoiceGroup.choices.map((choice) => choice.nameEn),
+      ["Vanilla Ice Cream", "Chocolate Ice Cream", "Ice Cream Add-on"]
+    );
+    assert.deepStrictEqual(
+      res.body.addonChoiceGroups.find((group) => group.displayKey === "juice").choices.map((choice) => choice.nameEn),
+      ["Orange Juice", "Apple Juice", "Mango Juice"]
+    );
+    iceCreamChoiceGroup.choices.forEach((choice) => assertOwnedSelectable(choice, `inactive ice cream ${choice.nameEn}`));
+    res.body.addonChoiceGroups
+      .find((group) => group.displayKey === "juice")
+      .choices.forEach((choice) => assertOwnedSelectable(choice, `inactive juice ${choice.nameEn}`));
+    assertOwnedSelectable(
+      snackChoiceGroup.choices.find((choice) => String(choice.productId) === String(multiPlan.planProducts[2][0]._id)),
+      "new custom add-on plan inactive snapshot"
+    );
+    assert.deepStrictEqual(
       snackChoiceGroup.choices.map((choice) => choice.productId).sort(),
       multiPlan.planProducts[2].map((product) => String(product._id)).sort()
     );
@@ -749,6 +839,7 @@ async function main() {
     assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 4);
     assert.strictEqual(res.body.data.addonSelections[0].source, "subscription");
     assert.strictEqual(res.body.data.addonSelections[0].pricingMode, "allowance_covered");
+    assertOwnedSelectable(res.body.data.addonSelections[0], "validate inactive ice cream snapshot");
     assert.strictEqual(res.body.data.paymentRequirement.requiresPayment, false);
     assert.strictEqual(
       res.body.data.addonSubscriptionAllowances.find((row) => row.displayCategory === "ice_cream").remainingIncludedQty,
@@ -763,6 +854,7 @@ async function main() {
     assert.strictEqual(res.body.data.addonCategoryAllowances.length, 3);
     assert.strictEqual(res.body.data.addonSubscriptionAllowances.length, 4);
     assert.strictEqual(res.body.data.addonSelections[0].source, "subscription");
+    assertOwnedSelectable(res.body.data.addonSelections[0], "save inactive ice cream snapshot");
     assert.strictEqual(res.body.data.paymentRequirement.requiresPayment, false);
 
     const partialUser = await createUser("Partial allowance user");
