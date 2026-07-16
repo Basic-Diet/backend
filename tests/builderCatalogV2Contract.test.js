@@ -12,7 +12,10 @@ const request = require("supertest");
 const { createApp } = require("../src/app");
 const MenuOption = require("../src/models/MenuOption");
 const MenuOptionGroup = require("../src/models/MenuOptionGroup");
+const MenuProduct = require("../src/models/MenuProduct");
+const PremiumUpgradeConfig = require("../src/models/PremiumUpgradeConfig");
 const { seedCatalog } = require("../scripts/bootstrap/seed-catalog");
+const mealBuilderConfigService = require("../src/services/subscription/mealBuilderConfigService");
 
 const TEST_DB_NAME = `builder_catalog_v2_contract_${Date.now()}`;
 
@@ -76,6 +79,45 @@ function firstProduct(section, label) {
 
 function groupByKey(product, key) {
   return (product.optionGroups || []).find((group) => group.key === key || group.sourceKey === key);
+}
+
+function premiumProteinGroup(catalog) {
+  const section = sectionByKey(catalog, "premium_meal") || sectionByKey(catalog, "premium");
+  assertObject(section, "premium catalog section");
+  const product = (section.products || []).find((row) => row.selectionType === "premium_meal")
+    || firstProduct(section, "premium catalog section");
+  const group = groupByKey(product, "proteins") || groupByKey(product, "protein");
+  assertObject(group, "premium protein group");
+  return group;
+}
+
+function assertDashboardPremiumParity(catalog, label) {
+  const group = premiumProteinGroup(catalog);
+  const fajita = (group.options || []).find((option) => option.key === "chicken_fajita");
+  assertObject(fajita, `${label} Chicken Fajita`);
+  assert.strictEqual(fajita.name, "فاهيتا", `${label} Arabic selected name`);
+  assert.strictEqual(fajita.nameI18n.ar, "فاهيتا", `${label} Arabic nameI18n`);
+  assert.strictEqual(fajita.nameI18n.en, "Chicken Fajita", `${label} English nameI18n`);
+  assert.strictEqual(fajita.displayCategoryKey, "premium", `${label} premium display category`);
+  assert.strictEqual(fajita.proteinFamilyKey, "premium", `${label} premium family`);
+  assert.strictEqual(fajita.selectionType, "premium_meal", `${label} premium selection type`);
+  assert.strictEqual(fajita.isPremium, true, `${label} isPremium`);
+  assert.strictEqual(fajita.premiumKey, "chicken_fajita", `${label} premiumKey`);
+  assert.strictEqual(fajita.extraFeeHalala, 2500, `${label} dashboard extra fee`);
+  assert.strictEqual(fajita.extraPriceHalala, 2500, `${label} dashboard extra price`);
+  assert.strictEqual(fajita.sortOrder, 110, `${label} dashboard sort order`);
+
+  const sections = group.optionSections || [];
+  const premium = sections.find((section) => section.key === "premium");
+  const chicken = sections.find((section) => section.key === "chicken");
+  assertObject(premium, `${label} premium optionSection`);
+  assert.deepStrictEqual(
+    premium.optionKeys,
+    ["beef_steak", "shrimp", "salmon", "chicken_fajita"],
+    `${label} derives four premium options from active dashboard configuration`
+  );
+  assert.strictEqual(premium.optionIds.length, 4, `${label} premium option ids`);
+  assert(!chicken || !chicken.optionKeys.includes("chicken_fajita"), `${label} does not leak Chicken Fajita into chicken optionSection`);
 }
 
 function allV2Groups(catalog) {
@@ -349,11 +391,53 @@ async function enrichContractFixtureMetadata() {
   );
 }
 
+async function configureDashboardChickenFajitaPremium() {
+  const [proteinsGroup, basicMeal, chickenFajita] = await Promise.all([
+    MenuOptionGroup.findOne({ key: "proteins" }).lean(),
+    MenuProduct.findOne({ key: "basic_meal" }).lean(),
+    MenuOption.findOne({ key: "chicken_fajita" }),
+  ]);
+  assertObject(proteinsGroup, "dashboard premium proteins group");
+  assertObject(basicMeal, "dashboard premium basic meal");
+  assertObject(chickenFajita, "dashboard premium Chicken Fajita source");
+
+  chickenFajita.name = { ar: "فاهيتا", en: "Chicken Fajita" };
+  chickenFajita.displayCategoryKey = "chicken";
+  chickenFajita.proteinFamilyKey = "chicken";
+  chickenFajita.selectionType = "standard_meal";
+  chickenFajita.isPremium = false;
+  chickenFajita.extraFeeHalala = 0;
+  chickenFajita.extraPriceHalala = 0;
+  await chickenFajita.save();
+
+  await PremiumUpgradeConfig.create({
+    sourceType: "menu_option",
+    sourceId: chickenFajita._id,
+    sourceProductId: basicMeal._id,
+    sourceGroupId: proteinsGroup._id,
+    selectionType: "premium_meal",
+    premiumKey: "chicken_fajita",
+    displayGroupKey: "premium",
+    upgradeDeltaHalala: 2500,
+    currency: "SAR",
+    isEnabled: true,
+    isVisible: true,
+    status: "active",
+    sortOrder: 110,
+    sourceSnapshot: {
+      key: "chicken_fajita",
+      name: { ar: "فاهيتا", en: "Chicken Fajita" },
+      context: { productKey: "basic_meal", groupKey: "proteins" },
+    },
+  });
+}
+
 async function run() {
   await connect();
   try {
     await seedCatalog({ reset: true, sync: true });
     await enrichContractFixtureMetadata();
+    await configureDashboardChickenFajitaPremium();
 
     const app = createApp();
     const api = request(app);
@@ -364,6 +448,28 @@ async function run() {
     assertObject(res.body.data, "default response data");
     assertDefaultTopLevelCompatibility(res.body.data);
     assertBuilderCatalogV2(res.body.data.builderCatalogV2, res.body.data.plannerCatalog || res.body.data.builderCatalog);
+
+    res = await api.get("/api/subscriptions/meal-planner-menu?lang=ar");
+    assert.strictEqual(res.status, 200, `Arabic premium parity status: ${JSON.stringify(res.body)}`);
+    for (const alias of ["builderCatalog", "plannerCatalog", "builderCatalogV2"]) {
+      assertDashboardPremiumParity(res.body.data[alias], alias);
+    }
+    const publishedPlannerCatalog = await mealBuilderConfigService.buildPlannerCatalogFromPublishedBuilder({
+      lang: "ar",
+      config: {
+        status: "published",
+        isCurrent: true,
+        source: "dashboard",
+        revisionHash: "dashboard-premium-parity",
+        publishedAt: new Date(),
+        sections: await mealBuilderConfigService.buildDefaultVisualTemplateSections(),
+      },
+    });
+    assertDashboardPremiumParity(publishedPlannerCatalog, "published plannerCatalog");
+    const premiumSaladSection = sectionByKey(res.body.data.builderCatalogV2, "premium_large_salad");
+    const premiumSalad = firstProduct(premiumSaladSection, "premium large salad regression");
+    assert.strictEqual(premiumSalad.selectionType, "premium_large_salad", "premium large salad stays separate");
+    assert.strictEqual(premiumSalad.extraFeeHalala, 2900, "premium large salad keeps 2900 halala fee");
 
     res = await api.get("/api/subscriptions/meal-planner-menu?contractVersion=v3&lang=en");
     assert.strictEqual(res.status, 200, `v3 catalog status: ${JSON.stringify(res.body)}`);

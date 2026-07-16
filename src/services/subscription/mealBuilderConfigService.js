@@ -20,6 +20,8 @@ const {
   SUBSCRIPTION_COLD_SANDWICH_KEYS,
   SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS,
   SYSTEM_CURRENCY,
+  buildProteinOptionSections,
+  getProteinFamilyNameI18n,
   getMealPlannerRules,
   resolveProteinVisualFamilyKey,
 } = require("../../config/mealPlannerContract");
@@ -689,6 +691,8 @@ async function buildAutomaticPremiumSection({ lang = "en" } = {}) {
   const items = readyRows.map(({ config, sourceDoc }) => {
     const name = sourceDoc?.name || config.sourceSnapshot?.name || {};
     const premiumKey = config.premiumKey || "";
+    const isPremiumMeal = config.selectionType === MEAL_SELECTION_TYPES.PREMIUM_MEAL;
+    const premiumFeeHalala = Number(config.upgradeDeltaHalala || 0);
     const common = {
       id: String(config.sourceId || config._id),
       key: sourceKeyForLocal(sourceDoc, premiumKey),
@@ -698,11 +702,15 @@ async function buildAutomaticPremiumSection({ lang = "en" } = {}) {
       imageUrl: sourceDoc?.imageUrl || "",
       selectionType: config.selectionType || "",
       isPremium: true,
+      displayCategoryKey: isPremiumMeal ? "premium" : undefined,
+      proteinFamilyKey: isPremiumMeal ? "premium" : undefined,
+      proteinFamilyNameI18n: isPremiumMeal ? getProteinFamilyNameI18n("premium") : undefined,
       premiumKey,
       premiumKind: config.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD ? "premium_large_salad" : "premium_protein",
-      priceHalala: Number(config.upgradeDeltaHalala || 0),
-      premiumPriceHalala: Number(config.upgradeDeltaHalala || 0),
-      extraFeeHalala: Number(config.upgradeDeltaHalala || 0),
+      priceHalala: premiumFeeHalala,
+      premiumPriceHalala: premiumFeeHalala,
+      extraFeeHalala: premiumFeeHalala,
+      extraPriceHalala: premiumFeeHalala,
       requiresPremiumBalance: true,
       configId: String(config._id),
       revision: Number(config.revision || 0),
@@ -3190,13 +3198,18 @@ function buildOptionItem({ option, relation, group, product, selectionType, lang
     imageUrl: option.imageUrl || "",
     selectionType,
     isPremium,
+    displayCategoryKey: isPremium ? "premium" : (option.displayCategoryKey || option.proteinFamilyKey || ""),
+    proteinFamilyKey: isPremium ? "premium" : (resolveProteinVisualFamilyKey(option) || option.proteinFamilyKey || ""),
+    proteinFamilyNameI18n: getProteinFamilyNameI18n(isPremium ? "premium" : option),
     premiumKind: isPremium ? "premium_protein" : null,
     premiumKey: isPremium ? premiumKey : null,
     priceHalala,
     premiumPriceHalala: isPremium ? premiumFee : 0,
+    extraFeeHalala: isPremium ? premiumFee : priceHalala,
+    extraPriceHalala: isPremium ? premiumFee : priceHalala,
     requiresPremiumBalance: isPremium,
     available: true,
-    sortOrder: Number(relation?.sortOrder ?? option.sortOrder ?? 0),
+    sortOrder: Number(isPremium ? (activeConfig.sortOrder ?? relation?.sortOrder ?? option.sortOrder ?? 0) : (relation?.sortOrder ?? option.sortOrder ?? 0)),
   };
 }
 
@@ -3329,6 +3342,9 @@ function plannerOptionFromBuilderItem(item = {}) {
     imageUrl: item.imageUrl || "",
     selectionType: item.selectionType || "",
     isPremium: item.isPremium === true,
+    displayCategoryKey: item.displayCategoryKey || "",
+    proteinFamilyKey: item.proteinFamilyKey || "",
+    proteinFamilyNameI18n: item.proteinFamilyNameI18n || undefined,
     premiumKey: item.premiumKey || undefined,
     premiumKind: item.premiumKind || undefined,
     configId: item.configId || undefined,
@@ -3471,6 +3487,31 @@ function filterPlannerSectionByPremiumConfig(section, premiumConfigState) {
   return { ...section, products };
 }
 
+function regeneratePlannerProteinOptionSections(section, lang) {
+  const products = (section.products || []).map((product) => {
+    const optionGroups = (product.optionGroups || []).map((group) => {
+      const options = group.options || [];
+      const groupKey = String(group.key || group.sourceKey || "").trim().toLowerCase();
+      const isProteinGroup = groupKey === "protein"
+        || groupKey === "proteins"
+        || options.some((option) => (
+          option.isPremium === true
+          || option.displayCategoryKey === "premium"
+          || option.selectionType === MEAL_SELECTION_TYPES.PREMIUM_MEAL
+        ));
+      if (!isProteinGroup) return group;
+
+      const optionSections = buildProteinOptionSections(options, lang);
+      const { optionSections: _staleOptionSections, ...groupWithoutSections } = group;
+      return optionSections.length
+        ? { ...groupWithoutSections, optionSections }
+        : groupWithoutSections;
+    });
+    return { ...product, optionGroups };
+  });
+  return { ...section, products };
+}
+
 async function buildPlannerCatalogFromPublishedBuilder({ lang = "en", config = null } = {}) {
   const published = config || await getCurrentPublishedConfig();
   if (!published) return null;
@@ -3479,6 +3520,7 @@ async function buildPlannerCatalogFromPublishedBuilder({ lang = "en", config = n
   const sections = (contract.sections || [])
     .map(plannerSectionFromBuilderSection)
     .map((section) => filterPlannerSectionByPremiumConfig(section, premiumConfigState))
+    .map((section) => regeneratePlannerProteinOptionSections(section, lang))
     .filter((section) => section.products.length)
     .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
   const stablePayload = {

@@ -159,10 +159,6 @@ const PROTEIN_VISUAL_FAMILY_OPTION_KEYS = Object.freeze({
   tuna: "fish",
   eggs: "eggs",
   boiled_eggs: "eggs",
-  // Premium proteins: always shown in Premium tab regardless of biological family
-  beef_steak: "premium",
-  shrimp: "premium",
-  salmon: "premium",
 });
 
 const SALAD_SELECTION_GROUPS = Object.freeze([
@@ -328,6 +324,15 @@ function getProteinVisualFamilyDefinition(value) {
 }
 
 function resolveProteinVisualFamilyKey(option = {}) {
+  // Final catalog metadata is authoritative. Dashboard premium configuration may
+  // promote any protein option, including one whose default visual family is
+  // defined below, so premium overrides must win before sections are generated.
+  const displayCategoryKey = String(option.displayCategoryKey || "").trim().toLowerCase();
+  const selectionType = String(option.selectionType || "").trim().toLowerCase();
+  if (option.isPremium === true || displayCategoryKey === "premium" || selectionType === "premium_meal") {
+    return "premium";
+  }
+
   // Priority 1: PROTEIN_VISUAL_FAMILY_OPTION_KEYS maps option.key → visual tab
   // This is the most specific mapping (e.g. beef_steak → "premium", meatballs → "beef")
   const optionKey = String(option.key || option.premiumKey || "").trim().toLowerCase();

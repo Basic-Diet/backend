@@ -173,11 +173,7 @@ function resolvePremiumMealExtraFeeHalala(option, premiumConfigState = null) {
   if (config) {
     return Number(config.upgradeDeltaHalala || 0);
   }
-  let fee = Number(option?.extraFeeHalala ?? option?.extraPriceHalala ?? 0);
-  if (fee === 0 && ["beef_steak", "shrimp", "salmon"].includes(key)) {
-    fee = 2000;
-  }
-  return fee;
+  return Number(option?.extraFeeHalala ?? option?.extraPriceHalala ?? 0);
 }
 
 function isConfiguredPremiumMealProtein(option, premiumConfigState = null) {
@@ -192,12 +188,15 @@ function isConfiguredPremiumMealProtein(option, premiumConfigState = null) {
 }
 
 function buildProteinPayload(option, lang, { isPremium, premiumConfigState = null }) {
-  const proteinFamilyKey = inferProteinFamilyKey(option);
+  const activePremiumConfig = isPremium && premiumConfigState && typeof premiumConfigState.getActiveConfig === "function"
+    ? premiumConfigState.getActiveConfig(option.premiumKey || option.key)
+    : null;
+  const proteinFamilyKey = isPremium ? "premium" : inferProteinFamilyKey(option);
   const displayCategoryKey = normalizeProteinDisplayCategoryKey(option.displayCategoryKey, {
     isPremium,
     proteinFamilyKey,
   });
-  const premiumKey = String(option.premiumKey || option.key || "").trim() || null;
+  const premiumKey = String(activePremiumConfig?.premiumKey || option.premiumKey || option.key || "").trim() || null;
   const extraFeeHalala = isPremium ? resolvePremiumMealExtraFeeHalala(option, premiumConfigState) : 0;
 
   return {
@@ -211,7 +210,7 @@ function buildProteinPayload(option, lang, { isPremium, premiumConfigState = nul
     proteinFamilyKey,
     proteinFamilyNameI18n: getProteinFamilyNameI18n(proteinFamilyKey),
     ruleTags: Array.isArray(option.ruleTags) ? option.ruleTags : [],
-    sortOrder: Number(option.sortOrder || 0),
+    sortOrder: Number(activePremiumConfig?.sortOrder ?? option.sortOrder ?? 0),
     isPremium,
     premiumKey,
     extraFeeHalala,
@@ -464,11 +463,23 @@ function buildMealBuilderSection({ key, name, cardVariant, optionGroups }) {
 }
 
 function buildProteinGroupV2({ group, sourceOptions, key, selectionType, rules = {}, lang }) {
+  const isPremiumGroup = selectionType === MEAL_SELECTION_TYPES.PREMIUM_MEAL;
   const options = (sourceOptions || [])
-    .map((option) => normalizeV2Option(option, lang, {
-      selectionType,
-      isPremium: selectionType === MEAL_SELECTION_TYPES.PREMIUM_MEAL,
-    }))
+    .map((option) => {
+      const premiumFeeHalala = Number(option.extraFeeHalala ?? option.extraPriceHalala ?? 0);
+      return normalizeV2Option(option, lang, {
+        selectionType,
+        isPremium: isPremiumGroup,
+        ...(isPremiumGroup ? {
+          displayCategoryKey: "premium",
+          proteinFamilyKey: "premium",
+          proteinFamilyNameI18n: getProteinFamilyNameI18n("premium"),
+          premiumKey: option.premiumKey || option.key || null,
+          extraFeeHalala: premiumFeeHalala,
+          extraPriceHalala: premiumFeeHalala,
+        } : {}),
+      });
+    })
     .sort(sortByCatalogOrder);
 
   return buildV2Group({
@@ -613,6 +624,7 @@ function buildV3OptionPayload({ option, relation, lang, overrides = {} }) {
     premiumKey: option.premiumKey || option.key || null,
     ruleTags: Array.isArray(option.ruleTags) ? option.ruleTags : [],
     sortOrder: Number(relation?.sortOrder ?? option.sortOrder ?? 0),
+    ...overrides,
   });
 }
 
@@ -794,7 +806,11 @@ async function buildCanonicalPlannerCatalogV3({ builderCatalog, context = {}, la
       return { extraPriceHalala: fee, extraFeeHalala: fee };
     },
   });
-  const premiumMealGroups = premiumMealRelationGroups;
+  const premiumMealGroups = applyV3PremiumMealCompatibilityOptions({
+    optionGroups: premiumMealRelationGroups,
+    builderCatalog,
+    lang,
+  });
 
   const premiumLargeSaladGroups = await buildV3ProductOptionGroups({
     product: premiumLargeSaladProduct,
@@ -1339,19 +1355,21 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
     })),
     premiumProteins: premiumProteins.map((protein) => ({
       id: protein.id,
+      optionId: protein.id,
       key: protein.key,
-      displayCategoryKey: protein.displayCategoryKey,
+      displayCategoryKey: "premium",
       name: protein.name,
       nameI18n: protein.nameI18n,
       description: protein.description,
       descriptionI18n: protein.descriptionI18n,
-      proteinFamilyKey: protein.proteinFamilyKey,
-      proteinFamilyNameI18n: protein.proteinFamilyNameI18n,
+      proteinFamilyKey: "premium",
+      proteinFamilyNameI18n: getProteinFamilyNameI18n("premium"),
       ruleTags: protein.ruleTags,
       selectionType: MEAL_SELECTION_TYPES.PREMIUM_MEAL,
       isPremium: true,
       premiumKey: protein.premiumKey,
       extraFeeHalala: protein.extraFeeHalala,
+      extraPriceHalala: protein.extraFeeHalala,
       sortOrder: protein.sortOrder,
     })),
     carbs: selectableCarbs,

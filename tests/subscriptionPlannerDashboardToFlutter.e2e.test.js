@@ -377,7 +377,7 @@ async function run() {
     assert.strictEqual(menuRes.body.data.builderCatalog.contractVersion, "meal_planner_menu.v3");
     assert(menuRes.body.data.plannerCatalog, "flutter planner payload has plannerCatalog");
     assert(Array.isArray(menuRes.body.data.plannerCatalog.sections) && menuRes.body.data.plannerCatalog.sections.length > 0, "plannerCatalog has sections");
-    assert.strictEqual(menuRes.body.data.builderCatalogV2, undefined, "flutter planner payload does not use builderCatalogV2");
+    assert(menuRes.body.data.builderCatalogV2, "flutter planner payload keeps builderCatalogV2 compatibility alias");
     for (const key of ["categories", "proteins", "carbs", "premiumProteins", "premiumLargeSalad"]) {
       assert.strictEqual(menuRes.body.data.builderCatalog[key], undefined, `flutter planner payload omits legacy ${key}`);
     }
