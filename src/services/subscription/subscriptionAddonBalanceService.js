@@ -5,6 +5,7 @@ const { toKSADateString } = require("../../utils/date");
 const {
   ALL_SUPPORTED_SUBSCRIPTION_ADDON_CATEGORIES,
   normalizeSubscriptionAddonCategory,
+  resolveAddonBalanceRemainingQty,
 } = require("./subscriptionAddonPolicyService");
 
 const SYSTEM_CURRENCY = "SAR";
@@ -92,7 +93,7 @@ function buildClientAddonBalance(subscription, businessDate, auditedConsumptionM
     const categoryBuckets = balances.filter((bucket) => normalizeSubscriptionAddonCategory(bucket && bucket.category) === category);
     if (categoryBuckets.length) {
       const totalUnits = categoryBuckets.reduce((sum, bucket) => sum + Number(bucket.includedTotalQty || 0), 0);
-      const remainingUnits = categoryBuckets.reduce((sum, bucket) => sum + Math.max(0, Number(bucket.remainingQty || 0)), 0);
+      const remainingUnits = categoryBuckets.reduce((sum, bucket) => sum + resolveAddonBalanceRemainingQty(bucket), 0);
       const consumedUnits = categoryBuckets.reduce((sum, bucket) => sum + Number(bucket.consumedQty || 0), 0);
       result[category] = {
         totalUnits,
@@ -172,7 +173,7 @@ function buildAddonCategoryAllowances(subscription, day = {}) {
     const includedTotalQty = Math.max(0, Math.floor(Number(
       bucket.includedTotalQty != null ? bucket.includedTotalQty : bucket.purchasedQty || 0
     )));
-    const remainingQty = Math.max(0, Math.floor(Number(bucket.remainingQty || 0)));
+    const remainingQty = resolveAddonBalanceRemainingQty(bucket);
     const reservedQty = countReservedAddonSelectionsForCategory(day, category);
     const rawConsumedQty = Math.max(0, Math.floor(Number(
       bucket.consumedQty != null ? bucket.consumedQty : includedTotalQty - remainingQty
