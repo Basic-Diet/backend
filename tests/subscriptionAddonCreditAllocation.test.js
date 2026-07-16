@@ -55,7 +55,17 @@ function entitlement({ category, planId, menuProductIds = [], includeCategory = 
   };
 }
 
-function balance({ category, planId, remainingQty, includedTotalQty, consumedQty = 0, reservedQty = 0 }) {
+function balance({
+  category,
+  planId,
+  remainingQty,
+  includedTotalQty,
+  purchasedQty,
+  extraPurchasedQty,
+  consumedQty = 0,
+  reservedQty = 0,
+  overageConsumedQty = 0,
+}) {
   return {
     _id: objectId(Number.parseInt(planId.slice(-4), 16) + 1000),
     addonId: planId,
@@ -63,8 +73,11 @@ function balance({ category, planId, remainingQty, includedTotalQty, consumedQty
     category,
     ...(remainingQty === undefined ? {} : { remainingQty }),
     ...(includedTotalQty === undefined ? {} : { includedTotalQty }),
+    ...(purchasedQty === undefined ? {} : { purchasedQty }),
+    ...(extraPurchasedQty === undefined ? {} : { extraPurchasedQty }),
     consumedQty,
     reservedQty,
+    overageConsumedQty,
   };
 }
 
@@ -148,8 +161,8 @@ async function run() {
   assert.strictEqual(result.summary.amountDue, 3300);
 
   // Scenario 5b: production recovery for activated subscriptions whose bucket
-  // was persisted with included credits but an uninitialized zero remainingQty.
-  sub = subscription({ juice: { remainingQty: 0, includedTotalQty: 7, consumedQty: 0, reservedQty: 0 } });
+  // was persisted with purchased credits but an uninitialized zero remainingQty.
+  sub = subscription({ juice: { remainingQty: 0, includedTotalQty: 7, purchasedQty: 7, consumedQty: 0, reservedQty: 0 } });
   result = await allocate(sub, JUICE_IDS.slice(0, 3));
   assert.strictEqual(result.summary.covered, 3);
   assert.strictEqual(result.summary.pending, 0);
