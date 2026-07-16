@@ -18,10 +18,8 @@ const {
   buildSubscriptionDayFulfillmentState,
 } = require("./subscriptionDayFulfillmentStateService");
 const { resolveReadLabel } = require("../../utils/subscription/subscriptionLocalizationCommon");
+const { logger } = require("../../utils/logger");
 
-/**
- * Statuses where no further updates will happen — mobile should stop polling.
- */
 const TERMINAL_STATUSES = new Set([
   "fulfilled",
   "delivery_canceled",
@@ -32,30 +30,58 @@ const TERMINAL_STATUSES = new Set([
   "canceled_at_branch",
 ]);
 
-/**
- * Determine the recommended polling interval in seconds based on current status.
- * Returns lower intervals for "active" states so mobile reflects changes quickly.
- */
-function resolvePollingIntervalSeconds(status, deliveryMode) {
-  if (TERMINAL_STATUSES.has(status)) return null; // terminal — stop polling
-  if (status === "in_preparation") return 30;
-  if (status === "out_for_delivery") return 30;
-  if (status === "ready_for_pickup") return 30;
-  if (status === "locked") return 60;
-  return 60; // open / other non-terminal
+function resolvePollingIntervalSeconds(status) {
+  if (TERMINAL_STATUSES.has(status)) return null;
+  if (["in_preparation", "out_for_delivery", "ready_for_pickup"].includes(status)) return 30;
+  return 60;
 }
 
-/**
- * Build the fulfillment status payload for a given subscription and day.
- *
- * @param {object} options
- * @param {string} options.subscriptionId
- * @param {string} options.date
- * @param {string} options.userId
- * @param {string} options.lang
- * @param {Function} options.ensureActiveFn
- * @returns {Promise<{ok: boolean, status?: number, code?: string, message?: string, data?: object}>}
- */
+function errorResult(err, fallbackCode = "FULFILLMENT_STATUS_UNAVAILABLE") {
+  const code = String(err && err.code || fallbackCode);
+  const knownStatus = Number(err && err.status);
+  let status = Number.isInteger(knownStatus) && knownStatus >= 400 && knownStatus < 600 ? knownStatus : 500;
+  if (status === 500) {
+    if (["SUB_INACTIVE", "SUB_EXPIRED"].includes(code)) status = 422;
+    else if (code === "NOT_FOUND" || code === "DAY_NOT_FOUND") status = 404;
+    else if (code === "FORBIDDEN") status = 403;
+    else if (code === "INVALID_DATE" || code === "VALIDATION_ERROR") status = 400;
+  }
+  return {
+    ok: false,
+    status,
+    code,
+    message: err && err.message ? err.message : "Fulfillment status is temporarily unavailable",
+  };
+}
+
+function fallbackReadFields({ subscription, day, lang }) {
+  const baseMode = subscription && subscription.deliveryMode === "pickup" ? "pickup" : "delivery";
+  const effectiveMode = day && day.fulfillmentModeOverride ? day.fulfillmentModeOverride : baseMode;
+  const rawStatus = String(day && day.status || "open");
+  const statusLabel = resolveReadLabel("dayStatuses", rawStatus, lang) || rawStatus;
+  return {
+    deliveryMode: baseMode,
+    fulfillmentModeOverride: day && day.fulfillmentModeOverride ? day.fulfillmentModeOverride : null,
+    effectiveFulfillmentMode: effectiveMode,
+    pickupLocationIdOverride: day && day.pickupLocationIdOverride ? day.pickupLocationIdOverride : null,
+    firstDayFulfillmentOverride: Boolean(day && day.fulfillmentModeOverride),
+    fulfillmentSummary: {
+      status: rawStatus,
+      statusLabel,
+      message: "",
+      nextAction: "",
+      lockedReason: null,
+      lockedMessage: null,
+    },
+    deliveryAddress: null,
+    deliveryWindow: null,
+    deliverySlot: null,
+    pickupLocation: null,
+    lockedReason: null,
+    lockedMessage: null,
+  };
+}
+
 async function getDayFulfillmentStatusForClient({
   subscriptionId,
   date,
@@ -63,93 +89,120 @@ async function getDayFulfillmentStatusForClient({
   lang = "ar",
   ensureActiveFn,
 }) {
-  // 1. Load subscription and verify ownership
-  const sub = await Subscription.findById(subscriptionId).lean();
-  if (!sub) {
-    return { ok: false, status: 404, code: "NOT_FOUND", message: "Subscription not found" };
+  let sub;
+  try {
+    sub = await Subscription.findById(subscriptionId).lean();
+  } catch (err) {
+    return errorResult(err);
   }
+  if (!sub) return { ok: false, status: 404, code: "NOT_FOUND", message: "Subscription not found" };
   if (String(sub.userId) !== String(userId)) {
     return { ok: false, status: 403, code: "FORBIDDEN", message: "Forbidden" };
   }
 
-  // 2. Ensure active (soft check — still return status for non-active to show terminal state)
-  const activeCheck = ensureActiveFn ? ensureActiveFn(sub) : null;
-  if (activeCheck && !activeCheck.ok) {
-    return { ok: false, status: 400, code: activeCheck.code, message: activeCheck.message };
+  if (ensureActiveFn) {
+    try {
+      const activeCheck = await ensureActiveFn(sub, date);
+      if (activeCheck && activeCheck.ok === false) return activeCheck;
+    } catch (err) {
+      return errorResult(err);
+    }
   }
 
-  // 3. Load the subscription day
-  const day = await SubscriptionDay.findOne({ subscriptionId, date }).lean();
-  if (!day) {
-    return { ok: false, status: 404, code: "DAY_NOT_FOUND", message: "Day not found" };
+  let day;
+  try {
+    day = await SubscriptionDay.findOne({ subscriptionId, date }).lean();
+  } catch (err) {
+    return errorResult(err);
+  }
+  if (!day) return { ok: false, status: 404, code: "DAY_NOT_FOUND", message: "Day not found" };
+
+  let fulfillmentState = {};
+  try {
+    fulfillmentState = buildSubscriptionDayFulfillmentState({ subscription: sub, day }) || {};
+  } catch (err) {
+    logger.warn("Fulfillment state fallback used", {
+      subscriptionId: String(subscriptionId),
+      date,
+      error: err.message,
+    });
   }
 
-  // 4. Derive fulfillment state flags (planningReady, fulfillmentReady, etc.)
-  const fulfillmentState = buildSubscriptionDayFulfillmentState({ subscription: sub, day });
+  let pickupLocations = [];
+  const effectiveMode = day.fulfillmentModeOverride || sub.deliveryMode;
+  if (effectiveMode === "pickup") {
+    try {
+      pickupLocations = await getPickupLocationsSetting();
+    } catch (err) {
+      logger.warn("Pickup locations unavailable for fulfillment status", {
+        subscriptionId: String(subscriptionId),
+        date,
+        error: err.message,
+      });
+    }
+  }
 
-  // 5. Load pickup locations (only needed for pickup mode, but cheap)
-  const pickupLocations = sub.deliveryMode === "pickup" || day.fulfillmentModeOverride === "pickup"
-    ? await getPickupLocationsSetting()
-    : [];
-
-  // 6. Build the rich fulfillment copy using existing service
-  const readFields = buildFulfillmentReadFields({
-    subscription: sub,
-    day,
-    pickupLocations,
-    lang,
-    fulfillmentState,
-    statusLabel: resolveReadLabel("dayStatuses", day.status, lang) || "",
-  });
+  let readFields;
+  try {
+    readFields = buildFulfillmentReadFields({
+      subscription: sub,
+      day,
+      pickupLocations,
+      lang,
+      fulfillmentState,
+      statusLabel: resolveReadLabel("dayStatuses", day.status, lang) || "",
+    });
+  } catch (err) {
+    logger.warn("Fulfillment read fields fallback used", {
+      subscriptionId: String(subscriptionId),
+      date,
+      error: err.message,
+    });
+    readFields = fallbackReadFields({ subscription: sub, day, lang });
+  }
 
   const status = String(day.status || "open");
-  const deliveryMode = readFields.deliveryMode;
+  const deliveryMode = readFields.deliveryMode || (sub.deliveryMode === "pickup" ? "pickup" : "delivery");
   const effectiveFulfillmentMode = readFields.effectiveFulfillmentMode || deliveryMode;
-  const isTerminal = TERMINAL_STATUSES.has(status);
-  const pollingIntervalSeconds = resolvePollingIntervalSeconds(status, effectiveFulfillmentMode);
+  const summary = readFields.fulfillmentSummary || {};
 
-  // 7. Compose response
-  const data = {
-    subscriptionId,
-    date,
-    deliveryMode,
-    fulfillmentModeOverride: readFields.fulfillmentModeOverride || null,
-    effectiveFulfillmentMode,
-    pickupLocationIdOverride: readFields.pickupLocationIdOverride || null,
-    firstDayFulfillmentOverride: Boolean(readFields.firstDayFulfillmentOverride),
-    status,
-    statusLabel: readFields.fulfillmentSummary?.statusLabel || "",
-    message: readFields.fulfillmentSummary?.message || "",
-    nextAction: readFields.fulfillmentSummary?.nextAction || "",
-    isTerminal,
-    pollingIntervalSeconds,
-    lastUpdatedAt: day.updatedAt ? new Date(day.updatedAt).toISOString() : null,
-
-    // Fulfillment summary details
-    fulfillmentSummary: readFields.fulfillmentSummary || null,
-    deliveryAddress: readFields.deliveryAddress || null,
-    deliveryWindow: readFields.deliveryWindow || null,
-    deliverySlot: readFields.deliverySlot || null,
-    pickupLocation: readFields.pickupLocation || null,
-    lockedReason: readFields.lockedReason || null,
-    lockedMessage: readFields.lockedMessage || null,
-
-    // Pickup-specific fields (null for delivery)
-    pickupCode: effectiveFulfillmentMode === "pickup" && status === "ready_for_pickup"
-      ? (day.pickupCode || null)
-      : null,
-    pickupCodeIssuedAt: effectiveFulfillmentMode === "pickup" && day.pickupCodeIssuedAt
-      ? new Date(day.pickupCodeIssuedAt).toISOString()
-      : null,
-
-    // State flags
-    planningReady: Boolean(fulfillmentState.planningReady),
-    fulfillmentReady: Boolean(fulfillmentState.fulfillmentReady),
-    isFulfillable: Boolean(fulfillmentState.isFulfillable),
-    canBePrepared: Boolean(fulfillmentState.canBePrepared),
+  return {
+    ok: true,
+    status: 200,
+    data: {
+      subscriptionId: String(subscriptionId),
+      date,
+      deliveryMode,
+      fulfillmentModeOverride: readFields.fulfillmentModeOverride || null,
+      effectiveFulfillmentMode,
+      pickupLocationIdOverride: readFields.pickupLocationIdOverride || null,
+      firstDayFulfillmentOverride: Boolean(readFields.firstDayFulfillmentOverride),
+      status,
+      statusLabel: summary.statusLabel || "",
+      message: summary.message || "",
+      nextAction: summary.nextAction || "",
+      isTerminal: TERMINAL_STATUSES.has(status),
+      pollingIntervalSeconds: resolvePollingIntervalSeconds(status),
+      lastUpdatedAt: day.updatedAt ? new Date(day.updatedAt).toISOString() : null,
+      fulfillmentSummary: summary,
+      deliveryAddress: readFields.deliveryAddress || null,
+      deliveryWindow: readFields.deliveryWindow || null,
+      deliverySlot: readFields.deliverySlot || null,
+      pickupLocation: readFields.pickupLocation || null,
+      lockedReason: readFields.lockedReason || summary.lockedReason || null,
+      lockedMessage: readFields.lockedMessage || summary.lockedMessage || null,
+      pickupCode: effectiveFulfillmentMode === "pickup" && status === "ready_for_pickup"
+        ? (day.pickupCode || null)
+        : null,
+      pickupCodeIssuedAt: effectiveFulfillmentMode === "pickup" && day.pickupCodeIssuedAt
+        ? new Date(day.pickupCodeIssuedAt).toISOString()
+        : null,
+      planningReady: Boolean(fulfillmentState.planningReady),
+      fulfillmentReady: Boolean(fulfillmentState.fulfillmentReady),
+      isFulfillable: Boolean(fulfillmentState.isFulfillable),
+      canBePrepared: Boolean(fulfillmentState.canBePrepared),
+    },
   };
-
-  return { ok: true, status: 200, data };
 }
 
 module.exports = {
