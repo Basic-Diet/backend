@@ -17,18 +17,9 @@ const CATEGORY_LABELS = Object.freeze({
 });
 
 const FLAT_TEXT_BASES = Object.freeze([
-  "statusText",
-  "selectionText",
-  "unavailableText",
-  "emptyText",
-  "message",
-  "statusLabel",
-  "reasonLabel",
-  "commercialStateLabel",
-  "paymentStatusLabel",
-  "availabilityLabel",
-  "sectionLabel",
-  "label",
+  "statusText", "selectionText", "unavailableText", "emptyText", "message",
+  "statusLabel", "reasonLabel", "commercialStateLabel", "paymentStatusLabel",
+  "availabilityLabel", "sectionLabel", "label", "nextAction", "lockedMessage",
 ]);
 
 function cleanText(value) {
@@ -41,23 +32,18 @@ function pairFrom(value, fallbacks = {}) {
   const scalar = typeof value === "string" ? cleanText(value) : "";
   const ar = cleanText(source.ar || source.arabic || source.nameAr || source.titleAr || fallbacks.ar || scalar);
   const en = cleanText(source.en || source.english || source.nameEn || source.titleEn || fallbacks.en || scalar);
-  return {
-    ar: ar || en,
-    en: en || ar,
-  };
+  return { ar: ar || en, en: en || ar };
 }
 
 function requestedLanguage(req) {
   const queryLanguage = normalizeLanguageCandidate(req && req.query && req.query.lang);
   if (queryLanguage) return queryLanguage;
-
   const header = req && req.headers && req.headers["accept-language"];
   if (typeof header === "string" && header.trim()) {
     const first = header.split(",")[0].split(";")[0].trim();
     const normalized = normalizeLanguageCandidate(first);
     if (normalized) return normalized;
   }
-
   return "ar";
 }
 
@@ -74,7 +60,6 @@ function normalizeFlatTextPair(target, base, lang) {
     || Object.prototype.hasOwnProperty.call(target, enKey)
     || Object.prototype.hasOwnProperty.call(target, i18nKey);
   if (!hasPair) return;
-
   const pair = pairFrom(target[i18nKey], {
     ar: target[arKey] || (lang === "ar" && typeof target[base] === "string" ? target[base] : ""),
     en: target[enKey] || (lang === "en" && typeof target[base] === "string" ? target[base] : ""),
@@ -99,10 +84,7 @@ function normalizeArrayPair(target, base, lang) {
   const length = Math.max(ar.length, en.length);
   const pairs = [];
   for (let index = 0; index < length; index += 1) {
-    pairs.push({
-      ar: ar[index] || en[index] || "",
-      en: en[index] || ar[index] || "",
-    });
+    pairs.push({ ar: ar[index] || en[index] || "", en: en[index] || ar[index] || "" });
   }
   target[arKey] = pairs.map((pair) => pair.ar);
   target[enKey] = pairs.map((pair) => pair.en);
@@ -112,7 +94,6 @@ function normalizeArrayPair(target, base, lang) {
 
 function normalizeNamedObject(target, lang) {
   if (!target || typeof target !== "object" || Array.isArray(target)) return target;
-
   const hasNameContract = Object.prototype.hasOwnProperty.call(target, "nameI18n")
     || Object.prototype.hasOwnProperty.call(target, "nameAr")
     || Object.prototype.hasOwnProperty.call(target, "nameEn");
@@ -126,7 +107,6 @@ function normalizeNamedObject(target, lang) {
     target.nameEn = pair.en;
     target.name = selected(pair, lang);
   }
-
   const hasDescriptionContract = Object.prototype.hasOwnProperty.call(target, "descriptionI18n")
     || Object.prototype.hasOwnProperty.call(target, "descriptionAr")
     || Object.prototype.hasOwnProperty.call(target, "descriptionEn");
@@ -140,7 +120,6 @@ function normalizeNamedObject(target, lang) {
     target.descriptionEn = pair.en;
     target.description = selected(pair, lang);
   }
-
   if (target.title && typeof target.title === "object" && !Array.isArray(target.title)) {
     const pair = pairFrom(target.title, { ar: target.titleAr, en: target.titleEn });
     target.title = pair;
@@ -154,7 +133,6 @@ function normalizeNamedObject(target, lang) {
     target.titleEn = pair.en;
     target.titleText = selected(pair, lang);
   }
-
   if (target.subtitle && typeof target.subtitle === "object" && !Array.isArray(target.subtitle)) {
     const pair = pairFrom(target.subtitle, { ar: target.subtitleAr, en: target.subtitleEn });
     target.subtitle = pair;
@@ -168,10 +146,8 @@ function normalizeNamedObject(target, lang) {
     target.subtitleEn = pair.en;
     target.subtitleText = selected(pair, lang);
   }
-
   for (const base of FLAT_TEXT_BASES) normalizeFlatTextPair(target, base, lang);
   normalizeArrayPair(target, "badges", lang);
-
   return target;
 }
 
@@ -197,14 +173,10 @@ function walk(value, lang, parentKey = "") {
     return value;
   }
   if (!value || typeof value !== "object") return value;
-
   normalizeNamedObject(value, lang);
-
   for (const [key, child] of Object.entries(value)) {
     if (child && typeof child === "object") {
-      if (child && !Array.isArray(child) && Array.isArray(child.choices)) {
-        normalizeCategoryGroup(child, key, lang);
-      }
+      if (!Array.isArray(child) && Array.isArray(child.choices)) normalizeCategoryGroup(child, key, lang);
       walk(child, lang, key);
     }
   }
@@ -214,7 +186,8 @@ function walk(value, lang, parentKey = "") {
 function isSupportedSubscriptionBilingualPath(url = "") {
   const path = String(url).split("?")[0];
   return path === "/api/subscriptions/addon-choices"
-    || /^\/api\/subscriptions\/[^/]+\/pickup-availability$/.test(path);
+    || /^\/api\/subscriptions\/[^/]+\/pickup-availability$/.test(path)
+    || /^\/api\/subscriptions\/[^/]+\/days\/[^/]+\/fulfillment\/status$/.test(path);
 }
 
 function normalizeSubscriptionBilingualResponse(payload, req) {
