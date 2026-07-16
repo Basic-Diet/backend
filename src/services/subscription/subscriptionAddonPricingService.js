@@ -30,7 +30,7 @@ function resolveEntitlementBalance(subscription, entitlement) {
     0
   );
   const remainingQty = bucket
-    ? resolveAddonBalanceRemainingQty(bucket)
+    ? resolveAddonBalanceRemainingQty(bucket, { entitlement })
     : toNonNegativeInteger(includedTotalQty, 0);
   return { bucket, includedTotalQty, remainingQty };
 }
