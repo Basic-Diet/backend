@@ -6,6 +6,9 @@ const {
 const {
   buildDayCommercialState,
 } = require("../src/services/subscription/subscriptionDayCommercialStateService");
+const {
+  buildAddonChoicePricingPreview,
+} = require("../src/services/subscription/subscriptionAddonPricingService");
 
 function objectId(index) {
   return Number(index).toString(16).padStart(24, "0");
@@ -143,6 +146,24 @@ async function run() {
   assert.strictEqual(result.summary.covered, 0);
   assert.strictEqual(result.summary.pending, 3);
   assert.strictEqual(result.summary.amountDue, 3300);
+
+  // Scenario 5b: production recovery for activated subscriptions whose bucket
+  // was persisted with included credits but an uninitialized zero remainingQty.
+  sub = subscription({ juice: { remainingQty: 0, includedTotalQty: 7, consumedQty: 0, reservedQty: 0 } });
+  result = await allocate(sub, JUICE_IDS.slice(0, 3));
+  assert.strictEqual(result.summary.covered, 3);
+  assert.strictEqual(result.summary.pending, 0);
+  assert.strictEqual(result.summary.amountDue, 0);
+  const preview = buildAddonChoicePricingPreview({
+    subscription: sub,
+    product: { _id: JUICE_IDS[0], priceHalala: 1100, currency: "SAR" },
+    category: "juice",
+    quantity: 1,
+  });
+  assert.strictEqual(preview.coveredQty, 1);
+  assert.strictEqual(preview.paidQty, 0);
+  assert.strictEqual(preview.pricingMode, "allowance_covered");
+  assert.strictEqual(preview.remainingBefore, 7);
 
   // Scenario 6: partial balance charges only the uncovered quantity.
   sub = subscription({ juice: { remainingQty: 2, includedTotalQty: 5, consumedQty: 3 } });
