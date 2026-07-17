@@ -109,6 +109,15 @@ async function run() {
   assert(cleanOrder.kitchen.cards[0].lines.length > 0);
   assert(cleanOrder.kitchen.cards[0].sections.length > 0);
   assert(cleanOrder.kitchen.cards[0].components.salad);
+  assert.strictEqual(cleanOrder.kitchen.cards[0].components.salad.sections, undefined);
+  assert.strictEqual(
+    cleanOrder.kitchen.cards[0].components.salad.sectionCount,
+    cleanOrder.kitchen.cards[0].sections.length
+  );
+  assert.strictEqual(
+    cleanOrder.kitchen.cards[0].components.salad.itemCount,
+    cleanOrder.kitchen.cards[0].sections.flatMap((section) => section.items).length
+  );
   assert.strictEqual(cleanOrder.kitchen.cards[0].rawSelection, undefined);
   assert.strictEqual(cleanOrder.kitchenDetails, undefined);
   assert.strictEqual(cleanOrder.kitchenCards, undefined);
@@ -118,6 +127,10 @@ async function run() {
 
   const rawOrder = serializeKitchenOperation(orderDto, { includeRaw: true });
   assert(rawOrder.kitchen.cards[0].rawSelection);
+  assert.deepStrictEqual(
+    rawOrder.kitchen.cards[0].components.salad.sections,
+    rawOrder.kitchen.cards[0].sections
+  );
   assert.strictEqual(rawOrder.kitchen.resolverDebug.sourceProjectionVersion, "v1");
   const legacyOrder = serializeKitchenOperation(orderDto, { includeLegacy: true });
   assert(legacyOrder.kitchenDetails);

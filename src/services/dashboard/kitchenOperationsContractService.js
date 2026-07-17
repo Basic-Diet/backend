@@ -63,6 +63,13 @@ function sanitizeComponentItem(item) {
 function sanitizeCard(card = {}, { includeRaw = false } = {}) {
   const sections = sanitizeSections(card.sections);
   const sourceComponents = card.components && typeof card.components === "object" ? card.components : {};
+  const saladSummary = sourceComponents.salad
+    ? {
+      sectionCount: sections.length,
+      itemCount: sections.reduce((total, section) => total + section.items.length, 0),
+      ...(includeRaw ? { sections } : {}),
+    }
+    : null;
   const clean = {
     cardId: card.cardId || null,
     slotIndex: card.slotIndex === undefined || card.slotIndex === null ? null : Number(card.slotIndex),
@@ -82,7 +89,7 @@ function sanitizeCard(card = {}, { includeRaw = false } = {}) {
       carbs: (Array.isArray(sourceComponents.carbs) ? sourceComponents.carbs : [])
         .map(sanitizeComponentItem)
         .filter(Boolean),
-      salad: sourceComponents.salad ? { sections } : null,
+      salad: saladSummary,
     },
     warnings: Array.isArray(card.warnings) ? [...card.warnings] : [],
   };
