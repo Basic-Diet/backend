@@ -161,6 +161,16 @@ async function assertError(res, code, message) {
   assert.strictEqual(res.body.error && res.body.error.code, code, message || code);
 }
 
+function resolveDashboardPickupCode(data = {}) {
+  return data.fulfillment && data.fulfillment.pickup && data.fulfillment.pickup.pickupCode
+    ? data.fulfillment.pickup.pickupCode
+    : data.pickup && data.pickup.pickupCode
+      ? data.pickup.pickupCode
+      : data.context && data.context.pickupCode
+        ? data.context.pickupCode
+        : undefined;
+}
+
 async function testOrderPickupFlow() {
   const order = await Order.create(orderPayload());
 
@@ -174,13 +184,13 @@ async function testOrderPickupFlow() {
   assert.strictEqual(res.status, 200, "ready_for_pickup status");
   assert.strictEqual(res.body.data.source, "one_time_order");
   assert.strictEqual(res.body.data.entityType, "order");
-  assert.match(res.body.data.context.pickupCode, /^\d{6}$/, "pickup code exposed in dashboard DTO");
+  assert.match(resolveDashboardPickupCode(res.body.data), /^\d{6}$/, "pickup code exposed in dashboard DTO");
 
   res = await auth(request(app).post("/api/dashboard/ops/actions/fulfill"))
     .send({ entityId: String(order._id), entityType: "order", payload: {} });
   assert.strictEqual(res.status, 200, "fulfill without pickupCode status");
   assert.strictEqual(res.body.data.status, "fulfilled");
-  assert.match(res.body.data.context.pickupCode, /^\d{6}$/, "pickup code remains visible after fulfill");
+  assert.match(resolveDashboardPickupCode(res.body.data), /^\d{6}$/, "pickup code remains visible after fulfill");
 
   const invalidOrder = await Order.create(orderPayload());
   res = await auth(request(app).post("/api/dashboard/ops/actions/fulfill"))
@@ -218,6 +228,10 @@ async function testManualSubscriptionSearchAndPickupDeductions() {
   assert.strictEqual(res.status, 200, "pickup deduction status");
   assert.deepStrictEqual(res.body.data.deducted, { regularMeals: 1, premiumMeals: 2, total: 3, addons: [] });
   assert.deepStrictEqual(res.body.data.remaining, { regularMeals: 4, premiumMeals: 0, totalMeals: 4, addons: [] });
+
+  const refreshedAfterPremium = await Subscription.findById(sub._id).lean();
+  assert.strictEqual(refreshedAfterPremium.premiumBalance.reduce((sum, row) => sum + Number(row.remainingQty || 0), 0), 0, "premium remaining deducted");
+  assert.strictEqual(refreshedAfterPremium.premiumBalance.reduce((sum, row) => sum + Number(row.consumedQty || 0), 0), 2, "premium consumed incremented");
 
   res = await auth(request(app).post(`/api/dashboard/subscriptions/${sub._id}/manual-deduction`))
     .send({ regularMeals: 1, premiumMeals: 0, reason: "Second pickup", notes: "" });
@@ -332,6 +346,7 @@ async function testConcurrentDeductionCannotOverspend() {
   const refreshed = await Subscription.findById(sub._id).lean();
   assert.strictEqual(refreshed.remainingMeals, 0, "remaining total not overspent");
   assert.strictEqual(refreshed.premiumBalance.reduce((sum, row) => sum + Number(row.remainingQty || 0), 0), 0, "premium not overspent");
+  assert.strictEqual(refreshed.premiumBalance.reduce((sum, row) => sum + Number(row.consumedQty || 0), 0), 1, "premium consumed once");
 }
 
 async function run() {
