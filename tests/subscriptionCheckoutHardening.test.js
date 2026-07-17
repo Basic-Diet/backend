@@ -59,10 +59,10 @@ function hasUniqueIndex(indexes, expectedKeys) {
     assert.strictEqual(result.premiumTotalHalala, 3000);
     assert.strictEqual(result.breakdown.grossTotalHalala, 14700);
     assert.strictEqual(result.breakdown.totalHalala, 14000);
-    assert.strictEqual(result.breakdown.vatPercentage, 16);
+    assert.strictEqual(result.breakdown.vatPercentage, 15);
     assert.strictEqual(
       result.breakdown.vatHalala,
-      Math.round((14000 * 16) / 116)
+      Math.round((14000 * 15) / 115)
     );
   });
 
