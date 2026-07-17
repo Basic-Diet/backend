@@ -16,6 +16,7 @@ const {
   sanitizeRow,
 } = require("./KitchenOperationsMapper");
 const { STATUS_SORT_ORDER } = require("./KitchenOperationsStatusResolver");
+const { buildKitchenCatalogMaps } = require("../dashboard/kitchenCatalogService");
 
 const VALID_TABS = new Set(["subscriptions", "orders", "branch_pickup"]);
 const VALID_MODES = new Set(["all", "delivery", "pickup"]);
@@ -132,12 +133,14 @@ async function fetchListBaseDataset(query, runtime) {
     runtime.fetchMealNameMap(mealIds),
     runtime.fetchAddonNameMap(addonIds),
   ]);
+  const catalogMaps = await runtime.buildKitchenCatalogMaps([...subscriptionDays, ...orders]);
 
   return {
     subscriptionDays,
     orders,
     mealNameById,
     addonNameById,
+    catalogMaps,
   };
 }
 
@@ -145,6 +148,7 @@ function buildRows(query, dataset) {
   const context = {
     mealNameById: dataset.mealNameById,
     addonNameById: dataset.addonNameById,
+    catalogMaps: dataset.catalogMaps,
   };
 
   if (query.tab === "orders") {
@@ -171,6 +175,7 @@ async function listKitchenOperations(rawQuery = {}, options = {}) {
     fetchOrdersByDate,
     fetchMealNameMap,
     fetchAddonNameMap,
+    buildKitchenCatalogMaps,
     ...(options.runtime || {}),
   };
 

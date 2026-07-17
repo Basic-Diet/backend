@@ -16,10 +16,10 @@ function attachSession(query, session) {
 
 async function fetchSubscriptionDaysByDate(date, { session } = {}) {
   let query = SubscriptionDay.find({ date: String(date), status: { $nin: ["skipped", "frozen"] } })
-    .select(["_id","subscriptionId","date","status","materializedMeals","mealSlots","plannerMeta","planningMeta","selections","recurringAddons","oneTimeAddonSelections","addonsOneTime","assignedByKitchen","pickupRequested","pickupRequestedAt","pickupPreparationStartedAt","pickupPreparedAt","pickupCode","pickupVerifiedAt","pickupNoShowAt","creditsDeducted","dayEndConsumptionReason","deliveryWindowOverride","customSalads","customMeals","lockedSnapshot","fulfilledSnapshot","lockedAt","fulfilledAt","createdAt"].join(" "))
+    .select(["_id","subscriptionId","date","status","materializedMeals","mealSlots","plannerMeta","planningMeta","selections","addonSelections","recurringAddons","oneTimeAddonSelections","addonsOneTime","premiumUpgradeSelections","assignedByKitchen","pickupRequested","pickupRequestedAt","pickupPreparationStartedAt","pickupPreparedAt","pickupCode","pickupVerifiedAt","pickupNoShowAt","creditsDeducted","dayEndConsumptionReason","deliveryWindowOverride","customSalads","customMeals","lockedSnapshot","fulfilledSnapshot","lockedAt","fulfilledAt","createdAt"].join(" "))
     .populate({
       path: "subscriptionId",
-      select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode deliveryWindow pickupLocationId deliveryAddress deliveryZoneId",
+      select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode deliveryWindow pickupLocationId deliveryAddress deliveryZoneId addonSubscriptions",
       populate: [
         { path: "userId", select: "_id name phone" },
         { path: "planId", select: "_id key name daysCount durationDays" },

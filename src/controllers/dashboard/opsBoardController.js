@@ -41,6 +41,7 @@ const {
   shouldUseCleanQueueContract,
 } = require("../../services/dashboard/kitchenQueueContractService");
 const { buildKitchenCatalogMaps } = require("../../services/dashboard/kitchenCatalogService");
+const { buildKitchenProjection } = require("../../services/dashboard/kitchenProjectionService");
 // Settlement on read is DISABLED — see pastSubscriptionDaySettlementService.js
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -132,6 +133,7 @@ function mapDay(day, latestAction, zoneMap, lang, role, delivery = null, catalog
     window: getWindow(day, subscription),
     zoneId: subscription.deliveryZoneId || null,
   });
+  const kitchenDetails = buildKitchenDetailsPayload(day, subscription, lang, catalogMaps);
 
   return {
     id: String(day._id),
@@ -148,7 +150,8 @@ function mapDay(day, latestAction, zoneMap, lang, role, delivery = null, catalog
     status: day.status,
     fulfillmentType: mode === "pickup" ? "branch_pickup" : "home_delivery",
     plan: buildPlanPayload(subscription, lang),
-    kitchenDetails: buildKitchenDetailsPayload(day, subscription, lang, catalogMaps),
+    kitchenDetails,
+    ...buildKitchenProjection(kitchenDetails),
     paymentValidity: buildPaymentValidityPayload(day),
     deliveryMethod: mode,
     deliveryMode: mode,
@@ -253,7 +256,7 @@ async function queryBoardDays(req, { screen }) {
   const days = await SubscriptionDay.find(dayQuery)
     .populate({
       path: "subscriptionId",
-      select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode deliveryWindow deliveryAddress deliveryZoneId pickupLocationId startDate",
+      select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode deliveryWindow deliveryAddress deliveryZoneId pickupLocationId startDate addonSubscriptions",
       populate: [
         { path: "userId", select: "_id name phone" },
         { path: "planId", select: "_id key name daysCount durationDays" },
@@ -354,7 +357,7 @@ async function queryBoardDays(req, { screen }) {
     })
       .populate({
         path: "subscriptionId",
-        select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode pickupLocationId startDate",
+        select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode pickupLocationId startDate addonSubscriptions",
         populate: [
           { path: "userId", select: "_id name phone" },
           { path: "planId", select: "_id key name daysCount durationDays" },
@@ -460,7 +463,7 @@ async function queueDetail(req, res) {
   const day = await SubscriptionDay.findById(req.params.dayId)
     .populate({
       path: "subscriptionId",
-      select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode deliveryWindow deliveryAddress deliveryZoneId pickupLocationId startDate",
+      select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode deliveryWindow deliveryAddress deliveryZoneId pickupLocationId startDate addonSubscriptions",
       populate: [
         { path: "userId", select: "_id name phone" },
         { path: "planId", select: "_id key name daysCount durationDays" },
@@ -471,7 +474,7 @@ async function queueDetail(req, res) {
     const pickupRequest = await SubscriptionPickupRequest.findById(req.params.dayId)
       .populate({
         path: "subscriptionId",
-        select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode pickupLocationId startDate",
+        select: "_id userId planId selectedGrams selectedMealsPerDay totalMeals remainingMeals deliveryMode pickupLocationId startDate addonSubscriptions",
         populate: [
           { path: "userId", select: "_id name phone" },
           { path: "planId", select: "_id key name daysCount durationDays" },

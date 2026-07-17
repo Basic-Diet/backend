@@ -25,6 +25,7 @@ function collectCatalogRefsFromDays(days) {
     saladItemKeys: new Set(),
     addonIds: new Set(),
     addonKeys: new Set(),
+    addonPlanIds: new Set(),
   };
   const isObjectId = (val) => /^[a-fA-F0-9]{24}$/.test(String(val || ""));
   const addIdRef = (set, value) => {
@@ -70,6 +71,7 @@ function collectCatalogRefsFromDays(days) {
     addKeyRef(refs.addonKeys, addon.addonKey || addon.key || addon.productKey);
     addIdRef(refs.productIds, addon.productId || addon.menuProductId);
     addKeyRef(refs.productKeys, addon.productKey || addon.key || addon.addonKey);
+    addIdRef(refs.addonPlanIds, addon.addonPlanId);
   };
   for (const day of Array.isArray(days) ? days : []) {
     const slots = []
@@ -81,6 +83,10 @@ function collectCatalogRefsFromDays(days) {
       addIdRef(refs.productIds, slot.productId);
       addKeyRef(refs.productKeys, slot.productKey);
       addIdRef(refs.sandwichIds, slot.sandwichId);
+      addKeyRef(refs.sandwichKeys, slot.sandwichKey);
+      if (slot.selectionType === "premium_large_salad") {
+        addKeyRef(refs.productKeys, "premium_large_salad");
+      }
       collectSalad(slot.salad || slot.customSalad);
       for (const option of Array.isArray(slot.selectedOptions) ? slot.selectedOptions : []) collectOption(option);
       const confirmation = slot.confirmationSnapshot || {};
@@ -101,6 +107,10 @@ function collectCatalogRefsFromDays(days) {
         if (carb && carb.carbId) addIdRef(refs.carbIds, carb.carbId);
         if (carb && carb.key) addKeyRef(refs.carbKeys, carb.key);
       }
+    }
+    for (const premiumSelection of Array.isArray(day && day.premiumUpgradeSelections) ? day.premiumUpgradeSelections : []) {
+      addIdRef(refs.productIds, premiumSelection.sourceProductId || premiumSelection.sourceId);
+      addKeyRef(refs.productKeys, premiumSelection.sourceKey);
     }
     for (const meal of Array.isArray(day && day.materializedMeals) ? day.materializedMeals : []) {
       addIdRef(refs.proteinIds, meal.proteinId);
@@ -169,7 +179,7 @@ function mapBy(rows, field) {
 
 async function buildKitchenCatalogMaps(days) {
   const refs = collectCatalogRefsFromDays(days);
-  const [proteins, carbs, products, meals, sandwiches, menuOptions, saladIngredients, addons, addonProducts] = await Promise.all([
+  const [proteins, carbs, products, meals, sandwiches, menuOptions, saladIngredients, addons, addonProducts, addonPlans] = await Promise.all([
     (refs.proteinIds.size || refs.proteinKeys.size)
       ? BuilderProtein.find({
         $or: [
@@ -187,13 +197,15 @@ async function buildKitchenCatalogMaps(days) {
         ].filter(Boolean),
       }).select("_id key name").lean()
       : Promise.resolve([]),
-    (refs.productIds.size || refs.productKeys.size)
+    (refs.productIds.size || refs.productKeys.size || refs.sandwichIds.size || refs.sandwichKeys.size)
       ? MenuProduct.find({
         $or: [
           refs.productIds.size ? { _id: { $in: [...refs.productIds] } } : null,
           refs.productKeys.size ? { key: { $in: [...refs.productKeys] } } : null,
+          refs.sandwichIds.size ? { _id: { $in: [...refs.sandwichIds] } } : null,
+          refs.sandwichKeys.size ? { key: { $in: [...refs.sandwichKeys] } } : null,
         ].filter(Boolean),
-      }).select("_id key name").lean()
+      }).select("_id key name imageUrl priceHalala itemType").lean()
       : Promise.resolve([]),
     refs.sandwichIds.size
       ? Meal.find({ _id: { $in: [...refs.sandwichIds] } }).select("_id name").lean()
@@ -221,7 +233,12 @@ async function buildKitchenCatalogMaps(days) {
           refs.addonIds.size ? { _id: { $in: [...refs.addonIds] } } : null,
           refs.addonKeys.size ? { key: { $in: [...refs.addonKeys] } } : null,
         ].filter(Boolean),
-      }).select("_id key name").lean()
+      }).select("_id key name imageUrl priceHalala itemType").lean()
+      : Promise.resolve([]),
+    refs.addonPlanIds.size
+      ? Addon.find({ _id: { $in: [...refs.addonPlanIds] } })
+        .select("_id name displayKey category imageUrl")
+        .lean()
       : Promise.resolve([]),
   ]);
   const sandwichRows = [...products, ...meals, ...sandwiches];
@@ -254,13 +271,14 @@ async function buildKitchenCatalogMaps(days) {
     productById: mapBy(products, "_id"),
     productByKey: mapBy(products, "key"),
     sandwichById: mapBy(sandwichRows, "_id"),
-    sandwichByKey: mapBy(products, "key"),
+    sandwichByKey: mapBy(sandwichRows, "key"),
     optionById,
     optionByKey,
     saladItemById: mapBy(saladRows, "_id"),
     saladItemByKey: mapBy(saladRows, "key"),
     addonById: mapBy(addonRows, "_id"),
     addonByKey: mapBy(addonRows, "key"),
+    addonPlanById: mapBy(addonPlans, "_id"),
   };
 }
 

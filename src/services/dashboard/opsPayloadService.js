@@ -106,6 +106,11 @@ function getFromMap(map, id) {
   return map.get(String(id)) || null;
 }
 
+function firstDefinedNumber(...values) {
+  const value = values.find((entry) => entry !== undefined && entry !== null && entry !== "");
+  return value === undefined ? 0 : Number(value || 0);
+}
+
 function resolvePlanDocument(subscription = {}) {
   return subscription && subscription.planId && typeof subscription.planId === "object"
     ? subscription.planId
@@ -239,13 +244,33 @@ function buildMealSlotPayload(slot = {}, subscription = {}, lang = "en", catalog
       : (slot.carbId ? [{ carbId: slot.carbId, grams: null }] : []));
   const product = confirmation.product || display.product || fulfillment.product || {};
   const materializedProduct = slot.materializedMeal || {};
-  const productId = stringifyId(slot.productId || product.id || product._id || materializedProduct.productId);
-  const productKey = slot.productKey || product.key || materializedProduct.productKey || null;
-  const sandwichId = stringifyId(slot.sandwichId || materializedProduct.sandwichId || (slot.selectionType === "sandwich" ? productId : null));
-  const productDoc = resolveCatalogDoc(catalogMaps, "product", productId, productKey);
-  const sandwichDoc = resolveCatalogDoc(catalogMaps, "sandwich", sandwichId || productId, productKey);
-  const productNameSource = product.name || product.title || (productDoc && productDoc.name) || (sandwichDoc && sandwichDoc.name);
-  const sandwichNameSource = (sandwichDoc && sandwichDoc.name) || product.name || product.title;
+  const premiumSelection = slot.premiumUpgradeSelection || {};
+  const premiumSalad = slot.selectionType === "premium_large_salad";
+  const initialProductId = stringifyId(
+    slot.productId
+      || product.id
+      || product._id
+      || materializedProduct.productId
+      || (premiumSalad && (premiumSelection.sourceProductId || premiumSelection.sourceId))
+  );
+  const initialProductKey = slot.productKey
+    || product.key
+    || materializedProduct.productKey
+    || (premiumSalad && premiumSelection.sourceKey)
+    || (premiumSalad ? "premium_large_salad" : null);
+  const sandwichId = stringifyId(slot.sandwichId || materializedProduct.sandwichId || (slot.selectionType === "sandwich" ? initialProductId : null));
+  const productDoc = resolveCatalogDoc(catalogMaps, "product", initialProductId, initialProductKey);
+  const sandwichDoc = resolveCatalogDoc(catalogMaps, "sandwich", sandwichId || initialProductId, slot.sandwichKey || initialProductKey);
+  const resolvedProductDoc = productDoc || (slot.selectionType === "sandwich" ? sandwichDoc : null);
+  const productId = initialProductId || (resolvedProductDoc && stringifyId(resolvedProductDoc._id)) || (slot.selectionType === "sandwich" ? sandwichId : null);
+  const productKey = initialProductKey || (resolvedProductDoc && resolvedProductDoc.key) || null;
+  const premiumNameSource = premiumSelection.nameI18n || premiumSelection.name;
+  const productNameSource = product.name
+    || product.title
+    || (premiumSalad && premiumNameSource)
+    || (resolvedProductDoc && resolvedProductDoc.name)
+    || (sandwichDoc && sandwichDoc.name);
+  const sandwichNameSource = (sandwichDoc && sandwichDoc.name) || product.name || product.title || productNameSource;
   const proteinDoc = resolveCatalogDoc(
     catalogMaps,
     "protein",
@@ -278,8 +303,19 @@ function buildMealSlotPayload(slot = {}, subscription = {}, lang = "en", catalog
     sandwichKey: slot.sandwichKey || (sandwichDoc && sandwichDoc.key) || productKey || null,
     sandwichName: localizedName(sandwichNameSource, lang),
     sandwichNameI18n: sandwichNameSource ? localizedNameObject(sandwichNameSource, productKey || sandwichId || "") : undefined,
+    imageUrl: slot.imageUrl
+      || product.imageUrl
+      || premiumSelection.imageUrl
+      || (resolvedProductDoc && resolvedProductDoc.imageUrl)
+      || (sandwichDoc && sandwichDoc.imageUrl)
+      || null,
     proteinId: stringifyId(slot.proteinId || fulfillment.proteinId || materializedProduct.proteinId),
-    proteinKey: fulfillment.proteinKey || confirmation.proteinKey || null,
+    proteinKey: slot.proteinKey
+      || fulfillment.proteinKey
+      || confirmation.proteinKey
+      || (proteinDoc && (proteinDoc.key || proteinDoc.proteinFamilyKey))
+      || slot.proteinFamilyKey
+      || null,
     proteinName: snapshotName(confirmation, ["protein", "name"], lang)
       || snapshotName(display, ["protein", "name"], lang)
       || localizedName(fulfillment.proteinName || (proteinDoc && proteinDoc.name), lang),
@@ -292,16 +328,19 @@ function buildMealSlotPayload(slot = {}, subscription = {}, lang = "en", catalog
     ),
     proteinGrams: Number(subscription && subscription.selectedGrams || 0) || null,
     proteinFamilyKey: slot.proteinFamilyKey || null,
-    carbSelections: carbSelections.map((carb) => ({
-      carbId: stringifyId(carb && carb.carbId),
-      key: carb && carb.key ? String(carb.key) : null,
-      name: localizedName((carb && (carb.name || carb.carbName)) || (resolveCatalogDoc(catalogMaps, "carb", carb && carb.carbId, carb && carb.key) || {}).name || null, lang),
-      nameI18n: localizedNameObject(
-        (carb && (carb.name || carb.carbName)) || (resolveCatalogDoc(catalogMaps, "carb", carb && carb.carbId, carb && carb.key) || {}).name,
-        carb && (carb.key || carb.carbId) ? String(carb.key || carb.carbId) : ""
-      ),
-      grams: carb && carb.grams !== undefined && carb.grams !== null ? Number(carb.grams || 0) : null,
-    })),
+    carbSelections: carbSelections.map((carb) => {
+      const carbDoc = resolveCatalogDoc(catalogMaps, "carb", carb && carb.carbId, carb && carb.key);
+      return {
+        carbId: stringifyId(carb && carb.carbId),
+        key: (carb && carb.key) || (carbDoc && carbDoc.key) || null,
+        name: localizedName((carb && (carb.name || carb.carbName)) || (carbDoc && carbDoc.name) || null, lang),
+        nameI18n: localizedNameObject(
+          (carb && (carb.name || carb.carbName)) || (carbDoc && carbDoc.name),
+          carb && (carb.key || carb.carbId) ? String(carb.key || carb.carbId) : ""
+        ),
+        grams: carb && carb.grams !== undefined && carb.grams !== null ? Number(carb.grams || 0) : null,
+      };
+    }),
     salad: hydrateSaladPayload(slot.salad || slot.customSalad || null, catalogMaps, lang),
     sauce: classifyOptions(selectedOptions, (key) => key.includes("sauce")),
     selectedOptions,
@@ -314,12 +353,41 @@ function buildMealSlotPayload(slot = {}, subscription = {}, lang = "en", catalog
   };
 }
 
-function buildAddonPayload(addon = {}, lang = "en", catalogMaps = {}) {
-  const id = addon.addonId || addon.productId || addon.menuProductId || addon.id || addon._id || null;
+function findAddonEntitlement(subscription = {}, addon = {}) {
+  const entitlements = Array.isArray(subscription.addonSubscriptions) ? subscription.addonSubscriptions : [];
+  const planId = stringifyId(addon.addonPlanId);
+  const bucketId = stringifyId(addon.balanceBucketId);
+  const entitlementKey = addon.entitlementKey ? String(addon.entitlementKey) : "";
+  return entitlements.find((entry) => {
+    const entryPlanId = stringifyId(entry.addonPlanId || entry.addonId);
+    return (planId && entryPlanId === planId)
+      || (bucketId && stringifyId(entry.balanceBucketId) === bucketId)
+      || (entitlementKey && String(entry.entitlementKey || "") === entitlementKey);
+  }) || null;
+}
+
+function findAddonProductSnapshot(entitlement, productId, key) {
+  if (!entitlement || !Array.isArray(entitlement.menuProductsSnapshot)) return null;
+  return entitlement.menuProductsSnapshot.find((entry) => (
+    (productId && stringifyId(entry.id || entry._id) === productId)
+      || (key && String(entry.key || "") === String(key))
+  )) || null;
+}
+
+function buildAddonPayload(addon = {}, lang = "en", catalogMaps = {}, subscription = {}) {
+  const legacyId = addon.addonId || addon.productId || addon.menuProductId || addon.id || addon._id || null;
+  const rawProductId = addon.productId || addon.menuProductId || addon.addonId || addon.id || addon._id || null;
+  const productId = stringifyId(rawProductId);
   const key = addon.key || addon.addonKey || null;
-  const doc = resolveAnyCatalogDoc(catalogMaps, ["addon", "product"], id, key);
+  const productDoc = resolveCatalogDoc(catalogMaps, "product", productId, addon.productKey || key);
+  const addonDoc = resolveCatalogDoc(catalogMaps, "addon", addon.addonId || rawProductId, key);
+  const doc = productDoc || addonDoc;
+  const entitlement = findAddonEntitlement(subscription, addon);
+  const addonPlanId = stringifyId(addon.addonPlanId || (entitlement && (entitlement.addonPlanId || entitlement.addonId)));
+  const productSnapshot = findAddonProductSnapshot(entitlement, productId, addon.productKey || key);
+  const planDoc = getFromMap(catalogMaps.addonPlanById, addonPlanId);
   const snapshotName = addon.name || addon.addonName;
-  const catalogName = doc && doc.name;
+  const catalogName = (productSnapshot && (productSnapshot.nameI18n || productSnapshot.name)) || (doc && doc.name);
   let nameSource = hasArabicName(snapshotName)
     ? snapshotName
     : (hasArabicName(catalogName) ? catalogName : (snapshotName || catalogName));
@@ -329,12 +397,28 @@ function buildAddonPayload(addon = {}, lang = "en", catalogMaps = {}) {
   }
 
   return {
-    id: stringifyId(id),
-    key: key || (doc && doc.key) || null,
+    id: stringifyId(legacyId),
+    productId,
+    key: addon.productKey || key || (productSnapshot && productSnapshot.key) || (doc && doc.key) || null,
     name: localizedName(nameSource, lang),
     nameI18n: localizedNameObject(nameSource, key || (doc && doc.key) || ""),
     quantity: Number(addon.qty || addon.quantity || 1),
-    priceHalala: Number(addon.priceHalala || addon.unitPriceHalala || addon.totalPriceHalala || 0),
+    priceHalala: firstDefinedNumber(addon.priceHalala, addon.payableTotalHalala, addon.unitPriceHalala, addon.totalPriceHalala),
+    addonPlanId,
+    balanceBucketId: stringifyId(addon.balanceBucketId || (entitlement && entitlement.balanceBucketId)),
+    entitlementKey: addon.entitlementKey || (entitlement && entitlement.entitlementKey) || null,
+    addonPlanNameI18n: localizedNameObject(
+      (entitlement && (entitlement.addonPlanNameI18n || entitlement.addonPlanName || entitlement.name))
+        || (planDoc && planDoc.name),
+      (entitlement && (entitlement.displayKey || entitlement.entitlementKey)) || (planDoc && (planDoc.displayKey || planDoc.category)) || ""
+    ),
+    productUnitPriceHalala: firstDefinedNumber(
+      productSnapshot && productSnapshot.priceHalala,
+      productDoc && productDoc.priceHalala,
+      addon.productUnitPriceHalala
+    ),
+    payableTotalHalala: firstDefinedNumber(addon.payableTotalHalala, addon.priceHalala, addon.totalPriceHalala),
+    imageUrl: addon.imageUrl || (productSnapshot && productSnapshot.imageUrl) || (doc && doc.imageUrl) || null,
     missingArabicName: hasAnyName(nameSource) && !hasArabicName(nameSource),
   };
 }
@@ -424,10 +508,16 @@ function buildKitchenDetailsPayload(day = {}, subscription = {}, lang = "en", ca
       .filter(([key]) => key)
   );
   const hasSelectedMeals = hasExplicitKitchenMeals(day);
+  const premiumSelectionBySlotKey = new Map(
+    (Array.isArray(day.premiumUpgradeSelections) ? day.premiumUpgradeSelections : [])
+      .map((selection) => [String(selection && selection.baseSlotKey || ""), selection])
+      .filter(([key]) => key)
+  );
   let mealSlots = Array.isArray(day.mealSlots) && hasSelectedMeals
     ? day.mealSlots.map((slot) => buildMealSlotPayload({
       ...slot,
       materializedMeal: materializedBySlotKey.get(String(slot && slot.slotKey || "")) || null,
+      premiumUpgradeSelection: premiumSelectionBySlotKey.get(String(slot && slot.slotKey || "")) || null,
     }, subscription, lang, catalogMaps))
     : [];
   let selectionMode = hasSelectedMeals ? "customer_selected" : "none";
@@ -455,7 +545,7 @@ function buildKitchenDetailsPayload(day = {}, subscription = {}, lang = "en", ca
 
   return {
     mealSlots,
-    addons: addonSources.map((addon) => buildAddonPayload(addon, lang, catalogMaps)),
+    addons: addonSources.map((addon) => buildAddonPayload(addon, lang, catalogMaps, subscription)),
     selectionMode,
   };
 }

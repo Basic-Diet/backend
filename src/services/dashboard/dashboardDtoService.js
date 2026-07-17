@@ -13,6 +13,7 @@ const {
   buildPlanPayload,
   stringifyId,
 } = require("./opsPayloadService");
+const { buildKitchenProjection } = require("./kitchenProjectionService");
 
 /**
  * Service to map internal models to the UnifiedOperationalDTO.
@@ -114,6 +115,7 @@ function mapSubscriptionDayToDTO(day, delivery, subscription, user, role, lang, 
     mealCount: Array.isArray(day.mealSlots) ? day.mealSlots.length : 0,
     plan,
     kitchenDetails,
+    ...buildKitchenProjection(kitchenDetails),
     paymentValidity,
     ui: {
       ...ui,
@@ -175,6 +177,7 @@ function mapOrderToDTO(order, delivery, user, role, lang, catalogMaps = {}) {
     window: order.deliveryWindow || (order.delivery && order.delivery.deliveryWindow ? order.delivery.deliveryWindow : ""),
     zoneId: order.delivery && order.delivery.zoneId ? order.delivery.zoneId : null,
   });
+  const kitchenDetails = buildOrderKitchenDetailsPayload(order, lang, catalogMaps);
 
   return {
     source: "one_time_order",
@@ -191,7 +194,8 @@ function mapOrderToDTO(order, delivery, user, role, lang, catalogMaps = {}) {
     paymentStatus: order.paymentStatus || "paid",
     fulfillmentMethod: mode,
     fulfillmentType: mode === "pickup" ? "branch_pickup" : "delivery",
-    kitchenDetails: buildOrderKitchenDetailsPayload(order, lang, catalogMaps),
+    kitchenDetails,
+    ...buildKitchenProjection(kitchenDetails),
     paymentValidity: {
       paymentRequired: true,
       paymentStatus: order.paymentStatus || "initiated",
@@ -279,7 +283,7 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
   const creditsAvailableForOps = Boolean(pickupRequest.creditsReserved) && !pickupRequest.creditsReleasedAt;
   const paymentBlocksOps = Boolean(snapshotPaymentValidity && snapshotPaymentValidity.pendingUnpaid);
 
-  return {
+  const dto = {
     source: "subscription_pickup_request",
     entityType: "subscription_pickup_request",
     entityId: String(pickupRequest._id),
@@ -467,6 +471,7 @@ function mapSubscriptionPickupRequestToDTO(pickupRequest, subscription, user, ro
       preparedAt,
     },
   };
+  return { ...dto, ...buildKitchenProjection(dto.kitchenDetails) };
 }
 
 module.exports = {
