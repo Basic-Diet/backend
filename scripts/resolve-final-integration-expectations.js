@@ -11,6 +11,8 @@ function replaceRequired(oldText, newText, label) {
 
 replaceRequired(
 `    assertTrue(addons.length > 0, 'addons returned');
+    assertTrue(addons.every((addon) => addon.kind === 'item'), 'all planner addons are items');
+    assertTrue(!addons.some((addon) => addon.id === String(addonJuicePlan._id)), 'plan add-on excluded');
     assertTrue(addons.some((addon) => addon.id === String(addonJuice._id)), 'juice item included');
 
     assertEqual(
