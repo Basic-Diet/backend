@@ -45,3 +45,5 @@ jobs:
           fi
           git commit -m "fix: align backend tests with canonical contracts"
           git push origin HEAD:agent/fix-backend-contract-tests
+
+      - run: echo "canonical contract verification completed"
