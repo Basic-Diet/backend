@@ -820,14 +820,16 @@ async function removeProductFromSection({
 
 async function getSectionPicker(options = {}) {
   const sectionKey = String(options.sectionKey || "").trim().toLowerCase();
-  if (sectionKey === "sandwich" || sectionKey === "products") {
-    return getDirectProductPicker({ ...options, sectionKey });
-  }
   const config = await plannerConfig({ lang: options.lang, preferDraft: true });
   const matchingSection = (config?.sections || []).find(
     (section) => sectionKeyOf(section) === sectionKey
   );
-  if (matchingSection && isProductCard(matchingSection)) {
+  if (matchingSection) {
+    return isProductCard(matchingSection)
+      ? getDirectProductPicker({ ...options, sectionKey })
+      : baseService.getSectionPicker(options);
+  }
+  if (sectionKey === "sandwich" || sectionKey === "products") {
     return getDirectProductPicker({ ...options, sectionKey });
   }
   return baseService.getSectionPicker(options);

@@ -11,7 +11,9 @@ const request = require("supertest");
 const { createApp } = require("../src/app");
 const { dashboardAuth } = require("./helpers/dashboardAuthHelper");
 const MenuCategory = require("../src/models/MenuCategory");
+const MealBuilderConfig = require("../src/models/MealBuilderConfig");
 const MenuProduct = require("../src/models/MenuProduct");
+const { seedCatalog: seedCanonicalCatalog } = require("../scripts/bootstrap/seed-catalog");
 
 let mongoServer;
 
@@ -83,17 +85,20 @@ function directCard({ key, productIds, sortOrder, selectionType = "full_meal_pro
   };
 }
 
-async function seedCatalog() {
-  const now = new Date();
-  const category = await MenuCategory.create({
-    key: "dynamic_cards",
-    name: { ar: "بطاقات ديناميكية", en: "Dynamic cards" },
-    publishedAt: now,
-  });
+async function run() {
+  await connect();
+  try {
+    const app = createApp();
+    const api = request(app);
+    const auth = await dashboardAuth("admin", "meal-builder-dynamic-cards");
 
-  const products = await MenuProduct.insertMany([
-    {
-      categoryId: category._id,
+    const incompleteCategory = await MenuCategory.create({
+      key: "incomplete_seed",
+      name: { ar: "غير مكتمل", en: "Incomplete" },
+      publishedAt: new Date(),
+    });
+    await MenuProduct.create({
+      categoryId: incompleteCategory._id,
       key: "basic_meal",
       name: { ar: "وجبة أساسية", en: "Basic meal" },
       itemType: "basic_meal",
@@ -101,36 +106,36 @@ async function seedCatalog() {
       priceHalala: 1900,
       availableFor: ["subscription"],
       availableForSubscription: true,
-      publishedAt: now,
-    },
-    {
+      publishedAt: new Date(),
+    });
+
+    let response = await api
+      .post("/api/dashboard/meal-builder/draft")
+      .set(auth.headers)
+      .send({});
+    expectStatus(response, 422, "incomplete default seed fails atomically");
+    assert.strictEqual(response.body.error.code, "MEAL_BUILDER_DEFAULT_SEED_INCOMPLETE");
+    assert(response.body.error.details.missingSectionKeys.length > 0);
+    assert.strictEqual(await MealBuilderConfig.countDocuments({ status: "draft", isCurrent: true }), 0);
+
+    await seedCanonicalCatalog({
+      reset: true,
+      sync: false,
+      includeSubscriptionPlans: false,
+      skipStrictVerify: true,
+    });
+
+    const directProducts = await MenuProduct.find({
+      itemType: { $in: ["cold_sandwich", "full_meal_product"] },
+      isAvailable: { $ne: false },
+    }).sort({ sortOrder: 1 }).lean();
+    assert(directProducts.length >= 3, "canonical bootstrap must provide direct meal products");
+    const [directOne, directTwo, directThree] = directProducts;
+    const id = (product) => String(product._id);
+    const category = await MenuCategory.findById(directOne.categoryId).lean();
+    const unavailable = await MenuProduct.create({
       categoryId: category._id,
-      key: "sandwich_only_product",
-      name: { ar: "ساندويتش", en: "Sandwich" },
-      itemType: "cold_sandwich",
-      pricingModel: "fixed",
-      priceHalala: 1200,
-      availableFor: ["subscription"],
-      availableForSubscription: true,
-      publishedAt: now,
-    },
-    ...["custom_meal_one", "custom_meal_two", "custom_meal_three"].map(
-      (key, index) => ({
-        categoryId: category._id,
-        key,
-        name: { ar: key, en: key },
-        itemType: "full_meal_product",
-        pricingModel: "fixed",
-        priceHalala: 1400 + index * 100,
-        availableFor: ["subscription"],
-        availableForSubscription: true,
-        publishedAt: now,
-        sortOrder: index + 1,
-      })
-    ),
-    {
-      categoryId: category._id,
-      key: "unavailable_meal",
+      key: "unavailable_dynamic_meal",
       name: { ar: "غير متاح", en: "Unavailable" },
       itemType: "full_meal_product",
       pricingModel: "fixed",
@@ -138,33 +143,24 @@ async function seedCatalog() {
       availableFor: ["subscription"],
       availableForSubscription: true,
       isAvailable: false,
-      publishedAt: now,
-    },
-  ]);
+      publishedAt: new Date(),
+    });
 
-  return Object.fromEntries(products.map((product) => [product.key, product]));
-}
-
-async function run() {
-  await connect();
-  try {
-    const products = await seedCatalog();
-    const id = (key) => String(products[key]._id);
-    const app = createApp();
-    const api = request(app);
-    const auth = await dashboardAuth("admin", "meal-builder-dynamic-cards");
-
-    let response = await api
+    response = await api
       .post("/api/dashboard/meal-builder/draft")
       .set(auth.headers)
       .send({});
     expectStatus(response, 201, "optional seed draft");
-    assert(response.body.data.sections.length > 0, "optional seed should remain available");
+    assert.deepStrictEqual(
+      response.body.data.sections.map((section) => section.key),
+      ["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"]
+    );
+    const seededSections = response.body.data.sections;
 
     const sandwichOnly = [
       directCard({
-        key: "sandwich",
-        productIds: [id("sandwich_only_product")],
+        key: "portable_lunches",
+        productIds: [id(directOne)],
         sortOrder: 47,
         selectionType: "sandwich",
       }),
@@ -174,7 +170,13 @@ async function run() {
       .set(auth.headers)
       .send({ sections: sandwichOnly, notes: "sandwich only" });
     expectStatus(response, 200, "save sandwich-only draft");
-    assert.deepStrictEqual(response.body.data.sections.map((section) => section.key), ["sandwich"]);
+    assert.deepStrictEqual(response.body.data.sections.map((section) => section.key), ["portable_lunches"]);
+
+    response = await api
+      .get("/api/dashboard/meal-builder/pickers/portable_lunches?limit=1000")
+      .set(auth.headers);
+    expectStatus(response, 200, "picker follows renamed sandwich card meaning");
+    assert.strictEqual(response.body.data.candidateType, "product");
 
     response = await api
       .post("/api/dashboard/meal-builder/validate")
@@ -192,19 +194,19 @@ async function run() {
       .send({ notes: "publish sandwich only" });
     expectStatus(response, 200, "publish sandwich-only draft");
     assert.strictEqual(response.body.data.validation.ready, true);
-    assert.deepStrictEqual(response.body.data.config.sections.map((section) => section.key), ["sandwich"]);
+    assert.deepStrictEqual(response.body.data.config.sections.map((section) => section.key), ["portable_lunches"]);
 
     response = await api.get("/api/subscriptions/meal-planner-menu?lang=en");
     expectStatus(response, 200, "public v3 sandwich-only catalog");
     assert.strictEqual(response.body.data.builderCatalog.contractVersion, "meal_planner_menu.v3");
     assert.strictEqual(response.body.data.plannerCatalog, undefined);
     assert.strictEqual(response.body.data.builderCatalogV2, undefined);
-    assert(response.body.data.builderCatalog.sections.some((section) => section.key === "sandwich"));
+    assert(response.body.data.builderCatalog.sections.some((section) => section.key === "portable_lunches"));
 
     const customOnly = [
       directCard({
         key: "chef_specials",
-        productIds: [id("custom_meal_one")],
+        productIds: [id(directTwo)],
         sortOrder: 900,
       }),
     ];
@@ -218,15 +220,107 @@ async function run() {
     assert.deepStrictEqual(response.body.data.warnings, []);
     assertNoTemplateIssues(response.body.data, "custom-key validation");
 
+    for (const [label, card] of [
+      ["canonical sandwich key with unrelated meaning", directCard({ key: "sandwich", productIds: [id(directTwo)], sortOrder: 1 })],
+      ["canonical carbs key with unrelated meaning", directCard({ key: "carbs", productIds: [id(directThree)], sortOrder: 1 })],
+    ]) {
+      response = await api
+        .post("/api/dashboard/meal-builder/validate")
+        .set(auth.headers)
+        .send({ sections: [card] });
+      expectStatus(response, 200, label);
+      assert.strictEqual(response.body.data.ready, true);
+      assert.deepStrictEqual(response.body.data.warnings, []);
+      assert(!issueCodes(response.body.data).has("MEAL_BUILDER_CARBS_RULE_INVALID"));
+      assert(!issueCodes(response.body.data).has("MEAL_BUILDER_SANDWICH_METADATA_INCOMPLETE"));
+    }
+
+    const renamedCarbs = {
+      ...seededSections.find((section) => section.key === "carbs"),
+      key: "daily_starches",
+    };
+    response = await api
+      .post("/api/dashboard/meal-builder/validate")
+      .set(auth.headers)
+      .send({ sections: [{ ...renamedCarbs, maxSelections: 1 }] });
+    expectStatus(response, 200, "renamed carbs semantics");
+    assert(issueCodes(response.body.data).has("MEAL_BUILDER_CARBS_RULE_INVALID"));
+
+    response = await api
+      .post("/api/dashboard/meal-builder/validate")
+      .set(auth.headers)
+      .send({ sections: [renamedCarbs] });
+    expectStatus(response, 200, "valid renamed carbs card");
+    assert.strictEqual(response.body.data.ready, true);
+
+    response = await api
+      .put("/api/dashboard/meal-builder/draft")
+      .set(auth.headers)
+      .send({ sections: [renamedCarbs] });
+    expectStatus(response, 200, "save renamed carbs card");
+    response = await api
+      .get("/api/dashboard/meal-builder/pickers/daily_starches?limit=1000")
+      .set(auth.headers);
+    expectStatus(response, 200, "picker follows renamed carbs card meaning");
+    assert.strictEqual(response.body.data.candidateType, "option");
+    assert.strictEqual(response.body.data.rules.maxTotalGrams, 300);
+
+    const renamedBeef = {
+      ...seededSections.find((section) => section.key === "beef"),
+      key: "red_meat_choices",
+      rules: {},
+    };
+    response = await api
+      .post("/api/dashboard/meal-builder/validate")
+      .set(auth.headers)
+      .send({ sections: [renamedBeef] });
+    expectStatus(response, 200, "renamed beef semantics");
+    assert(issueCodes(response.body.data).has("MEAL_BUILDER_BEEF_DAILY_LIMIT_RULE_MISSING"));
+
+    const renamedPremium = {
+      ...seededSections.find((section) => section.key === "premium"),
+      key: "vip_upgrades",
+    };
+    response = await api
+      .post("/api/dashboard/meal-builder/validate")
+      .set(auth.headers)
+      .send({ sections: [renamedPremium] });
+    expectStatus(response, 200, "renamed premium semantics");
+    assert.strictEqual(response.body.data.ready, true);
+
+    response = await api
+      .put("/api/dashboard/meal-builder/draft")
+      .set(auth.headers)
+      .send({ sections: [renamedPremium] });
+    expectStatus(response, 200, "save premium-only authored draft");
+    response = await api
+      .post("/api/dashboard/meal-builder/publish")
+      .set(auth.headers)
+      .send({ notes: "premium-only is not primary content" });
+    expectStatus(response, 422, "block publish without primary picker content");
+    assert(issueCodes(response.body.error.details).has("MEAL_BUILDER_PRIMARY_CONTENT_EMPTY"));
+
+    const emptyFamily = {
+      ...seededSections.find((section) => section.key === "chicken"),
+      key: "poultry_choices",
+      selectedOptionIds: [],
+    };
+    response = await api
+      .post("/api/dashboard/meal-builder/validate")
+      .set(auth.headers)
+      .send({ sections: [emptyFamily] });
+    expectStatus(response, 200, "renamed empty protein family semantics");
+    assert(issueCodes(response.body.data).has("MEAL_BUILDER_PROTEIN_FAMILY_EMPTY"));
+
     const twoCards = [
       directCard({
         key: "later_card",
-        productIds: [id("custom_meal_two")],
+        productIds: [id(directThree)],
         sortOrder: 80,
       }),
       directCard({
         key: "first_card",
-        productIds: [id("custom_meal_one")],
+        productIds: [id(directTwo)],
         sortOrder: 3,
       }),
     ];
@@ -240,13 +334,20 @@ async function run() {
     assertNoTemplateIssues(response.body.data, "two-card validation");
 
     response = await api
+      .put("/api/dashboard/meal-builder/draft")
+      .set(auth.headers)
+      .send({ sections: twoCards });
+    expectStatus(response, 200, "save independently ordered cards");
+    assert.deepStrictEqual(response.body.data.sections.map((section) => section.key), ["first_card", "later_card"]);
+
+    response = await api
       .post("/api/dashboard/meal-builder/validate")
       .set(auth.headers)
       .send({
         sections: [
           directCard({
             key: "invalid_present_product",
-            productIds: [id("unavailable_meal")],
+            productIds: [id(unavailable)],
             sortOrder: 1,
           }),
         ],
@@ -294,7 +395,7 @@ async function run() {
       .send({
         key: "second_card",
         titleOverride: { ar: "ثانية", en: "Second" },
-        selectedProductIds: [id("custom_meal_two"), id("custom_meal_three")],
+        selectedProductIds: [id(directOne), id(directThree)],
         sortOrder: 12,
       });
     expectStatus(response, 201, "create arbitrary card");
@@ -316,10 +417,10 @@ async function run() {
     assert.strictEqual(response.body.data.section.titleOverride.en, "Updated");
 
     response = await api
-      .delete(`/api/dashboard/meal-builder/sections/second_card/products/${id("custom_meal_three")}`)
+      .delete(`/api/dashboard/meal-builder/sections/second_card/products/${id(directThree)}`)
       .set(auth.headers);
     expectStatus(response, 200, "remove product from arbitrary card");
-    assert(!response.body.data.section.selectedProductIds.includes(id("custom_meal_three")));
+    assert(!response.body.data.section.selectedProductIds.includes(id(directThree)));
 
     response = await api
       .delete("/api/dashboard/meal-builder/sections/second_card")
@@ -327,6 +428,13 @@ async function run() {
     expectStatus(response, 200, "delete arbitrary card");
     assert.strictEqual(response.body.data.action, "deleted");
     assert.deepStrictEqual(response.body.data.draft.sections.map((section) => section.key), ["chef_specials"]);
+
+    response = await api
+      .post("/api/dashboard/meal-builder/publish")
+      .set(auth.headers)
+      .send({ notes: "publish exact partial custom layout" });
+    expectStatus(response, 200, "publish exact partial custom layout");
+    assert.deepStrictEqual(response.body.data.config.sections.map((section) => section.key), ["chef_specials"]);
 
     response = await api
       .put("/api/dashboard/meal-builder/draft")
@@ -339,9 +447,29 @@ async function run() {
       .get("/api/dashboard/meal-builder/draft/hydrated")
       .set(auth.headers);
     expectStatus(response, 200, "hydrate empty editable draft");
-    assert.strictEqual(response.body.data.ready, false);
-    assert(issueCodes(response.body.data.validation).has("MEAL_BUILDER_SECTIONS_EMPTY"));
+    assert.strictEqual(response.body.data.ready, true);
+    assert.deepStrictEqual(response.body.data.errors, []);
+    assert.deepStrictEqual(response.body.data.warnings, []);
     assertNoTemplateIssues(response.body.data.validation, "empty draft validation");
+
+    response = await api
+      .post("/api/dashboard/meal-builder/validate")
+      .set(auth.headers)
+      .send({ sections: [] });
+    expectStatus(response, 200, "ordinary empty draft validation");
+    assert.strictEqual(response.body.data.ready, true);
+    assert.deepStrictEqual(response.body.data.errors, []);
+    assert.deepStrictEqual(response.body.data.warnings, []);
+
+    response = await api.get("/api/dashboard/meal-builder/draft").set(auth.headers);
+    expectStatus(response, 200, "open existing empty draft without reseeding");
+    assert.deepStrictEqual(response.body.data.sections, []);
+
+    response = await api.get("/api/dashboard/meal-builder").set(auth.headers);
+    expectStatus(response, 200, "dashboard state accepts empty draft");
+    assert.strictEqual(response.body.data.validation.draft.ready, true);
+    assert.deepStrictEqual(response.body.data.validation.draft.errors, []);
+    assert.deepStrictEqual(response.body.data.validation.draft.warnings, []);
 
     response = await api
       .post("/api/dashboard/meal-builder/publish")
@@ -349,14 +477,16 @@ async function run() {
       .send({ notes: "must not publish empty" });
     expectStatus(response, 422, "block empty publish");
     assert.strictEqual(response.body.error.code, "MEAL_BUILDER_VALIDATION_FAILED");
+    assert(issueCodes(response.body.error.details).has("MEAL_BUILDER_SECTIONS_EMPTY"));
+    assert(issueCodes(response.body.error.details).has("MEAL_BUILDER_PRIMARY_CONTENT_EMPTY"));
 
     response = await api
       .post("/api/dashboard/meal-builder/draft/reset")
       .set(auth.headers)
       .send({});
-    expectStatus(response, 200, "reset draft to published sandwich-only state");
+    expectStatus(response, 200, "reset draft to exact published partial state");
     assert.strictEqual(response.body.data.reset, true);
-    assert.deepStrictEqual(response.body.data.draft.sections.map((section) => section.key), ["sandwich"]);
+    assert.deepStrictEqual(response.body.data.draft.sections.map((section) => section.key), ["chef_specials"]);
     assert.strictEqual(response.body.data.draft.sections.length, 1);
 
     response = await api.get("/api/dashboard/meal-builder").set(auth.headers);
