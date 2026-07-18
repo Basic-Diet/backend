@@ -523,7 +523,6 @@ async function getSubscriptionMealPlannerMenu(req, res) {
     addonCatalog: authoritativeAddonChoices
       ? buildAuthoritativePlannerAddonCatalog(authoritativeAddonChoices)
       : { ...legacyAddonCatalog, entitlementResolved: false, source: "global_legacy_catalog" },
-    plannerCatalog: plannerCatalog || { sections: [] },
   };
   if (authoritativeAddonChoices) {
     data.addonChoices = authoritativeAddonChoices;
