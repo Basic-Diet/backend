@@ -26,6 +26,7 @@ jobs:
 
       - run: npm ci
       - run: node scripts/apply-final-backend-contract-fixes.js
+      - run: node scripts/remove-public-planner-mirror.js
 
       - name: Persist final backend fixes
         run: |
