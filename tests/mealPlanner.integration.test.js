@@ -848,7 +848,7 @@ async function createTestSubscription() {
   }
   
   const startDate = new Date();
-  startDate.setDate(startDate.getDate() + 1);
+  startDate.setHours(0, 0, 0, 0);
   const endDate = new Date(startDate);
   endDate.setDate(endDate.getDate() + 28);
   
@@ -1020,9 +1020,9 @@ async function runTests() {
     assertEqual(defaultRes.body.status, true, 'default response status');
     assertNoTopLevelOk(defaultRes.body, 'default meal-planner-menu response');
     assertTrue(!!defaultRes.body.data?.builderCatalog, 'default builderCatalog');
-    assertTrue(!!defaultRes.body.data?.builderCatalogV2, 'default v3 response keeps builderCatalogV2 compatibility mirror');
-    assertTrue(!!defaultRes.body.data?.plannerCatalog, 'default plannerCatalog');
-    assertEqual(defaultRes.body.data?.plannerCatalog?.contractVersion, 'meal_planner_menu.v3', 'default plannerCatalog v3 contract');
+    assertEqual(Object.prototype.hasOwnProperty.call(defaultRes.body.data || {}, 'builderCatalogV2'), false, 'default response has no builderCatalogV2 mirror');
+    assertEqual(Object.prototype.hasOwnProperty.call(defaultRes.body.data || {}, 'plannerCatalog'), false, 'default response has no plannerCatalog mirror');
+    assertEqual(defaultRes.body.data?.builderCatalog?.contractVersion, 'meal_planner_menu.v3', 'default builderCatalog v3 contract');
     assertTrue(!!defaultRes.body.data?.addonCatalog, 'default addonCatalog');
     assertTrue(Array.isArray(defaultRes.body.data?.addonCatalog?.items), 'default addonCatalog.items');
     assertTrue(!!defaultRes.body.data?.addonCatalog?.byCategory && typeof defaultRes.body.data?.addonCatalog?.byCategory === 'object', 'default addonCatalog.byCategory');
@@ -1061,20 +1061,20 @@ async function runTests() {
     );
   });
   
-  await test('explicit builderCatalogV2 exposes premium meal compatibility section', async () => {
+  await test('legacy contract query exposes canonical premium meal section', async () => {
     const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu?contractVersion=v2');
-    const premiumSection = findPlannerSection(res.body.data?.builderCatalogV2, 'premium_meal');
+    const premiumSection = findPlannerSection(res.body.data?.builderCatalog, 'premium_meal');
     const premiumProduct = findPlannerProduct(premiumSection, 'premium_meal');
     const proteinGroup = findPlannerGroup(premiumProduct, 'protein');
-    assertTrue(!!premiumSection, 'builderCatalogV2 premium_meal section present when v2 is requested');
-    assertTrue(!!premiumProduct, 'builderCatalogV2 premium_meal virtual product present');
-    assertTrue(!!proteinGroup, 'builderCatalogV2 premium protein group present');
+    assertTrue(!!premiumSection, 'canonical premium_meal section present');
+    assertTrue(!!premiumProduct, 'canonical premium_meal virtual product present');
+    assertTrue(!!proteinGroup, 'canonical premium protein group present');
     assertEqual(premiumProduct?.selectionType, 'premium_meal', 'premium product selectionType');
   });
   
-  await test('explicit builderCatalogV2 has premium_large_salad compatibility product', async () => {
+  await test('canonical builderCatalog has premium_large_salad product', async () => {
     const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu?contractVersion=v2');
-    const saladSection = findPlannerSection(res.body.data?.builderCatalogV2, 'premium_large_salad');
+    const saladSection = findPlannerSection(res.body.data?.builderCatalog, 'premium_large_salad');
     const salad = findPlannerProduct(saladSection, 'premium_large_salad');
     assertTrue(!!saladSection, 'premium_large_salad compatibility section present');
     assertTrue(!!salad, 'premium_large_salad compatibility product present');
@@ -1086,11 +1086,11 @@ async function runTests() {
     assertTrue(Array.isArray(salad?.optionGroups), 'premium_large_salad optionGroups is an array');
   });
 
-  await test('explicit builderCatalogV2 sandwich section does not leak non-sandwich products', async () => {
+  await test('canonical sandwich section does not leak non-sandwich products', async () => {
     const res = await makeRequest('GET', '/api/subscriptions/meal-planner-menu?contractVersion=v2');
-    const sandwichSection = findPlannerSection(res.body.data?.builderCatalogV2, 'sandwich');
+    const sandwichSection = findPlannerSection(res.body.data?.builderCatalog, 'sandwich');
     const sandwiches = sandwichSection?.products || [];
-    assertTrue(!!sandwichSection, 'builderCatalogV2 sandwich section present when v2 is requested');
+    assertTrue(!!sandwichSection, 'canonical sandwich section present');
     assertTrue(!sandwiches.some((item) => item.id === String(nonSandwichMeal._id)), 'non-sandwich meal excluded');
   });
 
@@ -1547,9 +1547,9 @@ async function runTests() {
       mealSlots: slots,
       addonsOneTime: [String(addonJuicePlan._id)],
     });
-    assertEqual(res.status, 400, 'status');
-    const errCode = res.body.error?.code;
-    assertTrue(errCode === 'INVALID' || errCode === 'INVALID_ONE_TIME_ADDON_SELECTION', 'plan add-on request rejected');
+    assertEqual(res.status, 402, 'plan add-on selection requires payment');
+    const paymentRequirement = res.body.paymentRequirement || res.body.error?.details?.paymentRequirement;
+    assertTrue(!!paymentRequirement, 'payment requirement returned');
   });
 
   await test('planner accepts item selection with no add-on subscriptions as paid overage', async () => {
