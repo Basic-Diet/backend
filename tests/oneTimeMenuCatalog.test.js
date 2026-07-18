@@ -696,8 +696,8 @@ async function seedViaDashboard(api) {
       const endpointCatalog = res.body.data && res.body.data.builderCatalog;
       assert(endpointCatalog, "endpoint returns builderCatalog");
       assert.strictEqual(endpointCatalog.contractVersion, "meal_planner_menu.v3");
-      assert(res.body.data.plannerCatalog, "endpoint includes plannerCatalog");
-      assert(res.body.data.builderCatalogV2, "default v3 response includes builderCatalogV2 compatibility mirror");
+      assert.strictEqual(res.body.data.plannerCatalog, undefined, "endpoint omits plannerCatalog mirror");
+      assert.strictEqual(res.body.data.builderCatalogV2, undefined, "endpoint omits builderCatalogV2 mirror");
       for (const key of ["categories", "proteins", "carbs", "premiumProteins", "premiumLargeSalad"]) {
         assert.strictEqual(endpointCatalog[key], undefined, `endpoint builderCatalog omits legacy ${key}`);
       }
@@ -705,9 +705,10 @@ async function seedViaDashboard(api) {
       assert(Array.isArray(endpointCatalog.sections), "endpoint builderCatalog.sections is an array");
 
       const v2Res = await api.get("/api/subscriptions/meal-planner-menu?lang=en&contractVersion=v2");
-      expectStatus(v2Res, 200, "subscription meal planner menu v2 compatibility");
-      assert(v2Res.body.data.builderCatalogV2, "explicit v2 request includes builderCatalogV2");
-      assert.strictEqual(v2Res.body.data.builderCatalogV2.catalogVersion, "meal_planner_menu.v2");
+      expectStatus(v2Res, 200, "subscription meal planner menu legacy query compatibility");
+      assert(v2Res.body.data.builderCatalog, "legacy query returns canonical builderCatalog");
+      assert.strictEqual(v2Res.body.data.builderCatalog.contractVersion, "meal_planner_menu.v3");
+      assert.strictEqual(v2Res.body.data.builderCatalogV2, undefined, "legacy query does not restore v2 mirror");
     });
 
     await resetDatabase();

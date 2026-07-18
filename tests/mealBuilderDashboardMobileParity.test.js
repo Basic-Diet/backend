@@ -294,7 +294,7 @@ async function readPlannerState(api, fixture) {
 
   res = await api.get("/api/subscriptions/meal-planner-menu?contractVersion=v3&lang=en");
   expectStatus(res, 200, "Mobile v3 meal planner catalog");
-  const mobileProduct = findPlannerProduct(res.body.data.plannerCatalog, fixture.product.id);
+  const mobileProduct = findPlannerProduct(res.body.data.builderCatalog, fixture.product.id);
   const mobileGroup = findProductGroup(mobileProduct, fixture.group.id);
 
   return {
@@ -302,7 +302,7 @@ async function readPlannerState(api, fixture) {
     dashboardGroup,
     mobileProduct,
     mobileGroup,
-    plannerCatalog: res.body.data.plannerCatalog,
+    plannerCatalog: res.body.data.builderCatalog,
   };
 }
 
