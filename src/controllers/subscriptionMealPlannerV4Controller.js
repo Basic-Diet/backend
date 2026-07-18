@@ -1,7 +1,11 @@
 const menuController = require("./menuController");
 const errorResponse = require("../utils/errorResponse");
+const {
+  PLANNER_CATALOG_V3_VERSION,
+  hasSelectablePlannerContent,
+} = require("../services/catalog/plannerCatalogContentValidator");
 
-const FLUTTER_CONTRACT_VERSION = "meal_planner_menu.v3";
+const FLUTTER_CONTRACT_VERSION = PLANNER_CATALOG_V3_VERSION;
 const OPTIONAL_ADDON_FIELDS = [
   "addonChoices",
   "addonChoiceGroups",
@@ -25,6 +29,17 @@ function sanitizePublicData(source = {}) {
     err.details = {
       expectedContractVersion: FLUTTER_CONTRACT_VERSION,
       receivedContractVersion: builderCatalog?.contractVersion || null,
+    };
+    throw err;
+  }
+  if (!hasSelectablePlannerContent(builderCatalog)) {
+    const err = new Error("Meal Planner catalog contains no selectable content");
+    err.code = "MEAL_PLANNER_CATALOG_EMPTY";
+    err.status = 503;
+    err.details = {
+      expectedContractVersion: FLUTTER_CONTRACT_VERSION,
+      receivedContractVersion: builderCatalog.contractVersion || null,
+      sectionCount: Array.isArray(builderCatalog.sections) ? builderCatalog.sections.length : 0,
     };
     throw err;
   }

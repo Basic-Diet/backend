@@ -8,6 +8,7 @@ const ProductOptionGroup = require("../../models/ProductOptionGroup");
 const Sandwich = require("../../models/Sandwich");
 const { pickLang } = require("../../utils/i18n");
 const { sanitizeObject } = require("../../utils/encoding");
+const { logger } = require("../../utils/logger");
 const {
   MEAL_PLANNER_CATEGORY_DEFINITIONS,
   MEAL_SELECTION_TYPES,
@@ -50,9 +51,12 @@ const {
   isSubscriptionPremiumLargeSaladProtein,
   isSubscriptionPremiumMealProtein,
 } = require("../subscription/subscriptionMenuEligibilityPolicyService");
+const {
+  PLANNER_CATALOG_V3_VERSION,
+  hasSelectablePlannerContent,
+} = require("./plannerCatalogContentValidator");
 
 const BUILDER_CATALOG_V2_VERSION = "meal_planner_menu.v2";
-const PLANNER_CATALOG_V3_VERSION = "meal_planner_menu.v3";
 const MENU_PROTEIN_GROUP_KEY = "proteins";
 const MENU_CARB_GROUP_KEY = "carbs";
 const MENU_SALAD_EXTRA_PROTEIN_GROUP_KEY = "extra_protein_50g";
@@ -1423,7 +1427,20 @@ async function buildSubscriptionBuilderCatalogBundle({ lang = "en", includeV2 = 
     try {
       const mealBuilderConfigService = require("../subscription/mealBuilderConfigService");
       const publishedBuilderPlannerCatalog = await mealBuilderConfigService.buildPlannerCatalogFromPublishedBuilder({ lang });
-      if (publishedBuilderPlannerCatalog) plannerCatalog = publishedBuilderPlannerCatalog;
+      if (publishedBuilderPlannerCatalog) {
+        if (hasSelectablePlannerContent(publishedBuilderPlannerCatalog)) {
+          plannerCatalog = publishedBuilderPlannerCatalog;
+        } else {
+          logger.warn("Published Meal Builder catalog rejected", {
+            event: "published_meal_builder_catalog_rejected",
+            reason: "no_selectable_content",
+            contractVersion: publishedBuilderPlannerCatalog.contractVersion || null,
+            sectionCount: Array.isArray(publishedBuilderPlannerCatalog.sections)
+              ? publishedBuilderPlannerCatalog.sections.length
+              : 0,
+          });
+        }
+      }
     } catch (err) {
       if (err && err.code !== "MEAL_BUILDER_NOT_PUBLISHED") {
         console.warn("[CatalogService] Unable to build plannerCatalog from published Meal Builder:", err.message);

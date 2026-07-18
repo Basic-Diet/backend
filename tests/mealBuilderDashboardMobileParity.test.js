@@ -360,11 +360,14 @@ async function main() {
     assert(hiddenRelation, "soft-hidden relation remains persisted");
     assert.strictEqual(hiddenRelation.isVisible, false, "persisted relation is hidden");
 
-    state = await readPlannerState(api, fixture);
-    assert(!state.mobileGroup, "hidden relation is removed from Mobile public product optionGroups");
-    if (state.mobileProduct) {
-      assert.deepStrictEqual(state.mobileProduct.optionGroups || [], [], "no stale public group shell remains");
-    }
+    res = await api.get("/api/dashboard/meal-builder").set(adminHeaders);
+    expectStatus(res, 200, "Dashboard Meal Builder read after hide");
+    const hiddenDashboardProduct = findPlannerProduct(res.body.data.plannerCatalog, fixture.product.id);
+    assert(!findProductGroup(hiddenDashboardProduct, fixture.group.id), "hidden relation is removed from Dashboard planner");
+
+    res = await api.get("/api/subscriptions/meal-planner-menu?contractVersion=v3&lang=en");
+    expectStatus(res, 503, "Mobile planner rejects catalog with no selectable content");
+    assert.strictEqual(res.body.error.code, "MEAL_PLANNER_CATALOG_EMPTY");
 
     res = await api.get(`/api/dashboard/menu/products/${fixture.product.id}/composer?contractVersion=v4`).set(adminHeaders);
     expectStatus(res, 200, "Dashboard composer read after hide");

@@ -2923,6 +2923,7 @@ function resolveSectionProducts(section, docs) {
 function productSelectionType(section, product) {
   if (product && product.key === "premium_large_salad") return MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD;
   if (product && product.itemType === "cold_sandwich") return MEAL_SELECTION_TYPES.SANDWICH;
+  if (product && product.itemType === "full_meal_product") return MEAL_SELECTION_TYPES.FULL_MEAL_PRODUCT;
   if (section.selectionType) return section.selectionType;
   return "";
 }
