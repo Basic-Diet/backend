@@ -1,1 +1,1 @@
-Trigger final Meal Planner contract gate.
+Trigger remaining Meal Planner failure export.
