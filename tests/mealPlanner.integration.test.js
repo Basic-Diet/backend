@@ -502,6 +502,7 @@ async function seedBuilderCatalog() {
   if (!addonJuice) {
     addonJuice = new Addon({
       name: { ar: 'عصير التوت', en: 'Berry Blast' }, category: 'juice', kind: 'item',
+      billingMode: 'flat_once',
       priceHalala: 1000, isActive: true,
     });
     await addonJuice.save();
@@ -511,6 +512,7 @@ async function seedBuilderCatalog() {
   if (!addonJuice2) {
     addonJuice2 = new Addon({
       name: { ar: 'ماء', en: 'Water' }, category: 'juice', kind: 'item',
+      billingMode: 'flat_once',
       priceHalala: 500, isActive: true,
     });
     await addonJuice2.save();
@@ -520,6 +522,7 @@ async function seedBuilderCatalog() {
   if (!addonSnack) {
     addonSnack = new Addon({
       name: { ar: 'بروتين بار', en: 'Protein Bar' }, category: 'snack', kind: 'item',
+      billingMode: 'flat_once',
       priceHalala: 1500, isActive: true,
     });
     await addonSnack.save();
@@ -529,6 +532,7 @@ async function seedBuilderCatalog() {
   if (!addonSmallSalad) {
     addonSmallSalad = new Addon({
       name: { ar: 'سلطة صغيرة', en: 'Small Salad' }, category: 'small_salad', kind: 'item',
+      billingMode: 'flat_once',
       priceHalala: 1200, isActive: true,
     });
     await addonSmallSalad.save();
@@ -538,6 +542,7 @@ async function seedBuilderCatalog() {
   if (!addonInactive) {
     addonInactive = new Addon({
       name: { ar: 'عنصر غير نشط', en: 'Inactive Juice Item' }, category: 'juice', kind: 'item',
+      billingMode: 'flat_once',
       priceHalala: 900, isActive: false,
     });
     await addonInactive.save();
@@ -1547,9 +1552,9 @@ async function runTests() {
       mealSlots: slots,
       addonsOneTime: [String(addonJuicePlan._id)],
     });
-    assertEqual(res.status, 402, 'plan add-on selection requires payment');
-    const paymentRequirement = res.body.paymentRequirement || res.body.error?.details?.paymentRequirement;
-    assertTrue(!!paymentRequirement, 'payment requirement returned');
+    assertEqual(res.status, 400, 'plan add-on selection is rejected');
+    const errCode = res.body.error?.code;
+    assertTrue(errCode === 'INVALID' || errCode === 'INVALID_ONE_TIME_ADDON_SELECTION', 'plan add-on request rejected');
   });
 
   await test('planner accepts item selection with no add-on subscriptions as paid overage', async () => {

@@ -573,6 +573,7 @@ function buildV3PricingPayload(product = {}, overrides = {}) {
 }
 
 function buildV3ProductPayload(product, lang, overrides = {}) {
+  const pricing = buildV3PricingPayload(product, overrides.pricing || {});
   return sanitizeObject({
     id: String(product._id),
     key: product.key || "",
@@ -583,7 +584,10 @@ function buildV3ProductPayload(product, lang, overrides = {}) {
     description: localized(product.description, lang),
     descriptionI18n: localizedPair(product.description),
     imageUrl: product.imageUrl || "",
-    pricing: buildV3PricingPayload(product, overrides.pricing || {}),
+    pricing,
+    priceHalala: pricing.basePriceHalala,
+    extraFeeHalala: pricing.extraFeeHalala,
+    currency: pricing.currency,
     nutrition: buildNutritionPayload(product),
     action: overrides.action || {
       type: overrides.optionGroups && overrides.optionGroups.length ? "open_builder" : "direct_add",
@@ -790,6 +794,16 @@ async function buildCanonicalPlannerCatalogV3({ builderCatalog, context = {}, la
   const premiumMealRelationGroups = await buildV3ProductOptionGroups({
     product: basicMealProduct,
     lang,
+    groupKeyResolver(group) {
+      if (group.key === MENU_PROTEIN_GROUP_KEY) {
+        return {
+          key: "protein",
+          sourceKey: MENU_PROTEIN_GROUP_KEY,
+          canonicalGroupKey: "protein",
+        };
+      }
+      return { key: group.key };
+    },
     optionFilter({ option, group }) {
       if (group.key === MENU_PROTEIN_GROUP_KEY) {
         if (!isConfiguredPremiumMealProtein(option, premiumConfigState)) return false;
