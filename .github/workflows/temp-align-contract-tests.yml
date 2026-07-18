@@ -25,17 +25,17 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: node scripts/align-current-contract-tests-v3.js
+      - run: node scripts/apply-final-backend-contract-fixes.js
 
-      - name: Persist corrected backend tests
+      - name: Persist final backend fixes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/mealPlanner.integration.test.js tests/oneTimeMenuCatalog.test.js tests/mealBuilderDashboardMobileParity.test.js
+          git add src/controllers/menuController.js tests/mealPlanner.integration.test.js
           if git diff --cached --quiet; then
-            echo "Tests already aligned"
+            echo "Final fixes already persisted"
           else
-            git commit -m "fix: align backend tests with canonical contracts"
+            git commit -m "fix: enforce canonical meal planner contract"
             git push origin HEAD:agent/fix-backend-contract-tests
           fi
 
