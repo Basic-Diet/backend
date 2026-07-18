@@ -70,11 +70,11 @@ async function main() {
       assert.strictEqual(product.baseUnitGrams, 100);
       assert.strictEqual(product.defaultWeightGrams, 100);
       assert.strictEqual(product.minWeightGrams, 100);
-      assert.strictEqual(product.weightStepGrams, 100);
+      assert.strictEqual(product.weightStepGrams, 50);
       assert.strictEqual(product.weightStepPriceHalala, 500);
     }
-    assert.strictEqual(readyMeal.maxWeightGrams, 300, "compatible maximum is preserved");
-    assert.strictEqual(builderMeal.maxWeightGrams, 500, "missing maximum receives the test default");
+    assert.strictEqual(readyMeal.maxWeightGrams, 500);
+    assert.strictEqual(builderMeal.maxWeightGrams, 500);
     assert.strictEqual(fixedSandwich.priceHalala, 900);
     assert.strictEqual(drink.priceHalala, 900);
     assert.strictEqual(inactiveMeal.priceHalala, 900);

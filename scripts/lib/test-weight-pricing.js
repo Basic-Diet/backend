@@ -4,7 +4,8 @@ const TEST_WEIGHT_PRICING_DEFAULTS = Object.freeze({
   baseUnitGrams: 100,
   defaultWeightGrams: 100,
   minWeightGrams: 100,
-  weightStepGrams: 100,
+  maxWeightGrams: 500,
+  weightStepGrams: 50,
   weightStepPriceHalala: 500,
 });
 
@@ -16,7 +17,7 @@ const MEAL_ITEM_TYPES = new Set([
   "standard_meal",
 ]);
 const SANDWICH_ITEM_TYPES = new Set(["cold_sandwich", "sandwich"]);
-const TEST_WEIGHT_PRICING_FIELDS = Object.keys(TEST_WEIGHT_PRICING_DEFAULTS).concat("maxWeightGrams");
+const TEST_WEIGHT_PRICING_FIELDS = Object.keys(TEST_WEIGHT_PRICING_DEFAULTS);
 
 function testWeightPricingEligibility(product, categoryKey = "") {
   if (product.isActive === false) return { eligible: false, reason: "product is inactive" };
@@ -34,22 +35,11 @@ function testWeightPricingEligibility(product, categoryKey = "") {
   };
 }
 
-function compatibleMaximum(maxWeightGrams) {
-  return Number.isInteger(maxWeightGrams)
-    && maxWeightGrams >= TEST_WEIGHT_PRICING_DEFAULTS.minWeightGrams
-    && (maxWeightGrams - TEST_WEIGHT_PRICING_DEFAULTS.minWeightGrams)
-      % TEST_WEIGHT_PRICING_DEFAULTS.weightStepGrams === 0;
+function testWeightPricingUpdate() {
+  return { ...TEST_WEIGHT_PRICING_DEFAULTS };
 }
 
-function testWeightPricingUpdate(product = {}) {
-  const currentMaximum = Number(product.maxWeightGrams);
-  return {
-    ...TEST_WEIGHT_PRICING_DEFAULTS,
-    maxWeightGrams: compatibleMaximum(currentMaximum) ? currentMaximum : 500,
-  };
-}
-
-function hasTestWeightPricing(product, expectedFields = testWeightPricingUpdate(product)) {
+function hasTestWeightPricing(product, expectedFields = testWeightPricingUpdate()) {
   return TEST_WEIGHT_PRICING_FIELDS.every((field) => product[field] === expectedFields[field]);
 }
 

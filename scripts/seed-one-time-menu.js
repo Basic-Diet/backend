@@ -432,7 +432,7 @@ async function seedOneTimeMenu({ actor = { role: "script" }, notes = "Seed one-t
   let productSort = 10;
   for (const productData of productRows) {
     const weightPricing = testWeightPricingEligibility(productData, productData.category).eligible
-      ? testWeightPricingUpdate(productData)
+      ? testWeightPricingUpdate()
       : {};
     const product = await MenuProduct.findOneAndUpdate(
       { key: productData.key },

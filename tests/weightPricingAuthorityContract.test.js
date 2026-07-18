@@ -14,6 +14,29 @@ const MenuProduct = require("../src/models/MenuProduct");
 const menuPricingService = require("../src/services/orders/menuPricingService");
 const { dashboardAuth } = require("./helpers/dashboardAuthHelper");
 
+const TEST_WEIGHT_CHOICES = [
+  { weightGrams: 100, priceHalala: 1900 },
+  { weightGrams: 150, priceHalala: 2400 },
+  { weightGrams: 200, priceHalala: 2900 },
+  { weightGrams: 250, priceHalala: 3400 },
+  { weightGrams: 300, priceHalala: 3900 },
+  { weightGrams: 350, priceHalala: 4400 },
+  { weightGrams: 400, priceHalala: 4900 },
+  { weightGrams: 450, priceHalala: 5400 },
+  { weightGrams: 500, priceHalala: 5900 },
+];
+
+function quoteProduct(product, weightGrams) {
+  return menuPricingService.priceMenuCart({
+    userId: new mongoose.Types.ObjectId(),
+    items: [{ productId: String(product._id), qty: 1, weightGrams, selectedOptions: [] }],
+    fulfillmentMethod: "pickup",
+    pickup: { branchId: "main" },
+    lang: "en",
+    requestBody: {},
+  });
+}
+
 async function main() {
   const dbName = `weight_pricing_authority_${Date.now()}`;
   const mongo = await MongoMemoryServer.create({ instance: { dbName } });
@@ -43,7 +66,7 @@ async function main() {
       defaultWeightGrams: 100,
       minWeightGrams: 100,
       maxWeightGrams: 500,
-      weightStepGrams: 100,
+      weightStepGrams: 50,
       weightStepPriceHalala: 500,
       availableFor: ["one_time"],
       isCustomizable: true,
@@ -62,13 +85,19 @@ async function main() {
       .find((item) => item.id === String(product._id));
     assert(initiallySeededProduct, "test-priced product appears in the public menu");
     assert.strictEqual(initiallySeededProduct.weightPricing.contractVersion, "weight_pricing.v1");
-    assert.deepStrictEqual(initiallySeededProduct.weightPricing.choices, [
-      { weightGrams: 100, priceHalala: 1900 },
-      { weightGrams: 200, priceHalala: 2400 },
-      { weightGrams: 300, priceHalala: 2900 },
-      { weightGrams: 400, priceHalala: 3400 },
-      { weightGrams: 500, priceHalala: 3900 },
-    ]);
+    assert.deepStrictEqual(initiallySeededProduct.weightPricing.choices, TEST_WEIGHT_CHOICES);
+
+    for (const choice of TEST_WEIGHT_CHOICES.slice(0, 5)) {
+      const quote = await quoteProduct(product, choice.weightGrams);
+      assert.strictEqual(quote.items[0].unitPriceHalala, choice.priceHalala);
+      assert.strictEqual(quote.pricing.totalHalala, choice.priceHalala);
+    }
+    for (const invalidWeight of [125, 550]) {
+      await assert.rejects(
+        () => quoteProduct(product, invalidWeight),
+        (err) => err && err.code === "INVALID_WEIGHT_GRAMS"
+      );
+    }
 
     const incompatible = await request(app)
       .patch(`/api/dashboard/menu/products/${product._id}/weight-pricing`)

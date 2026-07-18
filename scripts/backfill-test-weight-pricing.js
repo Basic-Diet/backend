@@ -33,7 +33,7 @@ function recordSkip(report, product, reason, log) {
 }
 
 async function updateEligibleProduct(product, report) {
-  const update = testWeightPricingUpdate(product);
+  const update = testWeightPricingUpdate();
   assertValidWeightPricingConfiguration(update);
   if (hasTestWeightPricing(product, update)) {
     report.unchanged += 1;

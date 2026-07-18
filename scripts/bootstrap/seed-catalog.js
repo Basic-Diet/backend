@@ -1218,7 +1218,7 @@ async function seedProducts({ catalogItemMap = new Map(), categoryMap, groupMap,
     const category = categoryMap.get(row.category);
     if (!category) throw new Error(`Missing category ${row.category} for ${row.key}`);
     const weightPricing = testWeightPricingEligibility(row, row.category).eligible
-      ? testWeightPricingUpdate(row)
+      ? testWeightPricingUpdate()
       : {};
 
     const catalogItemKey = menuProductCatalogItemKeyByProductKey[row.key];

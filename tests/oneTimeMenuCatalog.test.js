@@ -545,16 +545,20 @@ async function seedViaDashboard(api) {
       assertCleanPublicProductUi(basicMeal, "large");
       assert.strictEqual(basicMeal.pricingModel, "per_100g");
       assert.strictEqual(basicMeal.priceHalala, 1900);
-      assert.strictEqual(basicMeal.weightStepGrams, 100);
+      assert.strictEqual(basicMeal.weightStepGrams, 50);
       assert.strictEqual(basicMeal.weightStepPriceHalala, 500);
       assert.strictEqual(basicMeal.maxWeightGrams, 500);
       assert.strictEqual(basicMeal.weightPricing.contractVersion, "weight_pricing.v1");
       assert.deepStrictEqual(basicMeal.weightPricing.choices, [
         { weightGrams: 100, priceHalala: 1900 },
-        { weightGrams: 200, priceHalala: 2400 },
-        { weightGrams: 300, priceHalala: 2900 },
-        { weightGrams: 400, priceHalala: 3400 },
-        { weightGrams: 500, priceHalala: 3900 },
+        { weightGrams: 150, priceHalala: 2400 },
+        { weightGrams: 200, priceHalala: 2900 },
+        { weightGrams: 250, priceHalala: 3400 },
+        { weightGrams: 300, priceHalala: 3900 },
+        { weightGrams: 350, priceHalala: 4400 },
+        { weightGrams: 400, priceHalala: 4900 },
+        { weightGrams: 450, priceHalala: 5400 },
+        { weightGrams: 500, priceHalala: 5900 },
       ]);
       assert.strictEqual(basicMeal.requiresBuilder, true);
       assert.strictEqual(basicMeal.canAddDirectly, false);
