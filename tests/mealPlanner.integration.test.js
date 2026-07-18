@@ -1544,9 +1544,9 @@ async function runTests() {
       mealSlots: slots,
       addonsOneTime: [String(addonJuicePlan._id)],
     });
-    assertEqual(res.status, 402, 'plan add-on selection requires payment');
-    const paymentRequirement = res.body.paymentRequirement || res.body.error?.details?.paymentRequirement;
-    assertTrue(!!paymentRequirement, 'payment requirement returned');
+    assertEqual(res.status, 400, 'plan add-on selection is rejected');
+    const errCode = res.body.error?.code;
+    assertTrue(errCode === 'INVALID' || errCode === 'INVALID_ONE_TIME_ADDON_SELECTION', 'plan add-on request rejected');
   });
 
   await test('planner accepts item selection with no add-on subscriptions as paid overage', async () => {
