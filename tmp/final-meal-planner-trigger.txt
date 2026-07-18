@@ -1,0 +1,1 @@
+Trigger final Meal Planner contract application and verification.
