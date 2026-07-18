@@ -184,13 +184,13 @@ async function main() {
     const sectionsWithoutFajita = draft.sections.map((section) => section.key === "chicken"
       ? { ...section, selectedOptionIds: section.selectedOptionIds.filter((id) => id !== fajita.optionId) }
       : section);
-    res = await api.put("/api/dashboard/meal-builder/draft").set(headers).send({ sections: sectionsWithoutFajita, notes: "canonical save promotion" });
-    expectStatus(res, 200, "save canonical sections promotes family variants");
-    assert(res.body.data.sections.find((section) => section.key === "chicken").selectedOptionIds.includes(fajita.optionId), "canonical family candidate is promoted on save");
+    res = await api.put("/api/dashboard/meal-builder/draft").set(headers).send({ sections: sectionsWithoutFajita, notes: "preserve selected family variants" });
+    expectStatus(res, 200, "save selected family variants exactly");
+    assert(!res.body.data.sections.find((section) => section.key === "chicken").selectedOptionIds.includes(fajita.optionId), "removed family candidate is not reinserted on save");
 
     res = await api.get("/api/dashboard/meal-builder/draft/hydrated").set(headers);
-    expectStatus(res, 200, "reload after promotion");
-    assert(res.body.data.sections.find((section) => section.key === "chicken").selectedOptions.some((item) => item.key === "chicken_fajita"), "promoted candidate hydrates after reload");
+    expectStatus(res, 200, "reload preserved family selection");
+    assert(!res.body.data.sections.find((section) => section.key === "chicken").selectedOptions.some((item) => item.key === "chicken_fajita"), "removed family candidate stays removed after reload");
 
     const reordered = res.body.data.sections.map((section) => {
       if (section.key === "beef") return { ...section, sortOrder: 30 };
@@ -213,9 +213,10 @@ async function main() {
     res = await api.post("/api/dashboard/meal-builder/validate").set(headers).send({
       sections: draft.sections.filter((section) => section.key !== "chicken"),
     });
-    expectStatus(res, 200, "validate missing canonical section");
-    assert.strictEqual(res.body.data.ready, false, JSON.stringify(res.body.data));
-    assert(res.body.data.errors.some((error) => error.code === "MEAL_BUILDER_VISUAL_SECTION_MISSING" && error.sectionKey === "chicken"), JSON.stringify(res.body.data.errors));
+    expectStatus(res, 200, "validate missing optional section");
+    assert.strictEqual(res.body.data.ready, true, JSON.stringify(res.body.data));
+    assert.deepStrictEqual(res.body.data.errors, []);
+    assert(!res.body.data.warnings.some((warning) => warning.sectionKey === "chicken"), JSON.stringify(res.body.data.warnings));
 
     const missingGroupSections = draft.sections.map((section) => section.key === "chicken"
       ? { ...section, key: "custom_missing_group", source: undefined, sourceGroupId: null }

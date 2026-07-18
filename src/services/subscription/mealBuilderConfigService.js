@@ -49,7 +49,6 @@ const SECTION_TYPES = new Set(["option_group", "product_category", "product_list
 const INCLUDE_MODES = new Set(["all", "selected"]);
 const SOURCE_KINDS = new Set(["", "visual_family", "configurable_product", "product_list", "premium_visual"]);
 const SALAD_EXCLUDED_GROUP_KEYS = new Set(SUBSCRIPTION_PREMIUM_LARGE_SALAD_EXCLUDED_GROUP_KEYS);
-const VISUAL_TEMPLATE_ORDER = Object.freeze(["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"]);
 const VISUAL_PROTEIN_FAMILY_KEYS = new Set(["chicken", "beef", "fish", "eggs"]);
 const VISUAL_PROTEIN_FAMILY_DEFINITIONS = new Map(PROTEIN_DISPLAY_GROUPS.map((group) => [group.key, group]));
 const PREMIUM_SECTION_TITLE = Object.freeze({ ar: "مميز", en: "Premium" });
@@ -57,7 +56,7 @@ const SANDWICH_SECTION_TITLE = Object.freeze({ ar: "ساندوتشات", en: "Sa
 const CARBS_SECTION_TITLE = Object.freeze({ ar: "نشويات", en: "Carbs" });
 const HYDRATED_DRAFT_VERSION = "dashboard_meal_builder_hydrated_draft.v1";
 const PICKER_VERSION = "dashboard_meal_builder_picker.v1";
-const SUPPORTED_PICKER_SECTION_KEYS = new Set(["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"]);
+const LEGACY_PICKER_SECTION_KEYS = new Set(["premium", "sandwich", "chicken", "beef", "fish", "eggs", "carbs"]);
 const NON_PROTEIN_PICKER_OPTION_KEYS = new Set([
   "ranch",
   "mango",
@@ -195,7 +194,7 @@ function normalizeSection(section = {}, index = 0) {
     selectedProductIds: objectIdArray(sectionWithCanonicalAliases.selectedProductIds || sectionWithCanonicalAliases.productIds),
     includeMode,
     selectionType: String(sectionWithCanonicalAliases.selectionType || "").trim(),
-    sortOrder: normalizeInteger(sectionWithCanonicalAliases.sortOrder, CANONICAL_SECTION_SORT_ORDER[String(sectionWithCanonicalAliases.key || "").trim()] || index + 1),
+    sortOrder: normalizeInteger(sectionWithCanonicalAliases.sortOrder, index + 1),
     required: normalizeBoolean(sectionWithCanonicalAliases.required ?? sectionWithCanonicalAliases.isRequired, false),
     minSelections: normalizeInteger(sectionWithCanonicalAliases.minSelections, 0),
     maxSelections: normalizeNullableInteger(sectionWithCanonicalAliases.maxSelections, null),
@@ -240,7 +239,7 @@ async function normalizeSectionsForWrite(sections = []) {
       && (normalized.source || normalized.type)
       && (!normalized.productContextId || (!normalized.sourceGroupId && normalized.sectionType === "option_group") || (!normalized.sourceCategoryId && normalized.sectionType === "product_category"));
   });
-  if (!needsResolution) return promoteCanonicalFamilySelections(normalizeSections(sections));
+  if (!needsResolution) return normalizeSections(sections);
 
   const [basicMeal, proteinsGroup, carbsGroup] = await Promise.all([
     MenuProduct.findOne({ key: "basic_meal" }).lean(),
@@ -248,7 +247,7 @@ async function normalizeSectionsForWrite(sections = []) {
     MenuOptionGroup.findOne({ key: "carbs" }).lean(),
   ]);
 
-  return promoteCanonicalFamilySelections(normalizeSections(sections.map((section) => {
+  return normalizeSections(sections.map((section) => {
     const normalized = normalizeCanonicalSectionAliases(section);
     if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return normalized;
     const key = String(normalized.key || "").trim();
@@ -269,58 +268,7 @@ async function normalizeSectionsForWrite(sections = []) {
       // Standalone meals are dynamically resolved
     }
     return next;
-  })));
-}
-
-async function promoteCanonicalFamilySelections(sections = []) {
-  const visualFamilySections = sections.filter(isVisualProteinFamilySection);
-  if (!visualFamilySections.length) return sections;
-
-  const [basicMeal, proteinsGroup] = await Promise.all([
-    MenuProduct.findOne({ key: "basic_meal" }).lean(),
-    MenuOptionGroup.findOne({ key: "proteins" }).lean(),
-  ]);
-  if (!proteinsGroup) return sections;
-
-  const productIds = [...new Set(visualFamilySections
-    .map((section) => String(section.productContextId || basicMeal?._id || ""))
-    .filter(Boolean))];
-  const relationRows = productIds.length
-    ? await ProductGroupOption.find({ productId: { $in: productIds }, groupId: proteinsGroup._id }).lean()
-    : [];
-  const relationByProductOptionId = new Map(relationRows.map((row) => [`${String(row.productId)}:${String(row.optionId)}`, row]));
-
-  const familyOptionsByKey = new Map();
-  await Promise.all([...new Set(visualFamilySections.map((section) => section.key))].map(async (familyKey) => {
-    const familySource = buildOptionFamilyPickerSource(familyKey, { key: familyKey });
-    const candidates = await MenuOption.find(optionFamilyCandidateQuery({ group: proteinsGroup, ...familySource })).sort({ sortOrder: 1, createdAt: -1 }).lean();
-    const catalogItemsById = await loadCatalogItemsByIdForDocs(candidates);
-    familyOptionsByKey.set(
-      familyKey,
-      candidates
-        .filter((option) => isCanonicalStandardProteinForPicker(option, familyKey))
-        .filter((option) => readyDocForSeed(option, catalogItemsById))
-    );
   }));
-
-  return sections.map((section) => {
-    if (!isVisualProteinFamilySection(section)) return section;
-    const productId = String(section.productContextId || basicMeal?._id || "");
-    const familyOptions = (familyOptionsByKey.get(section.key) || [])
-      .sort((a, b) => {
-        const relationByOptionId = new Map([
-          [String(a._id), relationByProductOptionId.get(`${productId}:${String(a._id)}`)],
-          [String(b._id), relationByProductOptionId.get(`${productId}:${String(b._id)}`)],
-        ]);
-        return optionSort(a, b, relationByOptionId);
-      });
-    const selectedIds = new Set((section.selectedOptionIds || []).map(String));
-    for (const option of familyOptions) selectedIds.add(String(option._id));
-    return {
-      ...section,
-      selectedOptionIds: [...selectedIds],
-    };
-  });
 }
 
 function normalizeCanonicalSectionAliases(section = {}) {
@@ -346,18 +294,8 @@ function normalizeCanonicalSectionAliases(section = {}) {
     else if (sourceKind === "product_category" || sourceKind === "product_list") normalized.sourceKind = "product_list";
   }
 
-  if (normalized.sortOrder === undefined && CANONICAL_SECTION_SORT_ORDER[key]) {
-    normalized.sortOrder = CANONICAL_SECTION_SORT_ORDER[key];
-  }
   if (source.displayCategoryKey && !normalized.metadata?.proteinFamilyKey && VISUAL_PROTEIN_FAMILY_KEYS.has(key)) {
     normalized.metadata = { ...(normalized.metadata || {}), proteinFamilyKey: source.displayCategoryKey };
-  }
-  if (key === "carbs") {
-    normalized.rules = {
-      ...STANDARD_CARB_RULES,
-      onlyForSelectionTypes: [MEAL_SELECTION_TYPES.STANDARD_MEAL, MEAL_SELECTION_TYPES.PREMIUM_MEAL],
-      ...(normalized.rules || {}),
-    };
   }
 
   return normalized;
@@ -443,80 +381,7 @@ function canonicalSectionSource(section = {}) {
 }
 
 function canonicalSectionRules(section = {}) {
-  if (section.key === "carbs") {
-    return {
-      ...STANDARD_CARB_RULES,
-      onlyForSelectionTypes: [MEAL_SELECTION_TYPES.STANDARD_MEAL, MEAL_SELECTION_TYPES.PREMIUM_MEAL],
-      ...plainObject(section.rules),
-    };
-  }
   return sectionRules(section);
-}
-
-function canonicalSectionKeys(sections = []) {
-  return sections.map((section) => String(section.key || "").trim());
-}
-
-function looksLikeLegacyFiveSectionDraft(sections = []) {
-  if (!Array.isArray(sections) || sections.length !== 5) return false;
-  const keys = canonicalSectionKeys(sections);
-  if (keys.some(Boolean)) return false;
-  const titles = sections.map((section) => String(section.titleOverride?.en || section.title?.en || "").trim().toLowerCase());
-  return [
-    "standard proteins",
-    "carbs",
-    "premium proteins",
-    "sandwiches",
-    "premium large salad",
-  ].every((title) => titles.includes(title));
-}
-
-function addLegacyVisualDraftShapeIssues(sections, errors) {
-  if (!looksLikeLegacyFiveSectionDraft(sections)) return;
-  addCheck(
-    errors,
-    "error",
-    "MEAL_BUILDER_LEGACY_VISUAL_TEMPLATE",
-    "Legacy 5-section Meal Builder draft must be migrated to the canonical v3 visual template",
-    {
-      expectedSectionKeys: VISUAL_TEMPLATE_ORDER,
-      actualSectionCount: sections.length,
-    }
-  );
-}
-
-async function migrateLegacyDraftToCanonicalTemplate(draft) {
-  const sections = normalizeSections(draft?.sections || []);
-  if (!looksLikeLegacyFiveSectionDraft(sections)) {
-    return { draft, migrated: false, warnings: [] };
-  }
-
-  const canonicalSections = await buildDefaultVisualTemplateSections();
-  const updated = await MealBuilderConfig.findOneAndUpdate(
-    { _id: draft._id, status: "draft", isCurrent: true },
-    {
-      $set: {
-        sections: canonicalSections,
-        contractVersion: CONTRACT_VERSION,
-        source: draft.source || "dashboard",
-        notes: draft.notes || "",
-      },
-    },
-    { new: true }
-  ).lean();
-
-  return {
-    draft: updated || { ...draft, sections: canonicalSections },
-    migrated: true,
-    warnings: [
-      statusIssue(
-        "warning",
-        "MEAL_BUILDER_LEGACY_DRAFT_MIGRATED",
-        "Legacy 5-section Meal Builder draft was migrated to the canonical v3 visual template.",
-        { previousSectionCount: sections.length, sectionKeys: VISUAL_TEMPLATE_ORDER }
-      ),
-    ],
-  };
 }
 
 function serializeSection(section = {}) {
@@ -1314,9 +1179,7 @@ function paginateRows(rows, pagination) {
 }
 
 async function getHydratedDraft({ lang = "en" } = {}) {
-  const initialDraft = await getCurrentDraftConfig();
-  const migration = await migrateLegacyDraftToCanonicalTemplate(initialDraft);
-  const draft = migration.draft;
+  const draft = await getCurrentDraftConfig();
   if (!draft) {
     return {
       contractVersion: HYDRATED_DRAFT_VERSION,
@@ -1345,17 +1208,9 @@ async function getHydratedDraft({ lang = "en" } = {}) {
     },
     ready: validation.ready,
     errors: validation.errors || [],
-    warnings: [...(migration.warnings || []), ...(validation.warnings || [])],
+    warnings: validation.warnings || [],
     sections: hydratedSections,
-    validation: {
-      ...validation,
-      warnings: [...(migration.warnings || []), ...(validation.warnings || [])],
-      checks: [...(validation.errors || []), ...(migration.warnings || []), ...(validation.warnings || [])],
-      summary: {
-        ...(validation.summary || {}),
-        migratedFromLegacyTemplate: migration.migrated === true,
-      },
-    },
+    validation,
   };
 }
 
@@ -1438,13 +1293,12 @@ async function getSectionPicker({
   limit,
 } = {}) {
   const key = String(sectionKey || "").trim().toLowerCase();
-  if (!SUPPORTED_PICKER_SECTION_KEYS.has(key)) {
-    throw new MealBuilderError("Unsupported Meal Builder picker section", "MEAL_BUILDER_PICKER_SECTION_INVALID", 400, { sectionKey });
-  }
-
   const draft = await getCurrentDraftConfig();
   const sections = draft ? normalizeSections(draft.sections || []) : [];
   const section = sections.find((item) => item.key === key) || null;
+  if (!section && !LEGACY_PICKER_SECTION_KEYS.has(key)) {
+    throw new MealBuilderError("Meal Builder picker card not found", "MEAL_BUILDER_PICKER_SECTION_INVALID", 400, { sectionKey });
+  }
   const context = await resolvePickerContext(key, section);
   const pagination = normalizePagination({ page, limit });
   const includeMode = String(include || "").trim().toLowerCase();
@@ -1454,7 +1308,9 @@ async function getSectionPicker({
   };
 
   let result;
-  if (key === "sandwich") {
+  if (section?.sectionType === "product_category" || section?.sectionType === "product_list") {
+    result = await buildProductPicker({ sectionKey: key, section, context, lang, q, pagination, pickerOptions });
+  } else if (key === "sandwich") {
     result = await buildSandwichPicker({ sectionKey: key, section, context, lang, q, pagination, pickerOptions });
   } else if (key === "premium") {
     result = await buildPremiumPicker({ sectionKey: key, section, context, lang, q, pagination, pickerOptions });
@@ -1478,19 +1334,28 @@ async function getSectionPicker({
 }
 
 async function resolvePickerContext(sectionKey, section = null) {
-  const isSandwich = sectionKey === "sandwich";
-  const needsCarbs = sectionKey === "carbs";
-  const [basicMeal, proteinsGroup, carbsGroup, sandwichCategory] = await Promise.all([
-    section?.productContextId ? MenuProduct.findById(section.productContextId).lean() : MenuProduct.findOne({ key: "basic_meal" }).lean(),
-    section?.sourceGroupId && !needsCarbs && !isSandwich ? MenuOptionGroup.findById(section.sourceGroupId).lean() : MenuOptionGroup.findOne({ key: "proteins" }).lean(),
-    section?.sourceGroupId && needsCarbs ? MenuOptionGroup.findById(section.sourceGroupId).lean() : MenuOptionGroup.findOne({ key: "carbs" }).lean(),
-    section?.sourceCategoryId && isSandwich ? MenuCategory.findById(section.sourceCategoryId).lean() : null,
+  const legacyOptionFallback = !section && sectionKey !== "sandwich";
+  const fallbackGroupKey = sectionKey === "carbs" ? "carbs" : "proteins";
+  const [product, group, category] = await Promise.all([
+    section?.productContextId
+      ? MenuProduct.findById(section.productContextId).lean()
+      : legacyOptionFallback
+        ? MenuProduct.findOne({ key: "basic_meal" }).lean()
+        : null,
+    section?.sourceGroupId
+      ? MenuOptionGroup.findById(section.sourceGroupId).lean()
+      : legacyOptionFallback
+        ? MenuOptionGroup.findOne({ key: fallbackGroupKey }).lean()
+        : null,
+    section?.sourceCategoryId
+      ? MenuCategory.findById(section.sourceCategoryId).lean()
+      : null,
   ]);
 
   return {
-    product: basicMeal,
-    group: needsCarbs ? carbsGroup : proteinsGroup,
-    category: sandwichCategory,
+    product,
+    group,
+    category,
   };
 }
 
@@ -1593,6 +1458,7 @@ async function buildOptionPicker({ sectionKey, section, context, lang, q, pagina
       if (!option) return false;
       if (selectedSet.has(String(option._id))) return true;
       if (sectionKey === "carbs") return CUSTOMER_VISIBLE_CARB_KEYS.includes(optionKey(option));
+      if (!isOptionFamily) return true;
       return isCanonicalStandardProteinForPicker(option, sectionKey);
     })
     .filter((option) => matchesSearch(option, q))
@@ -1652,6 +1518,46 @@ async function buildOptionPicker({ sectionKey, section, context, lang, q, pagina
       candidateKeysAfterFamilyFilter: hydratedRows.map((candidate) => candidate.key),
       finalCandidateKeys: rows.map((candidate) => candidate.key),
     },
+  };
+}
+
+async function buildProductPicker({ sectionKey, section, context, lang, q, pagination, pickerOptions }) {
+  const selectedProductIds = (section?.selectedProductIds || []).map(String);
+  const selectedSet = new Set(selectedProductIds);
+  const category = context.category;
+  const candidateProducts = category
+    ? await MenuProduct.find({ categoryId: category._id }).sort({ sortOrder: 1, createdAt: -1 }).lean()
+    : selectedProductIds.length
+      ? await MenuProduct.find({ _id: { $in: selectedProductIds } }).sort({ sortOrder: 1, createdAt: -1 }).lean()
+      : [];
+  const docs = await buildPickerDocs({
+    category,
+    candidateProducts,
+    selectedProductIds,
+  });
+  const rows = candidateProducts
+    .filter((product) => matchesSearch(product, q))
+    .map((product) => serializeHydratedProduct({
+      product,
+      section: { ...(section || {}), key: sectionKey, lang },
+      docs,
+      selected: selectedSet.has(String(product._id)) || section?.includeMode === "all",
+      category,
+      selectionType: productSelectionType(section || {}, product),
+      requireSandwich: section?.selectionType === MEAL_SELECTION_TYPES.SANDWICH,
+      requirePremiumLargeSalad: section?.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD,
+      validateRelations: section?.selectionType === MEAL_SELECTION_TYPES.PREMIUM_LARGE_SALAD,
+    }))
+    .filter((candidate) => shouldIncludeCandidate(candidate, pickerOptions))
+    .sort((a, b) => String(a.key).localeCompare(String(b.key)));
+
+  const { rows: candidates, meta } = paginateRows(rows, pagination);
+  return {
+    candidateType: "product",
+    category: category ? { id: String(category._id), key: category.key || "", name: category.name || {} } : null,
+    rules: { selectionType: section?.selectionType || "" },
+    candidates,
+    meta,
   };
 }
 
@@ -2748,7 +2654,7 @@ async function validateConfigObject(configOrPayload = {}) {
     }
   }
 
-  validateVisualTemplateSections(sections, warnings, errors);
+  validatePresentSectionSemantics(sections, warnings, errors);
 
   const status = errors.length ? "error" : warnings.length ? "warning" : "ok";
   checks.push(...errors, ...warnings);
@@ -2767,31 +2673,8 @@ async function validateConfigObject(configOrPayload = {}) {
   };
 }
 
-function validateVisualTemplateSections(sections, warnings, errors) {
-  addLegacyVisualDraftShapeIssues(sections, errors);
-  const visualSections = sections.filter((section) => section.key && VISUAL_TEMPLATE_ORDER.includes(section.key));
-  if (!visualSections.length) return;
-
-  const byKey = new Map(visualSections.map((section) => [section.key, section]));
-  for (const [index, key] of VISUAL_TEMPLATE_ORDER.entries()) {
-    const section = byKey.get(key);
-    const expectedSortOrder = CANONICAL_SECTION_SORT_ORDER[key] || ((index + 1) * 10);
-    if (!section) {
-      addCheck(errors, "error", "MEAL_BUILDER_VISUAL_SECTION_MISSING", "Default visual template section is missing", { sectionKey: key });
-      continue;
-    }
-    const actualSortOrder = Number(section.sortOrder || 0);
-    const matchesCanonical = (actualSortOrder === expectedSortOrder) || (actualSortOrder === expectedSortOrder / 10);
-    if (!matchesCanonical) {
-      addCheck(warnings, "warning", "MEAL_BUILDER_VISUAL_SECTION_ORDER_CHANGED", "Default visual template section order differs from canonical order", {
-        sectionKey: key,
-        expectedSortOrder,
-        actualSortOrder,
-      });
-    }
-  }
-
-  const sandwich = byKey.get("sandwich");
+function validatePresentSectionSemantics(sections, warnings, errors) {
+  const sandwich = sections.find((section) => section.key === "sandwich");
   if (sandwich) {
     if (sandwich.selectionType !== MEAL_SELECTION_TYPES.SANDWICH) {
       addCheck(errors, "error", "MEAL_BUILDER_SANDWICH_SELECTION_TYPE_INVALID", "Sandwich section must use selectionType=sandwich", { sectionKey: "sandwich" });
@@ -2801,12 +2684,12 @@ function validateVisualTemplateSections(sections, warnings, errors) {
     }
   }
 
-  const beef = byKey.get("beef");
+  const beef = sections.find((section) => section.key === "beef");
   if (beef && (beef.rules?.ruleKey !== "beef_daily_limit" || Number(beef.rules?.maxSlotsPerDay || 0) !== 1)) {
     addCheck(warnings, "warning", "MEAL_BUILDER_BEEF_DAILY_LIMIT_RULE_MISSING", "Beef section should expose beef_daily_limit metadata", { sectionKey: "beef" });
   }
 
-  const carbs = byKey.get("carbs");
+  const carbs = sections.find((section) => section.key === "carbs");
   if (carbs) {
     if (carbs.selectionType !== MEAL_SELECTION_TYPES.STANDARD_MEAL) {
       addCheck(errors, "error", "MEAL_BUILDER_CARBS_SELECTION_TYPE_INVALID", "Carbs section must apply to standard configurable meals", { sectionKey: "carbs" });
@@ -2817,7 +2700,7 @@ function validateVisualTemplateSections(sections, warnings, errors) {
   }
 
   for (const familyKey of VISUAL_PROTEIN_FAMILY_KEYS) {
-    const section = byKey.get(familyKey);
+    const section = sections.find((item) => item.key === familyKey);
     if (section && !(section.selectedOptionIds || []).length) {
       addCheck(warnings, "warning", "MEAL_BUILDER_PROTEIN_FAMILY_EMPTY", "Protein family section has no selected options", { sectionKey: familyKey });
     }
