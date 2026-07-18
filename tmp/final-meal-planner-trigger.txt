@@ -1,1 +1,1 @@
-Trigger final Meal Planner artifact export.
+Trigger final Meal Planner contract gate.
