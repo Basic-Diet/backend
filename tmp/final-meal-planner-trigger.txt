@@ -1,1 +1,1 @@
-Trigger final Meal Planner contract application and verification.
+Trigger final Meal Planner contract diagnostics after applying the latest fixes.
