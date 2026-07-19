@@ -70,10 +70,57 @@ function mergeSaladGroupValues(groups, keys) {
   return merged;
 }
 
-function buildSaladSections(slot = {}) {
-  const groups = slot.salad && slot.salad.groups && typeof slot.salad.groups === "object"
+function canonicalPremiumSaladGroupKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return "";
+  if (VEGETABLE_GROUP_ALIASES.has(key)) return "vegetables_legumes";
+  if (key === "proteins") return "protein";
+  if (key === "sauces") return "sauce";
+  return key;
+}
+
+function selectedOptionToSaladItem(option = {}) {
+  return {
+    id: asId(option.optionId || option.id || option._id),
+    key: option.optionKey || option.key || null,
+    nameI18n: option.nameI18n || option.name || option.optionName || option.label || "",
+    quantity: Math.max(1, Number(option.quantity || option.qty || 1)),
+  };
+}
+
+function buildPremiumSaladGroups(slot = {}) {
+  const sourceGroups = slot.salad && slot.salad.groups && typeof slot.salad.groups === "object"
     ? slot.salad.groups
     : {};
+  const groups = {};
+
+  for (const [rawKey, values] of Object.entries(sourceGroups)) {
+    if (!Array.isArray(values)) continue;
+    const key = canonicalPremiumSaladGroupKey(rawKey);
+    if (!key) continue;
+    groups[key] = mergeSaladGroupValues({
+      existing: groups[key] || [],
+      incoming: values,
+    }, ["existing", "incoming"]);
+  }
+
+  for (const option of Array.isArray(slot.selectedOptions) ? slot.selectedOptions : []) {
+    if (!option || typeof option !== "object") continue;
+    const key = canonicalPremiumSaladGroupKey(option.canonicalGroupKey || option.groupKey);
+    if (!key) continue;
+    const item = selectedOptionToSaladItem(option);
+    if (!item.id && !item.key && !item.nameI18n) continue;
+    groups[key] = mergeSaladGroupValues({
+      existing: groups[key] || [],
+      incoming: [item],
+    }, ["existing", "incoming"]);
+  }
+
+  return groups;
+}
+
+function buildSaladSections(slot = {}) {
+  const groups = buildPremiumSaladGroups(slot);
   const keys = SECTION_ORDER.concat(Object.keys(groups).filter((key) => (
     !SECTION_ORDER.includes(key) && !VEGETABLE_GROUP_ALIASES.has(key)
   )));
