@@ -241,6 +241,75 @@ async function run() {
   assert(!Object.prototype.hasOwnProperty.call(cleanDay, "kitchenAddonGroups"));
   assert(!JSON.stringify(cleanDay).includes('"priceHalala"'));
 
+  const saladSelections = {
+    protein: [{ id: "6a522ed1b3fb649917aee701", key: "boiled_eggs", name: { ar: "بيض مسلوق", en: "Boiled Eggs" } }],
+    leafy_greens: [
+      { id: "6a522ed1b3fb649917aee702", key: "cabbage", name: { ar: "ملفوف", en: "Cabbage" } },
+      { id: "6a522ed1b3fb649917aee703", key: "arugula", name: { ar: "جرجير", en: "Arugula" } },
+    ],
+    vegetables: [
+      ["tomato", "طماطم", "Tomato"], ["carrot", "جزر", "Carrot"], ["cucumber", "خيار", "Cucumber"],
+      ["corn", "ذرة", "Corn"], ["chickpeas", "حمص", "Chickpeas"], ["jalapeno", "هالبينو", "Jalapeno"],
+      ["red_beans", "فاصوليا حمراء", "Red Beans"], ["beetroot", "شمندر", "Beetroot"],
+      ["hot_pepper", "فلفل حار", "Hot Pepper"], ["coriander", "كزبرة", "Coriander"],
+    ].map(([key, ar, en], index) => ({ id: `6a522ed1b3fb649917aee7${String(index + 4).padStart(2, "0")}`, key, name: { ar, en } })),
+    vegetables_legumes: [
+      ["mushroom", "فطر", "Mushroom"], ["broccoli", "بروكلي", "Broccoli"],
+      ["salad_grilled_mixed_vegetables", "خضار مشكل مشوي", "Grilled Mixed Vegetables"],
+      ["red_onion", "بصل أحمر", "Red Onion"], ["green_onion", "بصل أخضر", "Green Onion"],
+      ["green_olives", "زيتون أخضر", "Green Olives"], ["black_olives", "زيتون أسود", "Black Olives"],
+      ["mint", "نعناع", "Mint"], ["pickled_onion", "بصل مخلل", "Pickled Onion"],
+    ].map(([key, ar, en], index) => ({ id: `6a522ed1b3fb649917aee8${String(index + 1).padStart(2, "0")}`, key, name: { ar, en } })),
+    fruits: [
+      ["raspberry", "توت العليق", "Raspberry"], ["watermelon", "بطيخ", "Watermelon"],
+      ["cantaloupe", "شمام", "Cantaloupe"], ["dates", "تمر", "Dates"],
+    ].map(([key, ar, en], index) => ({ id: `6a522ed1b3fb649917aee9${String(index + 1).padStart(2, "0")}`, key, name: { ar, en } })),
+    cheese_nuts: [
+      { id: "6a522ed1b3fb649917aee921", key: "cashew", name: { ar: "كاجو", en: "Cashew" } },
+      { id: "6a522ed1b3fb649917aee922", key: "walnut", name: { ar: "عين الجمل", en: "Walnut" } },
+    ],
+    sauce: [{ id: "6a522ed1b3fb649917aee923", key: "spicy_ranch", name: { ar: "سبايسي رانش", en: "Spicy Ranch" } }],
+  };
+  const regressionDay = {
+    ...day,
+    mealSlots: [{
+      slotIndex: 1,
+      slotKey: "premium_salad_regression",
+      selectionType: "premium_large_salad",
+      salad: { groups: saladSelections },
+    }],
+    premiumUpgradeSelections: [{
+      baseSlotKey: "premium_salad_regression",
+      sourceProductId: ids.premiumSalad,
+      sourceKey: "premium_large_salad",
+      nameI18n: { ar: "سلطة كبيرة مميزة", en: "Premium Large Salad" },
+    }],
+  };
+  const regressionDto = mapSubscriptionDayToDTO(regressionDay, null, subscription, null, "kitchen", "ar", catalogMaps);
+  const regressionCard = serializeKitchenOperation(regressionDto).kitchen.cards[0];
+  assert.strictEqual(regressionCard.type, "premium_large_salad");
+  assert.deepStrictEqual(regressionCard.sections.map((section) => section.key), [
+    "leafy_greens", "vegetables_legumes", "protein", "cheese_nuts", "fruits", "sauce",
+  ]);
+  const vegetableSection = regressionCard.sections.find((section) => section.key === "vegetables_legumes");
+  assert.strictEqual(vegetableSection.labelI18n.ar, "خضروات وبقوليات");
+  assert.strictEqual(vegetableSection.labelI18n.en, "Vegetables & legumes");
+  assert.strictEqual(vegetableSection.items.length, 19);
+  assert.deepStrictEqual(vegetableSection.items.map((item) => item.key), [
+    ...saladSelections.vegetables, ...saladSelections.vegetables_legumes,
+  ].map((item) => item.key));
+  const allItems = regressionCard.sections.flatMap((section) => section.items);
+  assert.strictEqual(new Set(allItems.map((item) => item.key)).size, allItems.length);
+  allItems.forEach((item) => {
+    assert(item.name);
+    assert(item.nameI18n && item.nameI18n.ar && item.nameI18n.en);
+    assert.strictEqual(item.name, item.nameI18n.ar);
+    assert.strictEqual(item.quantity, 1);
+  });
+  assert(regressionCard.lines.some((line) => line.startsWith("خضروات وبقوليات:")));
+  assert.strictEqual(regressionCard.components.salad.sectionCount, 6);
+  assert.strictEqual(regressionCard.components.salad.itemCount, 29);
+
   const originalListOperations = opsReadService.listOperations;
   try {
     opsReadService.listOperations = async () => [orderDto];

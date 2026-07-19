@@ -4,12 +4,14 @@ const SECTION_LABELS = {
   protein: { ar: "بروتين", en: "Protein" },
   leafy_greens: { ar: "ورقيات", en: "Leafy greens" },
   vegetables: { ar: "خضار", en: "Vegetables" },
+  vegetables_legumes: { ar: "خضروات وبقوليات", en: "Vegetables & legumes" },
   cheese_nuts: { ar: "جبن ومكسرات", en: "Cheese & nuts" },
   fruits: { ar: "فواكه", en: "Fruits" },
   sauce: { ar: "صوص", en: "Sauce" },
 };
 
-const SECTION_ORDER = ["protein", "leafy_greens", "vegetables", "cheese_nuts", "fruits", "sauce"];
+const SECTION_ORDER = ["leafy_greens", "vegetables_legumes", "protein", "cheese_nuts", "fruits", "sauce"];
+const VEGETABLE_GROUP_ALIASES = new Set(["vegetables", "vegetables_legumes"]);
 
 function asId(value) {
   if (!value) return null;
@@ -48,15 +50,40 @@ function saladSectionItems(values) {
   }).filter((item) => item.name);
 }
 
+function saladItemIdentity(item) {
+  if (!item || typeof item !== "object") return String(item || "");
+  return String(item.id || item._id || item.optionId || item.ingredientId
+    || item.key || item.optionKey || item.ingredientKey || item.name || "");
+}
+
+function mergeSaladGroupValues(groups, keys) {
+  const merged = [];
+  const seen = new Set();
+  keys.forEach((key) => {
+    (Array.isArray(groups[key]) ? groups[key] : []).forEach((item) => {
+      const identity = saladItemIdentity(item);
+      if (identity && seen.has(identity)) return;
+      if (identity) seen.add(identity);
+      merged.push(item);
+    });
+  });
+  return merged;
+}
+
 function buildSaladSections(slot = {}) {
   const groups = slot.salad && slot.salad.groups && typeof slot.salad.groups === "object"
     ? slot.salad.groups
     : {};
-  const keys = SECTION_ORDER.concat(Object.keys(groups).filter((key) => !SECTION_ORDER.includes(key)));
+  const keys = SECTION_ORDER.concat(Object.keys(groups).filter((key) => (
+    !SECTION_ORDER.includes(key) && !VEGETABLE_GROUP_ALIASES.has(key)
+  )));
   const sections = [];
 
   for (const key of keys) {
-    let items = saladSectionItems(groups[key]);
+    const values = key === "vegetables_legumes"
+      ? mergeSaladGroupValues(groups, ["vegetables", "vegetables_legumes"])
+      : groups[key];
+    let items = saladSectionItems(values);
     if (key === "sauce" && items.length === 0) {
       items = (Array.isArray(slot.sauce) ? slot.sauce : []).map((item) => component(item, {
         idField: "optionId",
